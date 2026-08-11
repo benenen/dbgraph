@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="dbgraph">
+  <rect width="64" height="64" rx="14" fill="#176b5b"/>
+  <circle cx="19" cy="22" r="7" fill="#fffdf8"/>
+  <circle cx="45" cy="19" r="7" fill="#f1b24a"/>
+  <circle cx="42" cy="45" r="7" fill="#fffdf8"/>
+  <path d="M25 22 38 20M23 28l14 12M45 26l-2 12" fill="none" stroke="#fffdf8" stroke-width="4" stroke-linecap="round"/>
+</svg>

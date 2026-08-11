@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dbgraph</title>
+	<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/workflows.css">
+  <script defer src="/assets/cytoscape.min.js"></script>
+	<script defer src="/assets/editor_controls.js"></script>
+	<script defer src="/assets/admin_controls.js"></script>
+  <script defer src="/assets/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#overview" data-panel-link="overview"><span class="brand-mark">d/g</span><span>dbgraph</span></a>
+    <div class="project-switcher">
+      <label for="project-id">Project ID</label>
+      <input id="project-id" inputmode="numeric" placeholder="Snowflake ID">
+    </div>
+    <div class="identity"><span id="session-actor">Loading…</span><span id="session-role" class="pill"></span><button id="logout-button" class="quiet">Sign out</button></div>
+  </header>
+  <div class="shell">
+    <nav class="sidebar" aria-label="Primary">
+      <a href="#overview" data-panel-link="overview" class="active">Overview</a>
+      <a href="#schema" data-panel-link="schema">Schema Explorer</a>
+      <a href="#node-details" data-panel-link="node-details">Node Details</a>
+      <a href="#graph" data-panel-link="graph">Graph Explorer</a>
+      <a href="#relation" data-panel-link="relation">Relation Details</a>
+      <a href="#review" data-panel-link="review">Relation Review</a>
+      <a href="#unresolved" data-panel-link="unresolved">Unresolved Findings</a>
+      <a href="#jobs" data-panel-link="jobs">Schema Scan Jobs</a>
+      <a href="#relation-init" data-panel-link="relation-init">Relation Init Sessions</a>
+      <a href="#audit" data-panel-link="audit">Audit History</a>
+      <a href="#settings" data-panel-link="settings">Settings</a>
+    </nav>
+    <main class="workspace">
+      <div id="global-message" class="message" role="status"></div>
+
+      <section id="panel-overview" class="panel active">
+        <p class="eyebrow">OVERVIEW</p><h1>Conditional data lineage, with evidence.</h1>
+        <p class="lede">dbgraph stores immutable catalog snapshots and reviewable relations. Source-code analysis happens in your external Agent; this service validates, versions, reviews, and traverses the submitted graph.</p>
+        <div class="metric-grid"><article><strong>Agent-owned analysis</strong><span>No embedded code parser</span></article><article><strong>Three-valued traversal</strong><span>TRUE · FALSE · UNKNOWN</span></article><article><strong>Review before publication</strong><span>Proposals never change effective edges</span></article></div>
+      </section>
+
+      <section id="panel-schema" class="panel">
+        <p class="eyebrow">SCHEMA EXPLORER</p><h1>Find current nodes</h1>
+        <form id="node-search-form" class="inline-form"><input id="node-query" required placeholder="orders.total or customer_id"><button>Search</button></form>
+        <div id="node-results" class="result-list"></div>
+      </section>
+
+      <section id="panel-node-details" class="panel">
+        <p class="eyebrow">NODE DETAILS</p><h1>Current catalog node</h1>
+        <pre id="node-details" class="details tall">Select a node in Schema Explorer or Graph Explorer to inspect it here.</pre>
+      </section>
+
+      <section id="panel-graph" class="panel">
+        <p class="eyebrow">GRAPH EXPLORER</p><h1>Trace effective relations</h1>
+		<form id="graph-node-search-form" class="inline-form"><input id="graph-node-query" required placeholder="Search columns or tables"><button>Search graph nodes</button></form>
+		<div id="graph-node-results" class="result-list graph-node-results"></div>
+        <form id="trace-form" class="form-grid compact">
+          <label>Start node ID<input id="trace-start" required inputmode="numeric"></label>
+          <label>Target node ID <span class="muted">optional</span><input id="trace-target" inputmode="numeric"></label>
+          <label>Direction<select id="trace-direction"><option>DOWNSTREAM</option><option>UPSTREAM</option></select></label>
+          <label>Max depth<input id="trace-depth" type="number" min="1" max="64" value="8"></label>
+          <label>Relation type<select id="trace-type-filter"><option value="ALL">All types</option><option>CONDITIONAL_VALUE_COPY</option><option>DECLARED_FOREIGN_KEY</option></select></label>
+          <label>Relation status<select id="trace-status-filter"><option value="ALL">All statuses</option><option value="APPROVED">APPROVED effective</option><option value="PROPOSED">PROPOSED revision</option></select></label>
+          <label>Minimum confidence<input id="trace-confidence-filter" type="number" min="0" max="1" step="0.05" value="0"></label>
+          <label class="full-width">Evaluation context <span class="muted">optional JSON with columns and parameters</span><textarea id="trace-context" spellcheck="false" placeholder='{"columns":{"123":"paid"},"parameters":{"tenant":"north"}}'></textarea></label>
+          <button>Run trace</button>
+        </form>
+		<div id="trace-flags" class="flags"></div><p id="graph-visible-summary" class="muted">No trace loaded</p><div id="graph-canvas" aria-label="Relation graph"></div>
+		<div id="graph-edge-results" class="result-list" aria-label="Visible graph relations"></div>
+		<section id="graph-edge-panel" hidden aria-labelledby="graph-edge-title">
+		  <h2 id="graph-edge-title">Relation details</h2>
+		  <p id="graph-edge-summary" class="muted"></p>
+		  <div class="two-column edge-detail-grid">
+			<div><h3>Guard</h3><pre id="graph-edge-guard" class="details"></pre></div>
+			<div><h3>Selector</h3><pre id="graph-edge-selector" class="details"></pre></div>
+			<div><h3>Transform</h3><pre id="graph-edge-transform" class="details"></pre></div>
+			<div><h3>Evidence</h3><pre id="graph-edge-evidence" class="details"></pre></div>
+		  </div>
+		  <form id="graph-relation-action-form" class="form-grid" data-capability="graph-relation-action">
+			<label>Action<select id="graph-relation-action"><option value="revision">Propose revision</option><option value="tombstones">Propose tombstone</option><option value="reviews">Approve or reject</option><option value="suppress">Suppress</option><option value="restore">Restore</option></select></label>
+			<label>Expected revision<input id="graph-action-revision" type="number" min="1" required></label>
+			<label>Decision<select id="graph-action-decision"><option>APPROVE</option><option>REJECT</option></select></label>
+			<label>Reason<textarea id="graph-action-reason" maxlength="2000"></textarea></label>
+			<button>Apply graph action</button>
+		  </form>
+		</section>
+        <pre id="graph-details" class="details"></pre>
+      </section>
+
+      <section id="panel-relation" class="panel">
+        <p class="eyebrow">RELATION DETAILS</p><h1>Create or revise a relation</h1>
+        <div class="two-column">
+		  <form id="proposal-form" class="form-grid">
+			<h2>Relation content editor</h2>
+            <label>Source node ID<input id="proposal-source" required inputmode="numeric"></label>
+            <label>Target node ID<input id="proposal-target" required inputmode="numeric"></label>
+			<label>Type<select id="proposal-type"><option>CONDITIONAL_VALUE_COPY</option></select></label>
+			<label>Confidence<input id="proposal-confidence" type="number" min="0" max="1" step="0.01" value="0.9"></label>
+			<fieldset><legend>Optional guard</legend>
+			  <p class="muted">Build nested boolean logic without writing JSON.</p>
+			  <div id="guard-builder" class="ast-builder"></div>
+			  <details><summary>Guard JSON preview</summary><pre id="guard-preview" class="details"></pre></details>
+			</fieldset>
+			<fieldset><legend>Optional selector</legend>
+			  <p class="muted">Describe row selection with the same structured condition builder.</p>
+			  <div id="selector-builder" class="ast-builder"></div>
+			  <details><summary>Selector JSON preview</summary><pre id="selector-preview" class="details"></pre></details>
+			</fieldset>
+			<fieldset><legend>Transform</legend>
+			  <p class="muted">Choose a column copy or build a recursive CASE transform.</p>
+			  <div id="transform-builder" class="ast-builder"></div>
+			  <details><summary>Transform JSON preview</summary><pre id="transform-preview" class="details"></pre></details>
+			</fieldset>
+			<fieldset><legend>Code evidence</legend>
+			  <label>Kind<select id="evidence-kind"><option>CODE</option><option>SQL_MAPPING</option><option>MANUAL</option></select></label><label>Repository<input id="evidence-repository"></label><label>Commit<input id="evidence-commit"></label><label>File<input id="evidence-file"></label><label>Symbol<input id="evidence-symbol"></label><div class="split"><label>Start line<input id="evidence-start" type="number" min="1" value="1"></label><label>End line<input id="evidence-end" type="number" min="1" value="1"></label></div>
+			  <button id="add-evidence" type="button" class="quiet">Add evidence</button>
+			  <div id="evidence-list" class="result-list" aria-live="polite"></div>
+			</fieldset>
+            <label>Reason<textarea id="proposal-reason" required maxlength="2000"></textarea></label>
+			<button id="submit-proposal" data-capability="create">Submit proposal</button>
+          </form>
+          <div>
+            <form id="relation-load-form" class="inline-form"><input id="relation-id" required placeholder="Relation ID"><button>Load</button></form>
+            <pre id="relation-details" class="details tall"></pre>
+            <section aria-labelledby="revision-diff-title"><h2 id="revision-diff-title">Active / proposed diff</h2><div id="revision-diff" class="diff-grid"></div></section>
+            <form id="relation-action-form" class="form-grid" data-capability="relation-action">
+              <h2>Revision and state actions</h2>
+              <label>Action<select id="relation-action"><option value="revision">Propose revision</option><option value="tombstones">Propose tombstone</option><option value="reviews">Approve or reject</option><option value="suppress">Suppress</option><option value="restore">Restore</option></select></label>
+              <label>Expected revision<input id="action-revision" type="number" min="1" required></label>
+              <label>Decision<select id="action-decision"><option>APPROVE</option><option>REJECT</option></select></label>
+              <label>Reason<textarea id="action-reason" required maxlength="2000"></textarea></label>
+              <button>Apply action</button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <section id="panel-review" class="panel"><p class="eyebrow">RELATION REVIEW</p><h1>Pending proposals</h1><button id="load-proposals">Refresh proposals</button><div id="proposal-results" class="result-list"></div></section>
+      <section id="panel-unresolved" class="panel"><p class="eyebrow">UNRESOLVED FINDINGS</p><h1>Agent-reported uncertainty</h1><button id="load-unresolved">Refresh findings</button><div id="unresolved-results" class="result-list"></div></section>
+      <section id="panel-jobs" class="panel"><p class="eyebrow">SCHEMA SCAN JOBS</p><h1>Inspect a scan job</h1><form id="job-form" class="inline-form"><input id="job-id" required placeholder="Job ID"><button>Load job</button></form><pre id="job-details" class="details"></pre></section>
+      <section id="panel-relation-init" class="panel"><p class="eyebrow">RELATION INIT SESSIONS</p><h1>Inspect Agent initialization</h1><form id="init-form" class="inline-form"><input id="init-id" required placeholder="Session ID"><button>Load session</button></form><pre id="init-details" class="details"></pre></section>
+      <section id="panel-audit" class="panel"><p class="eyebrow">AUDIT HISTORY</p><h1>Immutable changes</h1><button id="load-audit">Refresh audit</button><div id="audit-results" class="result-list"></div></section>
+      <section id="panel-settings" class="panel"><p class="eyebrow">SETTINGS</p><h1>Runtime boundaries</h1><div class="notice"><strong>Credentials stay outside dbgraph.</strong><p>MySQL DSNs and Web/MCP access tokens are loaded only from environment variables. Repository records hold evidence provenance; dbgraph never clones or analyzes source code.</p></div>
+        <div class="two-column admin-controls" data-capability="admin">
+          <form id="project-form" class="form-grid"><h2>Create a project</h2><label>Name<input id="project-name" required maxlength="200"></label><label>Description<textarea id="project-description" maxlength="2000"></textarea></label><label>Reason<textarea id="project-reason" required maxlength="2000"></textarea></label><button>Create project</button></form>
+          <form id="repository-form" class="form-grid"><h2>Register an evidence repository</h2><label>Name<input id="repository-name" required maxlength="200"></label><label>Remote URL <span class="muted">metadata only</span><input id="repository-url" maxlength="2000"></label><label>Default branch<input id="repository-branch" maxlength="500" value="main"></label><label>Reason<textarea id="repository-reason" required maxlength="2000"></textarea></label><button>Register repository</button><pre id="repository-result" class="details"></pre></form>
+          <form id="data-source-form" class="form-grid"><h2>Add a MySQL data source</h2><label>Name<input id="data-source-name" required maxlength="200"></label><label>DSN environment variable<input id="data-source-environment" required pattern="[A-Z][A-Z0-9_]*"></label><label>Reason<textarea id="data-source-reason" required maxlength="2000"></textarea></label><button>Create data source</button></form>
+          <form id="scan-start-form" class="form-grid"><h2>Start a schema scan</h2><label>Data source ID<input id="scan-data-source-id" required inputmode="numeric"></label><label>Mode<select id="scan-mode"><option value="FULL">Full inventory</option><option value="INCREMENTAL">Incremental table scope</option></select></label><label>Incremental tables <span class="muted">schema.table, one per line</span><textarea id="scan-tables" maxlength="100000"></textarea></label><label>Reason<textarea id="scan-reason" required maxlength="2000"></textarea></label><button>Queue schema scan</button><pre id="scan-result" class="details"></pre></form>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

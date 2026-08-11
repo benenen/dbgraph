@@ -1,0 +1,731 @@
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/benenen/dbgraph/internal/audit"
+	"github.com/benenen/dbgraph/internal/catalog"
+)
+
+const (
+	scanStatusRunning   = 1
+	scanStatusSucceeded = 2
+	scanStatusFailed    = 3
+)
+
+type catalogIDGenerator interface {
+	Next(context.Context) (int64, error)
+}
+
+type reservingIDGenerator interface {
+	Ensure(context.Context, int) error
+}
+
+type CatalogRepository struct {
+	store *Store
+	ids   catalogIDGenerator
+}
+
+func NewCatalogRepository(store *Store, ids catalogIDGenerator) *CatalogRepository {
+	return &CatalogRepository{store: store, ids: ids}
+}
+
+func (r *CatalogRepository) CreateDataSource(ctx context.Context, source catalog.DataSource) error {
+	err := r.store.write(ctx, func(tx *sql.Tx) error {
+		return insertDataSource(ctx, tx, source)
+	})
+	if err != nil {
+		return fmt.Errorf("insert data source: %w", err)
+	}
+	return nil
+}
+
+func (r *CatalogRepository) CreateDataSourceWithAudit(
+	ctx context.Context,
+	source catalog.DataSource,
+	event audit.Event,
+) error {
+	err := r.store.write(ctx, func(tx *sql.Tx) error {
+		if err := insertDataSource(ctx, tx, source); err != nil {
+			return err
+		}
+		return insertAuditEvent(ctx, tx, event)
+	})
+	if err != nil {
+		return fmt.Errorf("insert audited data source: %w", err)
+	}
+	return nil
+}
+
+func insertDataSource(ctx context.Context, tx *sql.Tx, source catalog.DataSource) error {
+	_, err := tx.ExecContext(ctx, `
+INSERT INTO data_sources(
+    id, project_id, name, source_kind, dsn_environment, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?)
+`,
+		source.ID,
+		source.ProjectID,
+		source.Name,
+		source.Kind,
+		source.DSNEnvironment,
+		source.CreatedAt.Format(time.RFC3339Nano),
+		source.UpdatedAt.Format(time.RFC3339Nano),
+	)
+	return err
+}
+
+func (r *CatalogRepository) GetDataSource(ctx context.Context, dataSourceID int64) (catalog.DataSource, error) {
+	var source catalog.DataSource
+	var createdAt string
+	var updatedAt string
+	err := r.store.db.QueryRowContext(ctx, `
+SELECT id, project_id, name, source_kind, dsn_environment, created_at, updated_at
+FROM data_sources
+WHERE id = ?
+`, dataSourceID).Scan(
+		&source.ID,
+		&source.ProjectID,
+		&source.Name,
+		&source.Kind,
+		&source.DSNEnvironment,
+		&createdAt,
+		&updatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return catalog.DataSource{}, catalog.ErrDataSourceNotFound
+	}
+	if err != nil {
+		return catalog.DataSource{}, fmt.Errorf("select data source: %w", err)
+	}
+	source.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+	if err != nil {
+		return catalog.DataSource{}, fmt.Errorf("parse data source creation time: %w", err)
+	}
+	source.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt)
+	if err != nil {
+		return catalog.DataSource{}, fmt.Errorf("parse data source update time: %w", err)
+	}
+	return source, nil
+}
+
+func (r *CatalogRepository) BeginSchemaScan(ctx context.Context, run catalog.SchemaScanRun) error {
+	err := r.store.write(ctx, func(tx *sql.Tx) error {
+		if err := verifyDataSource(ctx, tx, run.ProjectID, run.DataSourceID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `
+INSERT INTO schema_scan_runs(
+    id, project_id, data_source_id, status, started_at
+) VALUES (?, ?, ?, ?, ?)
+`, run.ID, run.ProjectID, run.DataSourceID, scanStatusRunning, run.StartedAt.Format(time.RFC3339Nano))
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("begin schema scan run: %w", err)
+	}
+	return nil
+}
+
+func (r *CatalogRepository) FailSchemaScan(ctx context.Context, failure catalog.SchemaScanFailure) error {
+	err := r.store.write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `
+UPDATE schema_scan_runs
+SET status = ?, error_code = ?, error_message = ?, completed_at = ?
+WHERE id = ? AND project_id = ? AND data_source_id = ? AND status = ?
+`,
+			scanStatusFailed,
+			failure.ErrorCode,
+			failure.ErrorMessage,
+			failure.CompletedAt.Format(time.RFC3339Nano),
+			failure.Run.ID,
+			failure.Run.ProjectID,
+			failure.Run.DataSourceID,
+			scanStatusRunning,
+		)
+		if err != nil {
+			return err
+		}
+		updated, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if updated != 1 {
+			return catalog.ErrInvalidSnapshot
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("fail schema scan run: %w", err)
+	}
+	return nil
+}
+
+func (r *CatalogRepository) PublishSnapshot(
+	ctx context.Context,
+	publication catalog.SnapshotPublication,
+) (catalog.PublishedSnapshot, error) {
+	if reservingIDs, ok := r.ids.(reservingIDGenerator); ok {
+		maximumIDs := (2 * len(publication.Nodes)) + catalog.MaximumSnapshotNodes +
+			(4 * len(publication.ForeignKeys)) + (4 * catalog.MaximumSnapshotForeignKeys)
+		if err := reservingIDs.Ensure(ctx, maximumIDs); err != nil {
+			return catalog.PublishedSnapshot{}, fmt.Errorf("reserve schema snapshot IDs: %w", err)
+		}
+	}
+	var published catalog.PublishedSnapshot
+	err := r.store.write(ctx, func(tx *sql.Tx) error {
+		var err error
+		published, err = r.publishSnapshot(ctx, tx, publication)
+		return err
+	})
+	return published, err
+}
+
+func (r *CatalogRepository) publishSnapshot(
+	ctx context.Context,
+	tx *sql.Tx,
+	publication catalog.SnapshotPublication,
+) (catalog.PublishedSnapshot, error) {
+
+	if err := verifyDataSource(ctx, tx, publication.ProjectID, publication.DataSourceID); err != nil {
+		return catalog.PublishedSnapshot{}, err
+	}
+	startedAt := publication.StartedAt.Format(time.RFC3339Nano)
+	if publication.Prestarted {
+		if err := verifyRunningSchemaScan(ctx, tx, publication); err != nil {
+			return catalog.PublishedSnapshot{}, err
+		}
+	} else if _, err := tx.ExecContext(ctx, `
+INSERT INTO schema_scan_runs(
+    id, project_id, data_source_id, status, started_at
+) VALUES (?, ?, ?, ?, ?)
+`,
+		publication.ScanRunID,
+		publication.ProjectID,
+		publication.DataSourceID,
+		scanStatusRunning,
+		startedAt,
+	); err != nil {
+		return catalog.PublishedSnapshot{}, fmt.Errorf("insert schema scan run: %w", err)
+	}
+
+	nodeIDs, err := r.resolveNodeIDs(ctx, tx, publication)
+	if err != nil {
+		return catalog.PublishedSnapshot{}, err
+	}
+	versionIDs := make(map[int64]int64, len(publication.Nodes))
+	searchRecords := make(map[int64]currentNodeRecord, len(publication.Nodes))
+	for _, input := range publication.Nodes {
+		versionID, err := r.ids.Next(ctx)
+		if err != nil {
+			return catalog.PublishedSnapshot{}, fmt.Errorf("generate node version ID: %w", err)
+		}
+		parentNodeID := nullableNodeID(nodeIDs, input.ParentStableKey)
+		if err := insertNodeVersion(
+			ctx,
+			tx,
+			versionID,
+			nodeIDs[input.StableKey],
+			publication.ScanRunID,
+			parentNodeID,
+			catalog.NodeActive,
+			input.Name,
+			input.QualifiedName,
+			input.DataType,
+			input.Nullable,
+			input.Ordinal,
+			startedAt,
+		); err != nil {
+			return catalog.PublishedSnapshot{}, err
+		}
+		nodeID := nodeIDs[input.StableKey]
+		versionIDs[nodeID] = versionID
+		searchRecords[nodeID] = currentNodeRecord{
+			ID:            nodeID,
+			Name:          input.Name,
+			QualifiedName: input.QualifiedName,
+			DataType:      input.DataType,
+		}
+	}
+
+	presentStableKeys := make(map[string]struct{}, len(publication.Nodes))
+	for _, input := range publication.Nodes {
+		presentStableKeys[input.StableKey] = struct{}{}
+	}
+	staleNodes, err := loadMissingCurrentNodes(
+		ctx, tx, publication.DataSourceID, presentStableKeys, publication.ScopeTables,
+	)
+	if err != nil {
+		return catalog.PublishedSnapshot{}, err
+	}
+	for _, staleNode := range staleNodes {
+		versionID, err := r.ids.Next(ctx)
+		if err != nil {
+			return catalog.PublishedSnapshot{}, fmt.Errorf("generate stale node version ID: %w", err)
+		}
+		if err := insertNodeVersion(
+			ctx,
+			tx,
+			versionID,
+			staleNode.ID,
+			publication.ScanRunID,
+			staleNode.ParentNodeID,
+			catalog.NodeStale,
+			staleNode.Name,
+			staleNode.QualifiedName,
+			staleNode.DataType,
+			staleNode.Nullable,
+			staleNode.Ordinal,
+			startedAt,
+		); err != nil {
+			return catalog.PublishedSnapshot{}, err
+		}
+		versionIDs[staleNode.ID] = versionID
+	}
+
+	for nodeID, versionID := range versionIDs {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO node_current(node_id, version_id, published_at)
+VALUES (?, ?, ?)
+ON CONFLICT(node_id) DO UPDATE SET
+    version_id = excluded.version_id,
+    published_at = excluded.published_at
+`, nodeID, versionID, startedAt); err != nil {
+			return catalog.PublishedSnapshot{}, fmt.Errorf("publish current node: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM node_search WHERE node_id = ?", nodeID); err != nil {
+			return catalog.PublishedSnapshot{}, fmt.Errorf("delete current node search record: %w", err)
+		}
+		if record, active := searchRecords[nodeID]; active {
+			if _, err := tx.ExecContext(ctx, `
+INSERT INTO node_search(node_id, project_id, name, qualified_name, data_type)
+VALUES (?, ?, ?, ?, ?)
+`, nodeID, publication.ProjectID, record.Name, record.QualifiedName, record.DataType); err != nil {
+				return catalog.PublishedSnapshot{}, fmt.Errorf("insert current node search record: %w", err)
+			}
+		}
+	}
+	if err := r.reconcileDeclaredForeignKeys(ctx, tx, publication, nodeIDs); err != nil {
+		return catalog.PublishedSnapshot{}, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE schema_scan_runs
+SET status = ?, node_count = ?, stale_count = ?, completed_at = ?
+WHERE id = ?
+`,
+		scanStatusSucceeded,
+		len(publication.Nodes),
+		len(staleNodes),
+		startedAt,
+		publication.ScanRunID,
+	); err != nil {
+		return catalog.PublishedSnapshot{}, fmt.Errorf("complete schema scan run: %w", err)
+	}
+
+	return catalog.PublishedSnapshot{
+		ScanRunID:   publication.ScanRunID,
+		NodeCount:   len(publication.Nodes),
+		StaleCount:  len(staleNodes),
+		PublishedAt: publication.StartedAt,
+	}, nil
+}
+
+func verifyRunningSchemaScan(
+	ctx context.Context,
+	tx *sql.Tx,
+	publication catalog.SnapshotPublication,
+) error {
+	var found int
+	if err := tx.QueryRowContext(ctx, `
+SELECT EXISTS(
+    SELECT 1
+    FROM schema_scan_runs
+    WHERE id = ? AND project_id = ? AND data_source_id = ? AND status = ?
+)
+`, publication.ScanRunID, publication.ProjectID, publication.DataSourceID, scanStatusRunning).Scan(&found); err != nil {
+		return fmt.Errorf("verify running schema scan: %w", err)
+	}
+	if found != 1 {
+		return catalog.ErrInvalidSnapshot
+	}
+	return nil
+}
+
+func (r *CatalogRepository) FindCurrentNode(
+	ctx context.Context,
+	projectID int64,
+	dataSourceID int64,
+	qualifiedName string,
+) (catalog.Node, error) {
+	var node catalog.Node
+	var parentNodeID sql.NullInt64
+	var nullable int
+	var versionCreated string
+	err := r.store.db.QueryRowContext(ctx, `
+SELECT
+    n.id, nv.id, n.project_id, n.data_source_id, nv.scan_run_id,
+    nv.parent_node_id, n.kind, nv.status, n.stable_key, nv.name,
+    nv.qualified_name, nv.data_type, nv.nullable, nv.ordinal_position,
+    nv.created_at
+FROM nodes n
+JOIN node_current nc ON nc.node_id = n.id
+JOIN node_versions nv ON nv.id = nc.version_id
+WHERE n.project_id = ? AND n.data_source_id = ? AND nv.qualified_name = ?
+ORDER BY n.id
+LIMIT 1
+`, projectID, dataSourceID, qualifiedName).Scan(
+		&node.ID,
+		&node.VersionID,
+		&node.ProjectID,
+		&node.DataSourceID,
+		&node.ScanRunID,
+		&parentNodeID,
+		&node.Kind,
+		&node.Status,
+		&node.StableKey,
+		&node.Name,
+		&node.QualifiedName,
+		&node.DataType,
+		&nullable,
+		&node.Ordinal,
+		&versionCreated,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return catalog.Node{}, catalog.ErrNodeNotFound
+	}
+	if err != nil {
+		return catalog.Node{}, fmt.Errorf("select current node: %w", err)
+	}
+	if parentNodeID.Valid {
+		node.ParentNodeID = parentNodeID.Int64
+	}
+	node.Nullable = nullable == 1
+	node.VersionCreated, err = time.Parse(time.RFC3339Nano, versionCreated)
+	if err != nil {
+		return catalog.Node{}, fmt.Errorf("parse node version time: %w", err)
+	}
+	return node, nil
+}
+
+func (r *CatalogRepository) SearchCurrentNodes(
+	ctx context.Context,
+	projectID int64,
+	query string,
+	limit int,
+) (nodes []catalog.Node, returnError error) {
+	searchQuery := ftsPrefixQuery(query)
+	rows, err := r.store.db.QueryContext(ctx, `
+WITH matched_nodes(node_id) AS (
+    SELECT node_id
+    FROM node_search
+    WHERE node_search MATCH ? AND project_id = ?
+    UNION
+    SELECT node_id
+    FROM relation_evidence_search
+    WHERE relation_evidence_search MATCH ? AND project_id = ?
+)
+SELECT
+    n.id, nv.id, n.project_id, n.data_source_id, nv.scan_run_id,
+    nv.parent_node_id, n.kind, nv.status, n.stable_key, nv.name,
+    nv.qualified_name, nv.data_type, nv.nullable, nv.ordinal_position,
+    nv.created_at
+FROM matched_nodes
+JOIN nodes n ON n.id = matched_nodes.node_id
+JOIN node_current nc ON nc.node_id = n.id
+JOIN node_versions nv ON nv.id = nc.version_id
+WHERE nv.status = ?
+ORDER BY length(nv.qualified_name), nv.qualified_name
+LIMIT ?
+`, searchQuery, projectID, searchQuery, projectID, catalog.NodeActive, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search current nodes: %w", err)
+	}
+	defer func() { returnError = errors.Join(returnError, rows.Close()) }()
+
+	nodes = make([]catalog.Node, 0)
+	for rows.Next() {
+		node, err := scanCurrentNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, node)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate current node search: %w", err)
+	}
+	return nodes, nil
+}
+
+func (r *CatalogRepository) GetCurrentNode(
+	ctx context.Context,
+	projectID int64,
+	nodeID int64,
+) (catalog.Node, error) {
+	node, err := scanCurrentNode(r.store.db.QueryRowContext(ctx, `
+SELECT
+    n.id, nv.id, n.project_id, n.data_source_id, nv.scan_run_id,
+    nv.parent_node_id, n.kind, nv.status, n.stable_key, nv.name,
+    nv.qualified_name, nv.data_type, nv.nullable, nv.ordinal_position,
+    nv.created_at
+FROM nodes n
+JOIN node_current nc ON nc.node_id = n.id
+JOIN node_versions nv ON nv.id = nc.version_id
+WHERE n.project_id = ? AND n.id = ?
+`, projectID, nodeID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return catalog.Node{}, catalog.ErrNodeNotFound
+	}
+	if err != nil {
+		return catalog.Node{}, fmt.Errorf("select current node by ID: %w", err)
+	}
+	return node, nil
+}
+
+func ftsPrefixQuery(query string) string {
+	terms := strings.Fields(query)
+	quoted := make([]string, 0, len(terms))
+	for _, term := range terms {
+		term = strings.ReplaceAll(term, `"`, `""`)
+		quoted = append(quoted, `"`+term+`"*`)
+	}
+	return strings.Join(quoted, " AND ")
+}
+
+func scanCurrentNode(scanner auditScanner) (catalog.Node, error) {
+	var node catalog.Node
+	var parentNodeID sql.NullInt64
+	var nullable int
+	var versionCreated string
+	if err := scanner.Scan(
+		&node.ID,
+		&node.VersionID,
+		&node.ProjectID,
+		&node.DataSourceID,
+		&node.ScanRunID,
+		&parentNodeID,
+		&node.Kind,
+		&node.Status,
+		&node.StableKey,
+		&node.Name,
+		&node.QualifiedName,
+		&node.DataType,
+		&nullable,
+		&node.Ordinal,
+		&versionCreated,
+	); err != nil {
+		return catalog.Node{}, fmt.Errorf("scan current node: %w", err)
+	}
+	if parentNodeID.Valid {
+		node.ParentNodeID = parentNodeID.Int64
+	}
+	node.Nullable = nullable == 1
+	parsedTime, err := time.Parse(time.RFC3339Nano, versionCreated)
+	if err != nil {
+		return catalog.Node{}, fmt.Errorf("parse node version time: %w", err)
+	}
+	node.VersionCreated = parsedTime
+	return node, nil
+}
+
+func verifyDataSource(ctx context.Context, tx *sql.Tx, projectID int64, dataSourceID int64) error {
+	var found int
+	if err := tx.QueryRowContext(ctx, `
+SELECT EXISTS(
+    SELECT 1 FROM data_sources WHERE id = ? AND project_id = ?
+)
+`, dataSourceID, projectID).Scan(&found); err != nil {
+		return fmt.Errorf("verify data source: %w", err)
+	}
+	if found != 1 {
+		return catalog.ErrInvalidSnapshot
+	}
+	return nil
+}
+
+func (r *CatalogRepository) resolveNodeIDs(
+	ctx context.Context,
+	tx *sql.Tx,
+	publication catalog.SnapshotPublication,
+) (map[string]int64, error) {
+	nodeIDs := make(map[string]int64, len(publication.Nodes))
+	rows, err := tx.QueryContext(ctx, `
+SELECT stable_key, id
+FROM nodes
+WHERE data_source_id = ?
+`, publication.DataSourceID)
+	if err != nil {
+		return nil, fmt.Errorf("list existing nodes: %w", err)
+	}
+	for rows.Next() {
+		var stableKey string
+		var nodeID int64
+		if err := rows.Scan(&stableKey, &nodeID); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan existing node: %w", err)
+		}
+		nodeIDs[stableKey] = nodeID
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close existing nodes: %w", err)
+	}
+
+	for _, input := range publication.Nodes {
+		if _, exists := nodeIDs[input.StableKey]; exists {
+			continue
+		}
+		nodeID, err := r.ids.Next(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("generate node ID: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO nodes(id, project_id, data_source_id, stable_key, kind, created_at)
+VALUES (?, ?, ?, ?, ?, ?)
+`,
+			nodeID,
+			publication.ProjectID,
+			publication.DataSourceID,
+			input.StableKey,
+			input.Kind,
+			publication.StartedAt.Format(time.RFC3339Nano),
+		); err != nil {
+			return nil, fmt.Errorf("insert catalog node: %w", err)
+		}
+		nodeIDs[input.StableKey] = nodeID
+	}
+	return nodeIDs, nil
+}
+
+func nullableNodeID(nodeIDs map[string]int64, stableKey string) any {
+	if stableKey == "" {
+		return nil
+	}
+	return nodeIDs[stableKey]
+}
+
+func insertNodeVersion(
+	ctx context.Context,
+	tx *sql.Tx,
+	versionID int64,
+	nodeID int64,
+	scanRunID int64,
+	parentNodeID any,
+	status catalog.NodeStatus,
+	name string,
+	qualifiedName string,
+	dataType string,
+	nullable bool,
+	ordinal int,
+	createdAt string,
+) error {
+	_, err := tx.ExecContext(ctx, `
+INSERT INTO node_versions(
+    id, node_id, scan_run_id, parent_node_id, status, name,
+    qualified_name, data_type, nullable, ordinal_position, metadata_json, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?)
+`,
+		versionID,
+		nodeID,
+		scanRunID,
+		parentNodeID,
+		status,
+		name,
+		qualifiedName,
+		dataType,
+		nullable,
+		ordinal,
+		createdAt,
+	)
+	if err != nil {
+		return fmt.Errorf("insert node version: %w", err)
+	}
+	return nil
+}
+
+type currentNodeRecord struct {
+	ID            int64
+	ParentNodeID  any
+	Kind          catalog.NodeKind
+	Name          string
+	QualifiedName string
+	DataType      string
+	Nullable      bool
+	Ordinal       int
+}
+
+func loadMissingCurrentNodes(
+	ctx context.Context,
+	tx *sql.Tx,
+	dataSourceID int64,
+	presentStableKeys map[string]struct{},
+	scopeTables []string,
+) (missing []currentNodeRecord, returnError error) {
+	rows, err := tx.QueryContext(ctx, `
+SELECT
+    n.id, n.stable_key, n.kind, nv.parent_node_id, nv.name,
+    nv.qualified_name, nv.data_type, nv.nullable, nv.ordinal_position
+FROM nodes n
+JOIN node_current nc ON nc.node_id = n.id
+JOIN node_versions nv ON nv.id = nc.version_id
+WHERE n.data_source_id = ? AND nv.status = ?
+`, dataSourceID, catalog.NodeActive)
+	if err != nil {
+		return nil, fmt.Errorf("list current nodes: %w", err)
+	}
+	defer func() { returnError = errors.Join(returnError, rows.Close()) }()
+
+	missing = make([]currentNodeRecord, 0)
+	for rows.Next() {
+		var record currentNodeRecord
+		var stableKey string
+		var parentNodeID sql.NullInt64
+		var nullable int
+		if err := rows.Scan(
+			&record.ID,
+			&stableKey,
+			&record.Kind,
+			&parentNodeID,
+			&record.Name,
+			&record.QualifiedName,
+			&record.DataType,
+			&nullable,
+			&record.Ordinal,
+		); err != nil {
+			return nil, fmt.Errorf("scan current node: %w", err)
+		}
+		if _, present := presentStableKeys[stableKey]; present {
+			continue
+		}
+		if !nodeWithinTableScope(record.Kind, record.QualifiedName, scopeTables) {
+			continue
+		}
+		if parentNodeID.Valid {
+			record.ParentNodeID = parentNodeID.Int64
+		}
+		record.Nullable = nullable == 1
+		missing = append(missing, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate current nodes: %w", err)
+	}
+	return missing, nil
+}
+
+func nodeWithinTableScope(kind catalog.NodeKind, qualifiedName string, scopeTables []string) bool {
+	if len(scopeTables) == 0 {
+		return true
+	}
+	for _, table := range scopeTables {
+		if kind == catalog.NodeTable && qualifiedName == table {
+			return true
+		}
+		if kind == catalog.NodeColumn && strings.HasPrefix(qualifiedName, table+".") {
+			return true
+		}
+	}
+	return false
+}
