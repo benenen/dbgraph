@@ -9,20 +9,27 @@
   Source Database
         │
         ▼
-  Schema Scanner ───────────────┐
-                                │
-  Source Repository             ▼
-   Java / MyBatis ──> Code Analyzer
-                                │
-  Agent MCP ───────> Proposals  │
-                                ▼
-                       Relation Reconciler
-                                │
-                                ▼
-                             SQLite
-                    ┌───────────┴───────────┐
-                    ▼                       ▼
-               Web UI + REST            MCP Server
+  Schema Scanner ──────────────────────────┐
+                                           │
+  Source Repository                        │
+        │                                  │
+        ▼                                  │
+  LLM Agent (outside dbgraph)               │
+        │ read catalog / submit proposals  │
+        ▼                                  ▼
+     MCP Server ──> Relation Reconciler ──> SQLite
+                                           │
+                              ┌────────────┴────────────┐
+                              ▼                         ▼
+                         Web UI + REST              MCP reads
+
+  Responsibility boundary:
+
+  - dbgraph does not clone, read, or parse source code and does not embed a Java/MyBatis/SQL Code Analyzer.
+  - The LLM Agent reads the Source Repository with its own code search, AST, or semantic analysis capabilities.
+  - The Agent reads the catalog and submits conditional, evidence-backed relation proposals through MCP.
+  - dbgraph only validates, deduplicates, versions, reviews, persists, and queries proposals.
+  - repositories contain evidence metadata submitted by Agents; they do not instruct dbgraph to scan a repository.
 
   推荐运行模式：
 
@@ -34,7 +41,7 @@
   - Web UI
   - REST API
   - Streamable HTTP MCP
-  - Background scan jobs
+  - Background schema scan jobs
 
   本地 Agent 如果只支持 stdio：
 
@@ -100,7 +107,9 @@
   projects
   data_sources
   repositories
-  scan_runs
+  schema_scan_runs
+  relation_init_sessions
+  relation_init_batches
   jobs
 
   nodes
@@ -116,7 +125,7 @@
   relation_current
 
   effective_edges
-  analysis_findings
+  unresolved_findings
   suppression_rules
   audit_events
 
@@ -150,7 +159,8 @@
 
   - 无条件 trace：SQLite recursive CTE
   - 带 context 的 trace：Go BFS + 批量读取 effective_edges
-  - AST 在 Go 中求值，不在每一跳用 JSON SQL 解析
+  - Evaluate only relation guard/selector/transform ASTs; never parse source-code ASTs during traversal
+  - Evaluate relation ASTs in Go instead of parsing JSON with SQL at every hop
   - 限制 maxDepth、maxNodes、maxPaths
   - 必须进行 cycle detection
 
@@ -167,10 +177,6 @@
   │   ├── conditions/
   │   ├── graph/
   │   ├── ingestion/
-  │   ├── analysis/
-  │   │   ├── java/
-  │   │   ├── mybatis/
-  │   │   └── sql/
   │   ├── reconcile/
   │   ├── audit/
   │   ├── jobs/
@@ -193,9 +199,7 @@
   - Graph UI：vendored Cytoscape.js
   - SQLite driver：modernc.org/sqlite，避免 CGO；Go 官方 driver 列表也收录了它。Go SQL drivers (https://go.dev/wiki/SQLDrivers)
   - MCP：official MCP Go SDK (https://github.com/modelcontextprotocol/go-sdk)，同时支持 stdio 和 Streamable HTTP
-  - Java AST：official Tree-sitter Go bindings (https://github.com/tree-sitter/go-tree-sitter) + Java grammar (https://github.com/tree-sitter/tree-sitter-java)
-  - MyBatis XML：Go encoding/xml
-  - SQL parser：定义内部 SQLParser seam，MVP 先实现 MySQL dialect
+  - Relation conditions：dbgraph defines and validates a stable JSON AST contract; it is not a source-code parse tree
 
   Web、REST、MCP 必须调用相同的 application modules，不能各自直接操作 SQLite。
 
@@ -211,17 +215,43 @@
   → Mark removed objects STALE
   → Publish node_current
 
-  ### Code Analysis
+  ### External LLM Agent Relation Initialization
 
-  Discover changed files
-  → Parse Java/MyBatis/SQL
-  → Extract assignments and conditions
-  → Resolve Java property to database column
+  Agent starts a relation-init session through MCP
+  → Read database/table/column catalog from dbgraph
+  → Analyze source code with the Agent's own code tools
+  → Identify assignments, conditions, SQL mappings and data flow
+  → Resolve code properties to catalog columns
   → Build guard/selector/transform AST
-  → Attach file/symbol/line/Git SHA evidence
-  → Score confidence
-  → Deduplicate by canonical fingerprint
-  → Create PROPOSED relation
+  → Attach repository/commit/file/symbol/line evidence and Agent provenance
+  → Submit proposals in bounded, retryable batches
+  → dbgraph validates node references, AST shape, limits and canonical fingerprints
+  → dbgraph stores deduplicated PROPOSED relations without approving them
+
+  dbgraph does not verify source-code semantics and does not claim to have read evidence files. It validates only the proposal contract; Agent evidence and Reviewer approval establish semantic trust.
+
+  ### Continuous Agent Relation Updates
+
+  Relation init is not the only write path. During ordinary use, an Agent can respond to new evidence, missing relations, or incorrect relations at any time by proposing:
+
+  - propose a new relation
+  - propose a new revision of an existing relation
+  - propose a tombstone for a relation that no longer exists
+  - append new evidence without rewriting historical evidence
+
+  Update flow:
+
+  Read current relation and revision
+  → Analyze the newly observed code/context outside dbgraph
+  → Submit a proposal with relationId + expectedRevisionNo + reason + evidence
+  → dbgraph applies optimistic concurrency validation
+  → Store a new PROPOSED revision
+  → Reviewer approves or rejects it
+  → On approval, atomically publish the new revision and rebuild affected effective_edges
+
+  An Agent cannot overwrite an APPROVED revision in place. The previous APPROVED revision remains active while the replacement is under review, and a rejected replacement leaves the graph unchanged. Mark the previous revision SUPERSEDED only after approval. Detect concurrent changes with expectedRevisionNo; return the current revision for re-analysis instead of using last-write-wins.
+
+  Small routine revisions do not need a relation-init session. Use begin/complete sessions only for full or incremental repository re-analysis that may identify stale candidates. Complete only closes the session and creates PROPOSED stale/tombstone revisions; it cannot modify APPROVED revisions or effective_edges. Every invalidation candidate requires Reviewer approval. An incomplete session creates no invalidation candidates and changes no existing relation.
 
   例如：
 
@@ -239,7 +269,7 @@
 
   不能确定的反射、运行时 SQL、复杂跨方法调用进入：
 
-  analysis_findings
+  unresolved_findings
   status = UNRESOLVED
 
   不能静默猜测。
@@ -256,10 +286,11 @@
   ├── TOMBSTONED
   └── SUPERSEDED
 
-  修改关系时创建新 revision：
+  Both Agent and Reviewer edits create a new revision:
 
   relation@1 APPROVED
-        ↓ superseded by
+        │ remains active while review is pending
+        ↓ superseded only after approval
   relation@2 PROPOSED → APPROVED
 
   旧版本永久保留。所有写操作包含：
@@ -281,7 +312,8 @@
   - Relation Details
   - Relation Review
   - Unresolved Findings
-  - Scan Jobs
+  - Schema Scan Jobs
+  - Relation Init Sessions
   - Audit History
   - Settings
 
@@ -293,7 +325,50 @@
   - Relation type/status/confidence filters
   - Guard/selector/transform details
   - Code evidence
-  - Approve/reject/revise/suppress operations
+  - Create/revise/tombstone proposal operations
+  - Approve/reject/suppress/restore operations
+
+  ### Web Relation Editing
+
+  In Graph Explorer or Relation Details, the Web UI can:
+
+  - select source and target nodes and propose a new relation
+  - edit guard/selector/transform with a structured condition editor
+  - append evidence and a required change reason
+  - propose a new revision from the current APPROVED relation
+  - propose a tombstone instead of physically deleting a relation
+  - compare current and proposed revisions before submission or review
+  - approve/reject/suppress/restore according to the current user's role
+
+  Web and MCP are separate adapters that must call the same Relation Commands module:
+
+  Web handlers ─┐
+                ├──> Relation Commands ──> validation/version/audit/reconcile ──> SQLite
+  MCP handlers ─┘
+
+  The Relation Commands interface exposes only:
+
+  ProposeCreate
+  ProposeRevision
+  ProposeTombstone
+  Review
+  Suppress
+  Restore
+
+  Web handlers must not write SQLite directly or bypass revision, audit, or review. Web and Agent revisions use the same state machine and effective_edges publication logic.
+
+  Web write requirements:
+
+  - server-side authentication and role authorization on every request
+  - Viewer is read-only; Editor can propose create/revision/tombstone; Reviewer can approve/reject/suppress/restore; Admin manages data sources and schema scans
+  - Require CSRF tokens and HttpOnly, Secure, SameSite session cookies
+  - validate node IDs, enums, relation type and all required fields
+  - bound AST depth/node count, batch size, string length and evidence count
+  - expectedRevisionNo mismatch returns 409 with the current revision; never last-write-wins
+  - parameterized SQLite queries only
+  - escape all labels, reasons and evidence when rendering; do not render user HTML
+  - rate-limit state-changing routes and return generic errors without stack traces
+  - write actor, origin=WEB, reason, requestId, expectedRevisionNo and timestamp to the audit log
 
   MCP tools：
 
@@ -308,20 +383,26 @@
   dbgraph_list_unresolved
 
   dbgraph_propose_relation
-  dbgraph_revise_relation
+  dbgraph_begin_relation_init
+  dbgraph_propose_relations
+  dbgraph_complete_relation_init
+  dbgraph_get_relation_init
+  dbgraph_propose_relation_revision
+  dbgraph_propose_relation_tombstone
   dbgraph_review_relation
   dbgraph_suppress_relation
   dbgraph_restore_relation
 
   dbgraph_start_schema_scan
-  dbgraph_start_code_scan
   dbgraph_get_job
 
   权限原则：
 
-  - Agent：read + propose
-  - Reviewer：approve/reject/revise
-  - Admin：source configuration + scans
+  - Agent：read + begin/submit/complete relation init + propose create/revision/tombstone
+  - Web Viewer：read
+  - Web Editor：propose create/revision/tombstone
+  - Reviewer：approve/reject/suppress/restore; content edits create a new PROPOSED revision
+  - Admin：source database configuration + schema scans
   - 不提供 generic execute_sql
   - Source database credentials 只从 environment variables 读取
   - SQLite、日志和 MCP response 不保存或返回密码
@@ -346,23 +427,23 @@
 
   5. MCP
 
-     先实现 read tools，再实现 propose；review tools 默认需要更高权限。
+     Implement read tools first, then single/batch proposal and relation-init sessions. Review tools require elevated permission by default.
 
-  6. MyBatis and SQL Analysis
+  6. Agent-driven Initialization Protocol
 
-     XML、dynamic tags、aliases、JOIN、INSERT、UPDATE、property-column mapping。
+     Session provenance, source commit, bounded batches, idempotency, partial retry, completion, and unresolved reporting. dbgraph contains no source-code parser.
 
-  7. Java Analysis
+  7. Incremental Agent Reconciliation
 
-     if/else、switch、assignment、setter/getter、intra-method data flow。
+     An Agent can submit individual create/revision/tombstone proposals during ordinary use or run a batch relation-init for a new source commit. Individual updates use expectedRevisionNo. A completed init session can create only PROPOSED stale/tombstone candidates, which take effect only after individual or controlled-batch Reviewer approval. Failed, interrupted, or merely completed sessions do not change the effective graph.
 
   8. Web Review Workflow
 
-     图展示、关系详情、条件编辑器、审批和审计历史。
+     Graph visualization, relation details, structured condition editing, create/revision/tombstone proposals, revision diff, review, RBAC, CSRF, and audit history.
 
   9. Hardening
 
-     Incremental scans、backup、limits、auth、performance 和 security review。
+     Incremental schema scans, proposal ingestion, backup, limits, auth, performance, and security review.
 
   每阶段按 TDD 实施，最终要求：
 
@@ -377,10 +458,11 @@
   第一版 MVP 应限定为：
 
   MySQL schema import
-  + Java/MyBatis XML
-  + intra-method conditional flow
+  + Agent-driven relation initialization via MCP
+  + conditional relation storage and traversal
   + SQLite
   + local English Web UI
+  + Web relation create/revise/review
   + MCP read/propose
   + manual review
 
@@ -492,7 +574,8 @@
   对应 MCP 工具可以设计为：
 
   - propose_relation
-  - revise_relation
+  - propose_relation_revision
+  - propose_relation_tombstone
   - review_relation
   - suppress_relation
   - restore_relation
@@ -500,7 +583,7 @@
   - trace_fields
   - impact_analysis
 
-  普通 Agent 默认只能 propose，审核通过后才进入正式图；删除使用 TOMBSTONED，保留历史证据。
+  An ordinary Agent can continuously propose new relations, revisions, or tombstones during initialization and normal use, but it cannot modify the effective graph directly. A new revision takes effect only after approval; deletion uses TOMBSTONED and preserves historical evidence.
 
   开源实现上，我建议：
 
@@ -509,9 +592,9 @@
 
   - 单独建立 ConditionalRelation Store，保存 guard AST、代码证据、置信度和版本。
   - 自定义 MCP 聚合 OpenMetadata 与条件关系层。
-  - Java/MyBatis Analyzer 从 Java 控制流、Mapper XML、动态 SQL 中产生 PROPOSED 关系。
+  - An external LLM Agent reads Java/MyBatis/SQL code and submits evidence-backed PROPOSED relations through the custom MCP; dbgraph embeds no code analyzer.
 
   OpenMetadata 原生 lineage 模型没有可查询的结构化 guard，只能放 SQL、function 或描述，因此不能只依赖它现有的边模型。官方 Lineage Schema
   (https://raw.githubusercontent.com/open-metadata/OpenMetadata/main/openmetadata-spec/src/main/resources/json/schema/type/entityLineage.json)
 
-  完整开源调研结果在/tmp/mutable-dbgraph-oss-research.md。核心结论是：OpenMetadata 最适合做七成底座，但“条件关系节点 + Java/MyBatis 分析器 + 可写 MCP”需要单独开发。
+  Full open-source research is recorded in /tmp/mutable-dbgraph-oss-research.md. The core conclusion is that OpenMetadata can provide most of the foundation, but conditional relation entities, the Agent relation-init/update workflow, and writable MCP require separate implementation.
