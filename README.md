@@ -20,15 +20,22 @@ The Makefile drives local development. `make run` builds `./bin/dbgraph` and ser
 make run
 ```
 
-Health is available at `http://127.0.0.1:8080/healthz` and the Streamable HTTP MCP endpoint at `http://127.0.0.1:8080/mcp`, where loopback callers get anonymous Viewer access. `make watch` does the same and rebuilds and restarts on every source change; a failed build leaves the running process untouched.
+Open `http://127.0.0.1:8080/` and sign in with the `DBGRAPH_WEB_ADMIN_TOKEN` printed at startup. Health is at `/healthz` and the Streamable HTTP MCP endpoint at `/mcp`, where loopback callers get anonymous Viewer access. `make watch` does the same and rebuilds and restarts on every source change; a failed build leaves the running process untouched.
 
-Cleartext serving cannot expose the Web UI: dbgraph refuses to start with `DBGRAPH_WEB_*` tokens configured but no TLS, and the `__Host-` session cookie requires HTTPS. Over HTTP the login page still renders, but it rejects every token because no Web credential is configured. Add `TLS=1` to serve the Web UI:
+Web sign-in over cleartext is an explicit development opt-in, because the `__Host-` session cookie requires HTTPS and dbgraph otherwise refuses to start with `DBGRAPH_WEB_*` tokens and no TLS. `make run` passes `--insecure-cleartext-web`, which:
+
+- is rejected unless the listener is loopback, and cannot be combined with TLS;
+- issues the session cookie as `dbgraph-session` without the `__Host-` prefix and without `Secure`, so a browser keeps it over HTTP;
+- keeps CSRF tokens, `HttpOnly`, `SameSite=Strict`, role authorization, rate limits, and audit unchanged;
+- prints a warning at startup.
+
+The session cookie and every token cross the loopback interface unencrypted in that mode, and any local process can read them. Use TLS for anything another host can reach:
 
 ```sh
 make run TLS=1
 ```
 
-That generates `.dbgraph-local/cert.pem` and `.dbgraph-local/key.pem` on first use, prints the Web Admin and MCP Agent tokens, and serves HTTPS. Open `https://127.0.0.1:8080/`, accept the locally generated certificate for this development instance, and sign in with the printed Web Admin token.
+That generates `.dbgraph-local/cert.pem` and `.dbgraph-local/key.pem` on first use and serves HTTPS with the standard `__Host-`, `Secure` cookie. Open `https://127.0.0.1:8080/`, accept the locally generated certificate for this development instance, and sign in with the printed Web Admin token.
 
 An unauthenticated or expired browser page request is answered with `303 See Other` to `/login`. That redirect is limited to `GET` and `HEAD` navigations outside `/api/` that accept HTML; every other unauthenticated request, including all `/api/v1` calls, still returns a `401 UNAUTHENTICATED` JSON body.
 
@@ -36,7 +43,9 @@ Development credentials are generated once into `.dbgraph-local/dev.env` and the
 
 ```sh
 go build -o ./bin/dbgraph ./cmd/dbgraph
-./bin/dbgraph serve --database ./dbgraph.sqlite --listen 127.0.0.1:8080
+export DBGRAPH_WEB_ADMIN_TOKEN="$(openssl rand -hex 32)"
+./bin/dbgraph serve --database ./dbgraph.sqlite --listen 127.0.0.1:8080 \
+  --insecure-cleartext-web
 ```
 
 ```sh
@@ -74,7 +83,7 @@ The backup command refuses to overwrite an existing file. The database, lock, WA
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `TLS` | `0` | `1` serves HTTPS with the generated certificate and enables the Web UI |
+| `TLS` | `0` | `0` serves cleartext HTTP with `--insecure-cleartext-web`; `1` serves HTTPS with the generated certificate |
 | `LISTEN` | `127.0.0.1:8080` | Listen address |
 | `DATABASE` | `./dbgraph.sqlite` | SQLite path |
 | `LOCAL_DIR` | `.dbgraph-local` | Directory holding `dev.env`, `cert.pem`, and `key.pem` |
@@ -92,6 +101,7 @@ Flags override environment variables.
 | `DBGRAPH_DATABASE_PATH` | SQLite path used by `serve` or the default backup source |
 | `DBGRAPH_LISTEN_ADDRESS` | HTTP address; defaults to `127.0.0.1:8080` |
 | `DBGRAPH_TLS_CERT_FILE` / `DBGRAPH_TLS_KEY_FILE` | TLS certificate and key; both are required together |
+| `DBGRAPH_INSECURE_CLEARTEXT_WEB` | Development only: allow Web sign-in without TLS on a loopback listener |
 | `DBGRAPH_BACKUP_PATH` | Default `backup --output` path |
 | `DBGRAPH_MCP_SERVER_URL` | Server URL used by the stdio proxy |
 | `DBGRAPH_MCP_TOKEN` | Bearer token used by the stdio proxy |
@@ -103,7 +113,7 @@ Flags override environment variables.
 | `DBGRAPH_WEB_REVIEWER_TOKEN` | Web review/revision/suppress/restore credential |
 | `DBGRAPH_WEB_ADMIN_TOKEN` | Web data-source and schema-scan credential |
 
-Every configured access token must be 32 random bytes encoded as exactly 64 hexadecimal characters; generate one with `openssl rand -hex 32`. Web credentials require TLS. A non-loopback listener requires both `--tls-cert`/`--tls-key` and at least one `DBGRAPH_MCP_*_TOKEN`; anonymous MCP Viewer access is loopback-only. MySQL DSNs are never stored in SQLite: a data source stores only an environment-variable name, such as `ORDERS_MYSQL_DSN`, and the serving process reads that variable when a scan runs. Use a read-only MySQL account with verified TLS.
+Every configured access token must be 32 random bytes encoded as exactly 64 hexadecimal characters; generate one with `openssl rand -hex 32`. Web credentials require TLS unless `--insecure-cleartext-web` is set, which is loopback-only and refuses to run alongside TLS. A non-loopback listener requires both `--tls-cert`/`--tls-key` and at least one `DBGRAPH_MCP_*_TOKEN`; anonymous MCP Viewer access is loopback-only. MySQL DSNs are never stored in SQLite: a data source stores only an environment-variable name, such as `ORDERS_MYSQL_DSN`, and the serving process reads that variable when a scan runs. Use a read-only MySQL account with verified TLS.
 
 ## Roles and review model
 

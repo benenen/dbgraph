@@ -36,31 +36,26 @@ WATCH_INTERVAL ?= 1
 # TLS=0 (default) serves cleartext HTTP; TLS=1 serves HTTPS with $(TLS_CERT).
 TLS ?= 0
 
-# Read from the file rather than the environment so every token is listed even
-# when the current mode keeps some of them out of the server process. Group them
-# by whether the running server actually accepts them: an unusable token printed
-# next to a usable one reads as a broken login.
+# Read from the file rather than the environment, and group by endpoint, so the
+# banner always says which token belongs in which place.
 SHOW_MCP_TOKENS = awk -F= '/^DBGRAPH_MCP_[A-Z_]+_TOKEN=/ {printf "    %-28s %s\n", $$1, $$2}' $(ENV_FILE)
 SHOW_WEB_TOKENS = awk -F= '/^DBGRAPH_WEB_[A-Z_]+_TOKEN=/ {printf "    %-28s %s\n", $$1, $$2}' $(ENV_FILE)
 
 ifeq ($(TLS),0)
 SCHEME := http
-TLS_FLAGS :=
+# Cleartext Web sign-in is loopback-only and refuses to start otherwise.
+TLS_FLAGS := --insecure-cleartext-web
 TLS_DEPS :=
 MCP_TLS_ENV :=
-# dbgraph rejects Web credentials without TLS, so keep them out of the process.
-LOAD_ENV := set -a; . ./$(ENV_FILE); set +a; \
-	unset DBGRAPH_WEB_VIEWER_TOKEN DBGRAPH_WEB_EDITOR_TOKEN \
-		DBGRAPH_WEB_REVIEWER_TOKEN DBGRAPH_WEB_ADMIN_TOKEN;
+LOAD_ENV := set -a; . ./$(ENV_FILE); set +a;
 BANNER = printf 'Tokens (%s)\n' '$(ENV_FILE)'; \
-	printf '  USABLE NOW - MCP bearer tokens for http://%s/mcp\n' '$(LISTEN)'; \
-	$(SHOW_MCP_TOKENS); \
-	printf '  NOT LOADED - the server was started without TLS, so it holds no\n'; \
-	printf '  Web credential at all and rejects each of these with\n'; \
-	printf '  INVALID_CREDENTIALS. Restart with TLS=1 to use them.\n'; \
+	printf '  Web sign-in at http://%s/ - paste one of these\n' '$(LISTEN)'; \
 	$(SHOW_WEB_TOKENS); \
+	printf '  MCP bearer tokens for http://%s/mcp\n' '$(LISTEN)'; \
+	$(SHOW_MCP_TOKENS); \
 	printf 'Health: http://%s/healthz\n' '$(LISTEN)'; \
-	printf 'Web UI: unavailable in this mode.\n\n'
+	printf 'Cleartext mode: sessions and tokens are sent unencrypted on\n'; \
+	printf 'loopback. Use TLS=1 for anything reachable by another host.\n\n'
 else
 SCHEME := https
 TLS_FLAGS := --tls-cert $(TLS_CERT) --tls-key $(TLS_KEY)

@@ -342,3 +342,72 @@ func assertSecurityHeaders(t *testing.T, response *httptest.ResponseRecorder) {
 		t.Fatalf("security headers=%v", response.Header())
 	}
 }
+
+func TestCleartextCookieModeDropsSecureAttributesButKeepsCSRF(t *testing.T) {
+	authenticator, err := appauth.NewTokenAuthenticator([]appauth.Credential{{
+		Token: testWebToken, Actor: "web-admin", Role: relations.RoleAdmin, Origin: audit.OriginWeb,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := appauth.NewSessionManager(authenticator, func() time.Time { return testWebTime }, nil)
+	handler := NewHandler(Services{}, sessions, WithCleartextCookies())
+
+	login := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/login",
+		strings.NewReader(`{"token":"`+testWebToken+`"}`))
+	login.Header.Set("Content-Type", "application/json")
+	login.RemoteAddr = "127.0.0.1:44000"
+	loginResponse := httptest.NewRecorder()
+	handler.ServeHTTP(loginResponse, login)
+	if loginResponse.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", loginResponse.Code, loginResponse.Body.String())
+	}
+	cookies := loginResponse.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("login cookies=%#v", cookies)
+	}
+	cookie := cookies[0]
+	if cookie.Name != "dbgraph-session" {
+		t.Fatalf("cookie name=%q, want dbgraph-session without the __Host- prefix", cookie.Name)
+	}
+	if cookie.Secure {
+		t.Fatal("cookie is marked Secure, so a browser drops it over cleartext HTTP")
+	}
+	if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/" {
+		t.Fatalf("cookie HttpOnly=%t SameSite=%v Path=%q", cookie.HttpOnly, cookie.SameSite, cookie.Path)
+	}
+
+	var envelope struct {
+		Data struct {
+			CSRF string `json:"csrfToken"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(loginResponse.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+
+	authenticated := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/api/v1/session", nil)
+	authenticated.RemoteAddr = "127.0.0.1:44000"
+	authenticated.AddCookie(cookie)
+	sessionResponse := httptest.NewRecorder()
+	handler.ServeHTTP(sessionResponse, authenticated)
+	assertWebStatus(t, sessionResponse, http.StatusOK, "")
+
+	withoutCSRF := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/logout", strings.NewReader(`{}`))
+	withoutCSRF.Header.Set("Content-Type", "application/json")
+	withoutCSRF.RemoteAddr = "127.0.0.1:44000"
+	withoutCSRF.AddCookie(cookie)
+	rejected := httptest.NewRecorder()
+	handler.ServeHTTP(rejected, withoutCSRF)
+	assertWebStatus(t, rejected, http.StatusForbidden, "CSRF_REJECTED")
+}
+
+func TestSecureCookieModeRemainsTheDefault(t *testing.T) {
+	client := newWebTestClient(t, Services{}, relations.RoleAdmin)
+	if client.cookie.Name != "__Host-dbgraph-session" {
+		t.Fatalf("cookie name=%q, want the __Host- prefixed default", client.cookie.Name)
+	}
+	if !client.cookie.Secure {
+		t.Fatal("default cookie must stay Secure")
+	}
+}

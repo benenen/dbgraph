@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -18,6 +19,10 @@ type ServeConfig struct {
 	ListenAddress string
 	TLSCertFile   string
 	TLSKeyFile    string
+	// AllowCleartextWeb enables Web credentials and non-Secure session cookies
+	// on a loopback listener without TLS. Development convenience only: the
+	// session cookie and every token then travel in the clear.
+	AllowCleartextWeb bool
 }
 
 type EnvironmentLookup func(string) (string, bool)
@@ -34,15 +39,24 @@ func LoadServe(arguments []string, lookupEnvironment EnvironmentLookup) (ServeCo
 	listenAddress := flags.String("listen", listenDefault, "HTTP listen address")
 	tlsCertFile := flags.String("tls-cert", tlsCertDefault, "TLS certificate file")
 	tlsKeyFile := flags.String("tls-key", tlsKeyDefault, "TLS private key file")
+	cleartextWebDefault, err := booleanEnvironmentValue(lookupEnvironment, "DBGRAPH_INSECURE_CLEARTEXT_WEB")
+	if err != nil {
+		return ServeConfig{}, err
+	}
+	allowCleartextWeb := flags.Bool(
+		"insecure-cleartext-web", cleartextWebDefault,
+		"serve the Web UI without TLS on a loopback listener (development only)",
+	)
 	if err := flags.Parse(arguments); err != nil {
 		return ServeConfig{}, fmt.Errorf("%w: %v", ErrInvalidServeConfig, err)
 	}
 
 	config := ServeConfig{
-		DatabasePath:  strings.TrimSpace(*databasePath),
-		ListenAddress: strings.TrimSpace(*listenAddress),
-		TLSCertFile:   strings.TrimSpace(*tlsCertFile),
-		TLSKeyFile:    strings.TrimSpace(*tlsKeyFile),
+		DatabasePath:      strings.TrimSpace(*databasePath),
+		ListenAddress:     strings.TrimSpace(*listenAddress),
+		TLSCertFile:       strings.TrimSpace(*tlsCertFile),
+		TLSKeyFile:        strings.TrimSpace(*tlsKeyFile),
+		AllowCleartextWeb: *allowCleartextWeb,
 	}
 	if config.DatabasePath == "" {
 		return ServeConfig{}, fmt.Errorf("%w: database path is required", ErrInvalidServeConfig)
@@ -57,8 +71,28 @@ func LoadServe(arguments []string, lookupEnvironment EnvironmentLookup) (ServeCo
 	if config.TLSCertFile == "" && !isLoopbackHost(host) {
 		return ServeConfig{}, fmt.Errorf("%w: non-loopback listeners require TLS", ErrInvalidServeConfig)
 	}
+	if config.AllowCleartextWeb && !isLoopbackHost(host) {
+		return ServeConfig{}, fmt.Errorf(
+			"%w: insecure cleartext Web access requires a loopback listener", ErrInvalidServeConfig)
+	}
+	if config.AllowCleartextWeb && config.TLSCertFile != "" {
+		return ServeConfig{}, fmt.Errorf(
+			"%w: insecure cleartext Web access cannot be combined with TLS", ErrInvalidServeConfig)
+	}
 
 	return config, nil
+}
+
+func booleanEnvironmentValue(lookupEnvironment EnvironmentLookup, key string) (bool, error) {
+	raw := environmentValue(lookupEnvironment, key, "")
+	if raw == "" {
+		return false, nil
+	}
+	value, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err != nil {
+		return false, fmt.Errorf("%w: %s must be a boolean", ErrInvalidServeConfig, key)
+	}
+	return value, nil
 }
 
 func isLoopbackHost(host string) bool {

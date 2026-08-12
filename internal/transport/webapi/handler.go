@@ -22,9 +22,12 @@ import (
 )
 
 const (
-	sessionCookieName       = "__Host-dbgraph-session"
-	loginPath               = "/login"
-	maximumJSONRequestBytes = 256 << 10
+	sessionCookieName = "__Host-dbgraph-session"
+	// The __Host- prefix is only valid on a Secure cookie, so cleartext mode
+	// has to fall back to an unprefixed name or the browser rejects it.
+	cleartextSessionCookieName = "dbgraph-session"
+	loginPath                  = "/login"
+	maximumJSONRequestBytes    = 256 << 10
 )
 
 type CatalogService interface {
@@ -94,18 +97,38 @@ type requestSession struct {
 }
 
 type handler struct {
-	services Services
-	sessions *appauth.SessionManager
-	mux      *http.ServeMux
-	writes   *principalIPLimiter
-	reads    *principalIPLimiter
-	logins   *loginLimiter
+	services   Services
+	sessions   *appauth.SessionManager
+	mux        *http.ServeMux
+	writes     *principalIPLimiter
+	reads      *principalIPLimiter
+	logins     *loginLimiter
+	cookieName string
+	secure     bool
 }
 
-func NewHandler(services Services, sessions *appauth.SessionManager) http.Handler {
+// Option adjusts how the Web adapter issues session cookies.
+type Option func(*handler)
+
+// WithCleartextCookies issues an unprefixed, non-Secure session cookie so a
+// browser keeps it over plain HTTP. Callers must restrict this to a loopback
+// listener: the session cookie, tokens, and every response travel in the clear.
+// CSRF validation, HttpOnly, and SameSite=Strict are unchanged.
+func WithCleartextCookies() Option {
+	return func(h *handler) {
+		h.cookieName = cleartextSessionCookieName
+		h.secure = false
+	}
+}
+
+func NewHandler(services Services, sessions *appauth.SessionManager, options ...Option) http.Handler {
 	h := &handler{
 		services: services, sessions: sessions, mux: http.NewServeMux(),
 		writes: newPrincipalIPLimiter(), reads: newPrincipalIPLimiter(), logins: newLoginLimiter(),
+		cookieName: sessionCookieName, secure: true,
+	}
+	for _, option := range options {
+		option(h)
 	}
 	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/relations", h.proposeRelation)
 	h.mux.HandleFunc("POST /api/v1/projects", h.createProject)
@@ -150,7 +173,7 @@ func (h *handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		serveStaticAsset(response, request)
 		return
 	}
-	cookie, err := request.Cookie(sessionCookieName)
+	cookie, err := request.Cookie(h.cookieName)
 	if err != nil {
 		rejectUnauthenticated(response, request)
 		return
@@ -216,7 +239,7 @@ func (h *handler) login(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	http.SetCookie(response, &http.Cookie{
-		Name: sessionCookieName, Value: token, Path: "/", Secure: true, HttpOnly: true,
+		Name: h.cookieName, Value: token, Path: "/", Secure: h.secure, HttpOnly: true,
 		SameSite: http.SameSiteStrictMode, Expires: session.ExpiresAt, MaxAge: int(time.Until(session.ExpiresAt).Seconds()),
 	})
 	response.Header().Set("Cache-Control", "no-store")
@@ -239,7 +262,7 @@ func (h *handler) logout(response http.ResponseWriter, request *http.Request) {
 	session := currentSession(request)
 	h.sessions.Delete(session.token)
 	http.SetCookie(response, &http.Cookie{
-		Name: sessionCookieName, Value: "", Path: "/", Secure: true, HttpOnly: true,
+		Name: h.cookieName, Value: "", Path: "/", Secure: h.secure, HttpOnly: true,
 		SameSite: http.SameSiteStrictMode, MaxAge: -1,
 	})
 	writeJSON(response, http.StatusOK, map[string]any{"loggedOut": true})

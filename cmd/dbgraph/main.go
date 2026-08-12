@@ -148,14 +148,21 @@ func serve(serveConfig config.ServeConfig) (returnError error) {
 	if err != nil {
 		return fmt.Errorf("configure Web authentication: %w", err)
 	}
-	if webAuthenticator.HasCredentials() && serveConfig.TLSCertFile == "" {
-		return errors.New("web credentials require TLS (--tls-cert and --tls-key)")
+	if webAuthenticator.HasCredentials() && serveConfig.TLSCertFile == "" && !serveConfig.AllowCleartextWeb {
+		return errors.New("web credentials require TLS (--tls-cert and --tls-key) or --insecure-cleartext-web")
+	}
+	var webOptions []webapi.Option
+	if serveConfig.AllowCleartextWeb {
+		webOptions = append(webOptions, webapi.WithCleartextCookies())
+		writeDiagnostic(os.Stderr,
+			"warning: --insecure-cleartext-web is enabled; Web sessions and tokens are sent in the clear on %s\n",
+			serveConfig.ListenAddress)
 	}
 	webHandler := webapi.NewHandler(webapi.Services{
 		Projects: projectService, CodeRepositories: codeRepositoryService,
 		Catalog: catalogService, Relations: relationCommands, Graph: graphService,
 		Reconcile: reconcileService, Jobs: schemaScans, Audit: auditService,
-	}, appauth.NewSessionManager(webAuthenticator, time.Now, nil))
+	}, appauth.NewSessionManager(webAuthenticator, time.Now, nil), webOptions...)
 
 	listener, err := net.Listen("tcp", serveConfig.ListenAddress)
 	if err != nil {

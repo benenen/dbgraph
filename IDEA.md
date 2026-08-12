@@ -362,6 +362,7 @@
   - server-side authentication and role authorization on every request
   - Viewer is read-only; Editor can propose create/revision/tombstone; Reviewer can approve/reject/suppress/restore; Admin manages data sources and schema scans
   - Require CSRF tokens and HttpOnly, Secure, SameSite session cookies
+  - One documented exception: `--insecure-cleartext-web` (development only) drops the `__Host-` prefix and the Secure attribute so a browser keeps the session cookie over plain HTTP. It is rejected unless the listener is loopback, it cannot be combined with TLS, it is off by default, and it changes nothing else: CSRF tokens, HttpOnly, SameSite=Strict, role authorization, and audit remain in force
   - validate node IDs, enums, relation type and all required fields
   - bound AST depth/node count, batch size, string length and evidence count
   - expectedRevisionNo mismatch returns 409 with the current revision; never last-write-wins
