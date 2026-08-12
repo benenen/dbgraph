@@ -41,6 +41,7 @@ type ProjectRepository interface {
 	CreateProject(context.Context, Project) error
 	CreateProjectWithAudit(context.Context, Project, audit.Event) error
 	GetProject(context.Context, int64) (Project, error)
+	ListProjects(context.Context, int) ([]Project, error)
 }
 
 type ProjectIDGenerator interface {
@@ -140,4 +141,8 @@ func (s *ProjectService) Get(ctx context.Context, projectID int64) (Project, err
 		return Project{}, ErrInvalidProject
 	}
 	return s.repository.GetProject(ctx, projectID)
+}
+
+func (s *ProjectService) List(ctx context.Context, limit int) ([]Project, error) {
+	return s.repository.ListProjects(ctx, clampListLimit(limit))
 }

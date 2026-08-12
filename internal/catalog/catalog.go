@@ -45,6 +45,22 @@ const (
 	MaximumIncrementalTables   = 100
 )
 
+const (
+	MinimumListLimit = 1
+	DefaultListLimit = 50
+	MaximumListLimit = 200
+)
+
+func clampListLimit(limit int) int {
+	if limit < MinimumListLimit {
+		return DefaultListLimit
+	}
+	if limit > MaximumListLimit {
+		return MaximumListLimit
+	}
+	return limit
+}
+
 type NodeStatus int
 
 const (
@@ -165,6 +181,7 @@ type CatalogRepository interface {
 	CreateDataSource(context.Context, DataSource) error
 	CreateDataSourceWithAudit(context.Context, DataSource, audit.Event) error
 	GetDataSource(context.Context, int64) (DataSource, error)
+	ListDataSources(context.Context, int64, int) ([]DataSource, error)
 	BeginSchemaScan(context.Context, SchemaScanRun) error
 	FailSchemaScan(context.Context, SchemaScanFailure) error
 	PublishSnapshot(context.Context, SnapshotPublication) (PublishedSnapshot, error)
@@ -178,6 +195,13 @@ func (s *Service) GetDataSource(ctx context.Context, dataSourceID int64) (DataSo
 		return DataSource{}, ErrInvalidDataSource
 	}
 	return s.repository.GetDataSource(ctx, dataSourceID)
+}
+
+func (s *Service) ListDataSources(ctx context.Context, projectID int64, limit int) ([]DataSource, error) {
+	if projectID <= 0 {
+		return nil, ErrInvalidDataSource
+	}
+	return s.repository.ListDataSources(ctx, projectID, clampListLimit(limit))
 }
 
 type Service struct {

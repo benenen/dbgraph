@@ -49,6 +49,7 @@ type CodeRepositoryStore interface {
 	CreateCodeRepository(context.Context, CodeRepository) error
 	CreateCodeRepositoryWithAudit(context.Context, CodeRepository, audit.Event) error
 	GetCodeRepository(context.Context, int64) (CodeRepository, error)
+	ListCodeRepositories(context.Context, int64, int) ([]CodeRepository, error)
 }
 
 type CodeRepositoryService struct {
@@ -151,4 +152,11 @@ func (s *CodeRepositoryService) Get(ctx context.Context, repositoryID int64) (Co
 		return CodeRepository{}, ErrInvalidRepository
 	}
 	return s.repository.GetCodeRepository(ctx, repositoryID)
+}
+
+func (s *CodeRepositoryService) List(ctx context.Context, projectID int64, limit int) ([]CodeRepository, error) {
+	if projectID <= 0 {
+		return nil, ErrInvalidRepository
+	}
+	return s.repository.ListCodeRepositories(ctx, projectID, clampListLimit(limit))
 }
