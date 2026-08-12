@@ -8,7 +8,9 @@ function initializeAdmin() {
         name: byId("project-name").value, description: byId("project-description").value,
         reason: byId("project-reason").value,
       }) });
+      await loadProjects(project.id);
       byId("project-id").value = project.id;
+      loadProjectList();
       showMessage(`Project ${project.id} created.`, true);
     } catch (error) { showMessage(error.message); }
   });
@@ -20,6 +22,7 @@ function initializeAdmin() {
         defaultBranch: byId("repository-branch").value, reason: byId("repository-reason").value,
       }) });
       byId("repository-result").textContent = JSON.stringify(repository, null, 2);
+      loadRepositoryList();
       showMessage(`Repository ${repository.id} is ready for Agent relation-init evidence.`, true);
     } catch (error) { showMessage(error.message); }
   });
@@ -31,6 +34,7 @@ function initializeAdmin() {
         reason: byId("data-source-reason").value,
       }) });
       byId("scan-data-source-id").value = source.id;
+      loadDataSourceList();
       showMessage(`Data source ${source.id} created.`, true);
     } catch (error) { showMessage(error.message); }
   });

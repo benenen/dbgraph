@@ -10,6 +10,7 @@
   <script defer src="/assets/cytoscape.min.js"></script>
 	<script defer src="/assets/editor_controls.js"></script>
 	<script defer src="/assets/admin_controls.js"></script>
+  <script defer src="/assets/workspace_controls.js"></script>
   <script defer src="/assets/app.js"></script>
 </head>
 <body>
@@ -24,6 +25,8 @@
   <div class="shell">
     <nav class="sidebar" aria-label="Primary">
       <a href="#overview" data-panel-link="overview" class="active">Overview</a>
+      <a href="#projects" data-panel-link="projects">Projects</a>
+      <a href="#data-sources" data-panel-link="data-sources" data-capability="admin">Data sources</a>
       <a href="#schema" data-panel-link="schema">Schema Explorer</a>
       <a href="#node-details" data-panel-link="node-details">Node Details</a>
       <a href="#graph" data-panel-link="graph">Graph Explorer</a>
@@ -144,13 +147,27 @@
       <section id="panel-jobs" class="panel"><header class="panel-head"><p class="eyebrow">SCHEMA SCAN JOBS</p><h1>Inspect a scan job</h1></header><form id="job-form" class="inline-form"><input id="job-id" required placeholder="Job ID"><button>Load job</button></form><pre id="job-details" class="details"></pre></section>
       <section id="panel-relation-init" class="panel"><header class="panel-head"><p class="eyebrow">RELATION INIT SESSIONS</p><h1>Inspect Agent initialization</h1></header><form id="init-form" class="inline-form"><input id="init-id" required placeholder="Session ID"><button>Load session</button></form><pre id="init-details" class="details"></pre></section>
       <section id="panel-audit" class="panel"><header class="panel-head"><p class="eyebrow">AUDIT HISTORY</p><h1>Immutable changes</h1></header><button id="load-audit">Refresh audit</button><div id="audit-results" class="result-list"></div></section>
-      <section id="panel-settings" class="panel"><header class="panel-head"><p class="eyebrow">SETTINGS</p><h1>Runtime boundaries</h1></header><div class="notice"><strong>Credentials stay outside dbgraph.</strong><p>MySQL DSNs and Web/MCP access tokens are loaded only from environment variables. Repository records hold evidence provenance; dbgraph never clones or analyzes source code.</p></div>
-        <div class="two-column admin-controls" data-capability="admin">
+      <section id="panel-projects" class="panel">
+        <header class="panel-head"><p class="eyebrow">PROJECTS</p><h1>Projects in this instance</h1></header>
+        <div id="project-list" class="result-list"></div>
+        <div class="admin-controls" data-capability="admin">
           <form id="project-form" class="form-grid"><h2>Create a project</h2><label>Name<input id="project-name" required maxlength="200"></label><label>Description<textarea id="project-description" maxlength="2000"></textarea></label><label>Reason<textarea id="project-reason" required maxlength="2000"></textarea></label><button>Create project</button></form>
-          <form id="repository-form" class="form-grid"><h2>Register an evidence repository</h2><label>Name<input id="repository-name" required maxlength="200"></label><label>Remote URL <span class="muted">metadata only</span><input id="repository-url" maxlength="2000"></label><label>Default branch<input id="repository-branch" maxlength="500" value="main"></label><label>Reason<textarea id="repository-reason" required maxlength="2000"></textarea></label><button>Register repository</button><pre id="repository-result" class="details"></pre></form>
+        </div>
+      </section>
+      <section id="panel-data-sources" class="panel">
+        <header class="panel-head"><p class="eyebrow">DATA SOURCES</p><h1>Catalog inputs for the selected project</h1></header>
+        <div id="data-source-list" class="result-list"></div>
+        <div class="admin-controls" data-capability="admin">
           <form id="data-source-form" class="form-grid"><h2>Add a MySQL data source</h2><label>Name<input id="data-source-name" required maxlength="200"></label><label>DSN environment variable<input id="data-source-environment" required pattern="[A-Z][A-Z0-9_]*"></label><label>Reason<textarea id="data-source-reason" required maxlength="2000"></textarea></label><button>Create data source</button></form>
           <form id="scan-start-form" class="form-grid"><h2>Start a schema scan</h2><label>Data source ID<input id="scan-data-source-id" required inputmode="numeric"></label><label>Mode<select id="scan-mode"><option value="FULL">Full inventory</option><option value="INCREMENTAL">Incremental table scope</option></select></label><label>Incremental tables <span class="muted">schema.table, one per line</span><textarea id="scan-tables" maxlength="100000"></textarea></label><label>Reason<textarea id="scan-reason" required maxlength="2000"></textarea></label><button>Queue schema scan</button><pre id="scan-result" class="details"></pre></form>
         </div>
+        <h2>Evidence repositories</h2>
+        <div id="repository-list" class="result-list"></div>
+        <div class="admin-controls" data-capability="admin">
+          <form id="repository-form" class="form-grid"><h2>Register an evidence repository</h2><label>Name<input id="repository-name" required maxlength="200"></label><label>Remote URL <span class="muted">metadata only</span><input id="repository-url" maxlength="2000"></label><label>Default branch<input id="repository-branch" maxlength="500" value="main"></label><label>Reason<textarea id="repository-reason" required maxlength="2000"></textarea></label><button>Register repository</button><pre id="repository-result" class="details"></pre></form>
+        </div>
+      </section>
+      <section id="panel-settings" class="panel"><header class="panel-head"><p class="eyebrow">SETTINGS</p><h1>Runtime boundaries</h1></header><div class="notice"><strong>Credentials stay outside dbgraph.</strong><p>MySQL DSNs and Web/MCP access tokens are loaded only from environment variables. Repository records hold evidence provenance; dbgraph never clones or analyzes source code.</p></div>
       </section>
     </main>
   </div>

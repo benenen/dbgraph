@@ -747,7 +747,7 @@ async function initializeApp() {
   if (await initializeLogin()) return;
   try {
     await initializeSession(); initializeNavigation(); applyRoleCapabilities(); initializeProjectPicker(); await loadProjects(); initializeNodeSearch(); initializeGraphNodeSearch(); initializeTrace(); initializeStructuredEditors(); initializeProposal();
-    initializeRelationActions(); initializeGraphRelationActions(); initializeReview(); initializeQueries(); initializeAdmin();
+    initializeRelationActions(); initializeGraphRelationActions(); initializeReview(); initializeQueries(); initializeAdmin(); initializeWorkspace();
     ["trace-type-filter", "trace-status-filter", "trace-confidence-filter"].forEach(id => byId(id).addEventListener("change", () => {
       if (state.traceResult) renderGraph(state.traceResult);
     }));
