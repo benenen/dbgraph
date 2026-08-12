@@ -109,6 +109,7 @@ async function loadProjects(preferredId = "") {
   select.replaceChildren();
   if (!projects.length) {
     select.append(new Option("No projects yet — create one in Projects", ""));
+    if (stored) localStorage.removeItem(PROJECT_STORAGE_KEY);
     return;
   }
   select.append(new Option("Select a project", ""));
