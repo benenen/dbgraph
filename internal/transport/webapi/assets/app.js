@@ -70,6 +70,13 @@ function initializeNavigation() {
 function activatePanel(name) {
   document.querySelectorAll(".panel").forEach(panel => panel.classList.toggle("active", panel.id === `panel-${name}`));
   document.querySelectorAll("[data-panel-link]").forEach(link => link.classList.toggle("active", link.dataset.panelLink === name));
+  // Covers every path that lands on Schema Explorer without a click on its
+  // nav link: the initial location.hash check and the hashchange listener
+  // in initializeNavigation() both call activatePanel() directly. The
+  // request-token guard in loadNodeDataSources() makes any redundant call
+  // here (e.g. one that also arrives via the dedicated click listener in
+  // initializeNodeSearch()) harmless.
+  if (name === "schema") loadNodeDataSources();
 }
 
 function applyRoleCapabilities() {
@@ -778,7 +785,14 @@ function initializeReview() {
 async function initializeApp() {
   if (await initializeLogin()) return;
   try {
-    await initializeSession(); initializeNavigation(); applyRoleCapabilities(); initializeProjectPicker(); await loadProjects(); initializeNodeSearch(); initializeGraphNodeSearch(); initializeTrace(); initializeStructuredEditors(); initializeProposal();
+    await initializeSession(); initializeNavigation(); applyRoleCapabilities(); initializeProjectPicker(); await loadProjects();
+    // initializeNavigation() runs (and may activate Schema Explorer from
+    // location.hash) before loadProjects() has restored/auto-selected a
+    // project, so that first activatePanel("schema") call finds no project
+    // yet and its loadNodeDataSources() call is a no-op. Catch up now that
+    // a project is known, guarded by the same request token.
+    if (byId("panel-schema").classList.contains("active")) loadNodeDataSources();
+    initializeNodeSearch(); initializeGraphNodeSearch(); initializeTrace(); initializeStructuredEditors(); initializeProposal();
     initializeRelationActions(); initializeGraphRelationActions(); initializeReview(); initializeQueries(); initializeAdmin(); initializeWorkspace();
     ["trace-type-filter", "trace-status-filter", "trace-confidence-filter"].forEach(id => byId(id).addEventListener("change", () => {
       if (state.traceResult) renderGraph(state.traceResult);
