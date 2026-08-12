@@ -109,6 +109,8 @@ type catalogHTTPStub struct {
 	node          catalog.Node
 	searchErr     error
 	getNodeErr    error
+	sources       []catalog.DataSource
+	listSrcErr    error
 }
 
 func (s *catalogHTTPStub) CreateDataSourceAsAdmin(_ context.Context, command catalog.AdminCreateDataSource) (catalog.DataSource, error) {
@@ -126,6 +128,10 @@ func (s *catalogHTTPStub) SearchCurrentNodes(context.Context, int64, string, int
 
 func (s *catalogHTTPStub) GetCurrentNode(context.Context, int64, int64) (catalog.Node, error) {
 	return s.node, s.getNodeErr
+}
+
+func (s *catalogHTTPStub) ListDataSources(context.Context, int64, int) ([]catalog.DataSource, error) {
+	return append([]catalog.DataSource(nil), s.sources...), s.listSrcErr
 }
 
 type relationHTTPStub struct {

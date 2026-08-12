@@ -229,3 +229,16 @@ func mapDataSource(source catalog.DataSource) map[string]any {
 		"createdAt": source.CreatedAt.UTC().Format(time.RFC3339Nano), "updatedAt": source.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 }
+
+// mapDataSourceForRole withholds deployment detail from non-admins. The name
+// and kind are needed by every role to label catalog nodes; the environment
+// variable name describes the deployment, not the catalog.
+func mapDataSourceForRole(source catalog.DataSource, role relations.Role) map[string]any {
+	if role == relations.RoleAdmin {
+		return mapDataSource(source)
+	}
+	return map[string]any{
+		"id": strconv.FormatInt(source.ID, 10), "projectId": strconv.FormatInt(source.ProjectID, 10),
+		"name": source.Name, "kind": "MYSQL",
+	}
+}

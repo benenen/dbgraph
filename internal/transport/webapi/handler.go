@@ -35,14 +35,17 @@ type CatalogService interface {
 	FindCurrentNode(context.Context, int64, int64, string) (catalog.Node, error)
 	GetCurrentNode(context.Context, int64, int64) (catalog.Node, error)
 	SearchCurrentNodes(context.Context, int64, string, int) ([]catalog.Node, error)
+	ListDataSources(context.Context, int64, int) ([]catalog.DataSource, error)
 }
 
 type ProjectService interface {
 	CreateAsAdmin(context.Context, catalog.AdminCreateProject) (catalog.Project, error)
+	List(context.Context, int) ([]catalog.Project, error)
 }
 
 type CodeRepositoryService interface {
 	CreateAsAdmin(context.Context, catalog.AdminCreateCodeRepository) (catalog.CodeRepository, error)
+	List(context.Context, int64, int) ([]catalog.CodeRepository, error)
 }
 
 type RelationService interface {
@@ -149,6 +152,9 @@ func NewHandler(services Services, sessions *appauth.SessionManager, options ...
 	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/schema-scan-jobs/{jobID}", h.limitExpensiveRead(h.getJob))
 	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/relation-init-sessions/{sessionID}", h.limitExpensiveRead(h.getInitSession))
 	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/audit-events", h.limitExpensiveRead(h.listAuditEvents))
+	h.mux.HandleFunc("GET /api/v1/projects", h.limitExpensiveRead(h.listProjects))
+	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/data-sources", h.limitExpensiveRead(h.listDataSources))
+	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/repositories", h.limitExpensiveRead(h.listRepositories))
 	h.mux.HandleFunc("GET /api/v1/session", h.getSession)
 	h.mux.HandleFunc("POST /logout", h.logout)
 	h.mux.HandleFunc("GET /", h.indexPage)

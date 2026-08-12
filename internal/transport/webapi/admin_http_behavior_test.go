@@ -11,10 +11,12 @@ import (
 )
 
 type projectHTTPStub struct {
-	result  catalog.Project
-	err     error
-	command catalog.AdminCreateProject
-	calls   int
+	result   catalog.Project
+	err      error
+	command  catalog.AdminCreateProject
+	calls    int
+	projects []catalog.Project
+	listErr  error
 }
 
 func (s *projectHTTPStub) CreateAsAdmin(_ context.Context, command catalog.AdminCreateProject) (catalog.Project, error) {
@@ -23,17 +25,27 @@ func (s *projectHTTPStub) CreateAsAdmin(_ context.Context, command catalog.Admin
 	return s.result, s.err
 }
 
+func (s *projectHTTPStub) List(context.Context, int) ([]catalog.Project, error) {
+	return append([]catalog.Project(nil), s.projects...), s.listErr
+}
+
 type repositoryHTTPStub struct {
-	result  catalog.CodeRepository
-	err     error
-	command catalog.AdminCreateCodeRepository
-	calls   int
+	result       catalog.CodeRepository
+	err          error
+	command      catalog.AdminCreateCodeRepository
+	calls        int
+	repositories []catalog.CodeRepository
+	listErr      error
 }
 
 func (s *repositoryHTTPStub) CreateAsAdmin(_ context.Context, command catalog.AdminCreateCodeRepository) (catalog.CodeRepository, error) {
 	s.command = command
 	s.calls++
 	return s.result, s.err
+}
+
+func (s *repositoryHTTPStub) List(context.Context, int64, int) ([]catalog.CodeRepository, error) {
+	return append([]catalog.CodeRepository(nil), s.repositories...), s.listErr
 }
 
 func TestAdminRoutesRejectNonAdminBeforeCallingServices(t *testing.T) {

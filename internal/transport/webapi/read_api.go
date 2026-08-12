@@ -272,6 +272,90 @@ func (h *handler) listAuditEvents(response http.ResponseWriter, request *http.Re
 	writeJSON(response, http.StatusOK, map[string]any{"events": output, "truncated": truncated})
 }
 
+func (h *handler) listProjects(response http.ResponseWriter, request *http.Request) {
+	if h.services.Projects == nil {
+		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
+		return
+	}
+	limit, err := queryLimit(request, catalog.DefaultListLimit, catalog.MaximumListLimit)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid limit", nil)
+		return
+	}
+	projects, err := h.services.Projects.List(request.Context(), limit)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, "INTERNAL", "request could not be completed", nil)
+		return
+	}
+	output := make([]map[string]any, len(projects))
+	for index, project := range projects {
+		output[index] = mapProject(project)
+	}
+	writeJSON(response, http.StatusOK, output)
+}
+
+func (h *handler) listDataSources(response http.ResponseWriter, request *http.Request) {
+	if h.services.Catalog == nil {
+		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
+		return
+	}
+	projectID, err := parseID(request.PathValue("projectID"))
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
+		return
+	}
+	limit, err := queryLimit(request, catalog.DefaultListLimit, catalog.MaximumListLimit)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid limit", nil)
+		return
+	}
+	sources, err := h.services.Catalog.ListDataSources(request.Context(), projectID, limit)
+	if err != nil {
+		if errors.Is(err, catalog.ErrInvalidDataSource) {
+			writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
+			return
+		}
+		writeError(response, http.StatusInternalServerError, "INTERNAL", "request could not be completed", nil)
+		return
+	}
+	role := currentSession(request).session.Principal.Role
+	output := make([]map[string]any, len(sources))
+	for index, source := range sources {
+		output[index] = mapDataSourceForRole(source, role)
+	}
+	writeJSON(response, http.StatusOK, output)
+}
+
+func (h *handler) listRepositories(response http.ResponseWriter, request *http.Request) {
+	if _, ok := requireAdmin(response, request); !ok {
+		return
+	}
+	if h.services.CodeRepositories == nil {
+		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
+		return
+	}
+	projectID, err := parseID(request.PathValue("projectID"))
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
+		return
+	}
+	limit, err := queryLimit(request, catalog.DefaultListLimit, catalog.MaximumListLimit)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid limit", nil)
+		return
+	}
+	repositories, err := h.services.CodeRepositories.List(request.Context(), projectID, limit)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, "INTERNAL", "request could not be completed", nil)
+		return
+	}
+	output := make([]map[string]any, len(repositories))
+	for index, repository := range repositories {
+		output[index] = mapCodeRepository(repository)
+	}
+	writeJSON(response, http.StatusOK, output)
+}
+
 func queryLimit(request *http.Request, fallback int, maximum int) (int, error) {
 	value := request.URL.Query().Get("limit")
 	if value == "" {
