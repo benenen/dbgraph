@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -250,9 +251,63 @@ func OpenWithPolicy(
 	return database, nil
 }
 
+// jdbcOnlyParameters are JDBC connection properties with no meaning to this
+// driver. It forwards parameters it does not recognise to the server as SET
+// statements, so a connection string pasted from a Spring configuration fails
+// at connect with "Unknown system variable" rather than at save. None of these
+// is a real MySQL system variable, so rejecting them cannot shadow a legitimate
+// SET; the value is the equivalent this driver understands, empty where none is
+// needed.
+var jdbcOnlyParameters = map[string]string{
+	"useSSL":                   "tls",
+	"characterEncoding":        "charset",
+	"allowMultiQueries":        "multiStatements",
+	"serverTimezone":           "loc",
+	"connectTimeout":           "timeout",
+	"socketTimeout":            "readTimeout",
+	"useUnicode":               "",
+	"autoReconnect":            "",
+	"zeroDateTimeBehavior":     "",
+	"rewriteBatchedStatements": "",
+	"useServerPrepStmts":       "",
+	"allowPublicKeyRetrieval":  "",
+}
+
+// ErrJDBCParameters reports a JDBC connection string that was pasted unchanged.
+var ErrJDBCParameters = errors.New("connection string uses JDBC parameters")
+
+// UnsupportedParameters names the JDBC-only parameters in a DSN, with the
+// equivalent this driver understands where one exists. It returns nothing for a
+// DSN this driver can use.
+func UnsupportedParameters(dsn string) []string {
+	config, err := mysqldriver.ParseDSN(dsn)
+	if err != nil {
+		return nil
+	}
+	unsupported := make([]string, 0, len(config.Params))
+	for name := range config.Params {
+		equivalent, jdbc := jdbcOnlyParameters[name]
+		if !jdbc {
+			continue
+		}
+		if equivalent == "" {
+			unsupported = append(unsupported, name+" (drop it)")
+			continue
+		}
+		unsupported = append(unsupported, name+" (use "+equivalent+")")
+	}
+	sort.Strings(unsupported)
+	return unsupported
+}
+
 func ValidateDSN(dsn string, policy ConnectionPolicy) error {
-	_, err := validatedConfiguration(dsn, policy)
-	return err
+	if _, err := validatedConfiguration(dsn, policy); err != nil {
+		return err
+	}
+	if unsupported := UnsupportedParameters(dsn); len(unsupported) > 0 {
+		return fmt.Errorf("%w: %s", ErrJDBCParameters, strings.Join(unsupported, ", "))
+	}
+	return nil
 }
 
 func validatedConfiguration(

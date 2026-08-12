@@ -79,8 +79,8 @@ func TestEnvironmentCredentialsCollectsBothSurfaces(t *testing.T) {
 	t.Parallel()
 
 	environment := map[string]string{
-		"DBGRAPH_WEB_ADMIN_TOKEN": storedWebToken,
-		"DBGRAPH_MCP_AGENT_TOKEN": storedMCPToken,
+		"DBGRAPH_WEB_TOKEN": storedWebToken,
+		"DBGRAPH_MCP_TOKEN": storedMCPToken,
 	}
 	stored, err := appauth.EnvironmentCredentials(func(key string) (string, bool) {
 		value, ok := environment[key]
@@ -98,13 +98,13 @@ func TestEnvironmentCredentialsCollectsBothSurfaces(t *testing.T) {
 		byActor[credential.Actor] = credential
 	}
 	webDigest := sha256.Sum256([]byte(storedWebToken))
-	web, ok := byActor["web-admin"]
+	web, ok := byActor["web"]
 	if !ok || string(web.Digest) != string(webDigest[:]) || web.Role != relations.RoleAdmin || web.Origin != audit.OriginWeb {
-		t.Fatalf("web-admin credential = %#v", web)
+		t.Fatalf("web credential = %#v", web)
 	}
-	agent, ok := byActor["mcp-agent"]
-	if !ok || agent.Role != relations.RoleAgent || agent.Origin != audit.OriginAgent {
-		t.Fatalf("mcp-agent credential = %#v", agent)
+	agent, ok := byActor["mcp"]
+	if !ok || agent.Role != relations.RoleAdmin || agent.Origin != audit.OriginAgent {
+		t.Fatalf("mcp credential = %#v", agent)
 	}
 
 	empty, err := appauth.EnvironmentCredentials(func(string) (string, bool) { return "", false })
@@ -123,8 +123,8 @@ func TestEnvironmentCredentialsRefusesADuplicateToken(t *testing.T) {
 	t.Parallel()
 
 	environment := map[string]string{
-		"DBGRAPH_WEB_VIEWER_TOKEN": storedWebToken,
-		"DBGRAPH_WEB_ADMIN_TOKEN":  storedWebToken,
+		"DBGRAPH_WEB_TOKEN": storedWebToken,
+		"DBGRAPH_MCP_TOKEN": storedWebToken,
 	}
 	_, err := appauth.EnvironmentCredentials(func(key string) (string, bool) {
 		value, ok := environment[key]

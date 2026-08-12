@@ -17,12 +17,39 @@ import (
 var (
 	ErrInvalidDataSource  = errors.New("invalid data source")
 	ErrDataSourceNotFound = errors.New("data source not found")
-	ErrInvalidSnapshot    = errors.New("invalid schema snapshot")
-	ErrNodeNotFound       = errors.New("catalog node not found")
-	ErrForbidden          = errors.New("catalog command is forbidden")
+	// ErrDataSourceNameTaken reports a name already registered. Data sources are
+	// shared across projects, so their names are unique service-wide and the
+	// answer is usually to link the existing one.
+	ErrDataSourceNameTaken = errors.New("a data source with that name already exists")
+	// ErrDataSourceInUse reports a source that imported a catalog. Deleting it
+	// would orphan the nodes and scan runs that record what was imported.
+	ErrDataSourceInUse = errors.New("data source has imported catalog content")
+
+	// ErrUnusableDSN reports a connection string the scanner would fail on.
+	ErrUnusableDSN     = errors.New("connection string cannot be used")
+	ErrInvalidSnapshot = errors.New("invalid schema snapshot")
+	ErrNodeNotFound    = errors.New("catalog node not found")
+	ErrForbidden       = errors.New("catalog command is forbidden")
 )
 
 var environmentNamePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+
+// validEnvironmentName accepts a blank name. A source that carries its own
+// sealed connection string needs no environment variable, and audit_events
+// still records how the DSN resolves either way.
+func validEnvironmentName(name string) bool {
+	return name == "" || environmentNamePattern.MatchString(name)
+}
+
+// auditReason keeps the audit trail complete when an operator leaves the field
+// blank. audit_events.reason is required and append-only, so a recorded
+// default is better than refusing the change.
+func auditReason(reason string, fallback string) string {
+	if reason == "" {
+		return fallback
+	}
+	return reason
+}
 
 type DataSourceKind int
 
@@ -199,6 +226,11 @@ type CatalogRepository interface {
 	GetDataSource(context.Context, int64) (DataSource, error)
 	GetProjectDataSource(context.Context, int64, int64) (DataSource, error)
 	ListDataSources(context.Context, int64, int) ([]DataSource, error)
+	ListAllDataSources(context.Context, int) ([]DataSource, error)
+	LinkDataSource(context.Context, int64, int64, time.Time) error
+	UnlinkDataSource(context.Context, int64, int64) error
+	UpdateDataSourceWithAudit(context.Context, DataSource, bool, audit.Event) error
+	DeleteDataSource(context.Context, int64) error
 	BeginSchemaScan(context.Context, SchemaScanRun) error
 	FailSchemaScan(context.Context, SchemaScanFailure) error
 	PublishSnapshot(context.Context, SnapshotPublication) (PublishedSnapshot, error)
@@ -209,6 +241,112 @@ type CatalogRepository interface {
 
 // GetProjectDataSource resolves a data source through the project that links
 // it. Anything scanning or publishing goes through this rather than a bare id.
+// ListAllDataSources returns the shared registry so a project can adopt an
+// existing source rather than registering the same database twice.
+func (s *Service) ListAllDataSources(ctx context.Context, limit int) ([]DataSource, error) {
+	return s.repository.ListAllDataSources(ctx, clampListLimit(limit))
+}
+
+// LinkDataSource adopts a source into a project. Linking twice is harmless.
+func (s *Service) LinkDataSource(ctx context.Context, projectID int64, dataSourceID int64) error {
+	if projectID <= 0 || dataSourceID <= 0 {
+		return ErrInvalidDataSource
+	}
+	return s.repository.LinkDataSource(ctx, projectID, dataSourceID, s.now().UTC())
+}
+
+// UnlinkDataSource removes the adoption. Nodes the project already scanned stay
+// where they are; only the association goes, so nothing silently disappears
+// from a catalog a relation may reference.
+func (s *Service) UnlinkDataSource(ctx context.Context, projectID int64, dataSourceID int64) error {
+	if projectID <= 0 || dataSourceID <= 0 {
+		return ErrInvalidDataSource
+	}
+	return s.repository.UnlinkDataSource(ctx, projectID, dataSourceID)
+}
+
+// AdminUpdateDataSource renames a source and may rotate its stored DSN. An
+// empty DSN leaves the stored credential untouched, because the connection
+// string is write-only and the caller never sees the current value.
+type AdminUpdateDataSource struct {
+	DataSourceID   int64
+	Name           string
+	DSNEnvironment string
+	DSN            string
+	Principal      relations.Principal
+	Reason         string
+	RequestID      string
+}
+
+// UpdateAsAdmin applies the change and records who made it.
+func (s *Service) UpdateDataSourceAsAdmin(
+	ctx context.Context,
+	command AdminUpdateDataSource,
+) (DataSource, error) {
+	if command.Principal.Role != relations.RoleAdmin {
+		return DataSource{}, ErrForbidden
+	}
+	name := strings.TrimSpace(command.Name)
+	dsnEnvironment := strings.TrimSpace(command.DSNEnvironment)
+	actor := strings.TrimSpace(command.Principal.Actor)
+	reason := strings.TrimSpace(command.Reason)
+	requestID := strings.TrimSpace(command.RequestID)
+	if command.DataSourceID <= 0 || name == "" || len(name) > 200 ||
+		!validEnvironmentName(dsnEnvironment) ||
+		actor == "" || len(actor) > 200 || len(reason) > 2000 ||
+		requestID == "" || len(requestID) > 200 {
+		return DataSource{}, ErrInvalidDataSource
+	}
+	reason = auditReason(reason, "Updated from the console")
+
+	existing, err := s.repository.GetDataSource(ctx, command.DataSourceID)
+	if err != nil {
+		return DataSource{}, err
+	}
+	keyID, ciphertext, err := s.sealDSN(command.DSN)
+	if err != nil {
+		return DataSource{}, err
+	}
+	replaceSecret := strings.TrimSpace(command.DSN) != ""
+
+	eventID, err := s.ids.Next(ctx)
+	if err != nil {
+		return DataSource{}, fmt.Errorf("generate audit event ID: %w", err)
+	}
+	now := s.now().UTC()
+	updated := existing
+	updated.Name = name
+	updated.DSNEnvironment = dsnEnvironment
+	updated.UpdatedAt = now
+	if replaceSecret {
+		updated.DSNKeyID = keyID
+		updated.DSNCiphertext = ciphertext
+	}
+
+	// The record says what changed, never the credential itself.
+	details, _ := json.Marshal(map[string]string{
+		"name": name, "dsnEnvironment": dsnEnvironment,
+		"dsnReplaced": storedLabel(DataSource{DSNCiphertext: ciphertext}),
+	})
+	event := audit.Event{
+		ID: eventID, Actor: actor, Origin: command.Principal.Origin,
+		Action: "DATA_SOURCE_UPDATED", SubjectType: "DATA_SOURCE", SubjectID: updated.ID,
+		Reason: reason, RequestID: requestID, Details: details, OccurredAt: now,
+	}
+	if err := s.repository.UpdateDataSourceWithAudit(ctx, updated, replaceSecret, event); err != nil {
+		return DataSource{}, err
+	}
+	return updated, nil
+}
+
+// DeleteDataSource removes a source that has imported nothing yet.
+func (s *Service) DeleteDataSource(ctx context.Context, dataSourceID int64) error {
+	if dataSourceID <= 0 {
+		return ErrInvalidDataSource
+	}
+	return s.repository.DeleteDataSource(ctx, dataSourceID)
+}
+
 func (s *Service) GetProjectDataSource(
 	ctx context.Context,
 	projectID int64,
@@ -235,10 +373,11 @@ func (s *Service) ListDataSources(ctx context.Context, projectID int64, limit in
 }
 
 type Service struct {
-	repository CatalogRepository
-	ids        ProjectIDGenerator
-	now        func() time.Time
-	sealer     DSNSealer
+	repository  CatalogRepository
+	ids         ProjectIDGenerator
+	now         func() time.Time
+	sealer      DSNSealer
+	validateDSN DSNValidator
 }
 
 // DSNSealer encrypts a source-database DSN before it reaches storage. The
@@ -247,6 +386,10 @@ type DSNSealer interface {
 	Seal(plaintext string) (keyID string, ciphertext []byte, err error)
 }
 
+// DSNValidator rejects a connection string the scanner could not use. The
+// service holds it as a function so the domain never depends on a driver.
+type DSNValidator func(dsn string) error
+
 // ServiceOption adjusts an optional service dependency.
 type ServiceOption func(*Service)
 
@@ -254,6 +397,13 @@ type ServiceOption func(*Service)
 // Without it, a data source can only reference an environment variable.
 func WithDSNSealer(sealer DSNSealer) ServiceOption {
 	return func(s *Service) { s.sealer = sealer }
+}
+
+// WithDSNValidator checks a connection string as it is saved, so an operator
+// learns it is unusable while the field is still in front of them rather than
+// from a scan that fails minutes later.
+func WithDSNValidator(validate DSNValidator) ServiceOption {
+	return func(s *Service) { s.validateDSN = validate }
 }
 
 func NewService(
@@ -286,11 +436,12 @@ func (s *Service) CreateDataSourceAsAdmin(
 	actor := strings.TrimSpace(command.Principal.Actor)
 	reason := strings.TrimSpace(command.Reason)
 	requestID := strings.TrimSpace(command.RequestID)
-	if actor == "" || len(actor) > 200 || reason == "" || len(reason) > 2000 ||
+	if actor == "" || len(actor) > 200 || len(reason) > 2000 ||
 		requestID == "" || len(requestID) > 200 ||
 		(command.Principal.Origin != audit.OriginAgent && command.Principal.Origin != audit.OriginWeb) {
 		return DataSource{}, ErrInvalidDataSource
 	}
+	reason = auditReason(reason, "Registered from the console")
 	return s.createDataSource(ctx, CreateDataSource{
 		ProjectID: command.ProjectID, Name: command.Name, Kind: command.Kind,
 		DSNEnvironment: command.DSNEnvironment, DSN: command.DSN,
@@ -321,7 +472,7 @@ func (s *Service) createDataSource(
 	if command.ProjectID <= 0 || command.Kind != DataSourceMySQL {
 		return DataSource{}, ErrInvalidDataSource
 	}
-	if name == "" || len(name) > 200 || !environmentNamePattern.MatchString(dsnEnvironment) {
+	if name == "" || len(name) > 200 || !validEnvironmentName(dsnEnvironment) {
 		return DataSource{}, ErrInvalidDataSource
 	}
 
@@ -583,6 +734,11 @@ func (s *Service) sealDSN(dsn string) (string, []byte, error) {
 	}
 	if len(trimmed) > MaximumDSNLength {
 		return "", nil, ErrInvalidDataSource
+	}
+	if s.validateDSN != nil {
+		if err := s.validateDSN(trimmed); err != nil {
+			return "", nil, fmt.Errorf("%w: %s", ErrUnusableDSN, err)
+		}
 	}
 	if s.sealer == nil {
 		return "", nil, ErrSealerUnavailable

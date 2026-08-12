@@ -8,10 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/benenen/dbgraph/internal/audit"
-	appauth "github.com/benenen/dbgraph/internal/auth"
 	"github.com/benenen/dbgraph/internal/conditions"
 	"github.com/benenen/dbgraph/internal/relations"
 )
@@ -20,70 +18,6 @@ const (
 	expectedProposalResponseCountBudget = 50
 	expectedProposalResponseByteBudget  = 1 << 20
 )
-
-func TestExpensiveReadRateLimitIsSharedByPrincipalAndNormalizedClientIP(t *testing.T) {
-	const secondToken = "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
-
-	tests := []struct {
-		name         string
-		credentials  []appauth.Credential
-		firstToken   string
-		secondToken  string
-		firstRemote  string
-		secondRemote string
-	}{
-		{
-			name: "principal across sessions and addresses",
-			credentials: []appauth.Credential{{
-				Token: testWebToken, Actor: "alice", Role: relations.RoleViewer, Origin: audit.OriginWeb,
-			}},
-			firstToken: testWebToken, secondToken: testWebToken,
-			firstRemote: "192.0.2.10:41000", secondRemote: "192.0.2.11:42000",
-		},
-		{
-			name: "normalized IP across principals",
-			credentials: []appauth.Credential{
-				{Token: testWebToken, Actor: "alice", Role: relations.RoleViewer, Origin: audit.OriginWeb},
-				{Token: secondToken, Actor: "bob", Role: relations.RoleViewer, Origin: audit.OriginWeb},
-			},
-			firstToken: testWebToken, secondToken: secondToken,
-			firstRemote: "[::ffff:192.0.2.20]:41000", secondRemote: "192.0.2.20:42000",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			authenticator, err := appauth.NewTokenAuthenticator(test.credentials)
-			if err != nil {
-				t.Fatal(err)
-			}
-			handler := NewHandler(
-				Services{Catalog: &catalogHTTPStub{}, Relations: &relationHTTPStub{}},
-				appauth.NewSessionManager(authenticator, time.Now, nil),
-			)
-			firstCookie := loginResourceLimitClient(t, handler, test.firstToken, test.firstRemote)
-			secondCookie := loginResourceLimitClient(t, handler, test.secondToken, test.secondRemote)
-
-			for attempt := 0; attempt < 30; attempt++ {
-				response := authenticatedResourceLimitGET(
-					handler, firstCookie, test.firstRemote,
-					"/api/v1/projects/10/nodes?q=student&limit=20",
-				)
-				if response.Code != http.StatusOK {
-					t.Fatalf("search %d status=%d body=%s", attempt+1, response.Code, response.Body.String())
-				}
-			}
-			limited := authenticatedResourceLimitGET(
-				handler, secondCookie, test.secondRemote,
-				"/api/v1/projects/10/relation-proposals?limit=20",
-			)
-			assertWebStatus(t, limited, http.StatusTooManyRequests, "RATE_LIMITED")
-			if limited.Header().Get("Retry-After") != "60" {
-				t.Fatalf("Retry-After=%q, want 60", limited.Header().Get("Retry-After"))
-			}
-		})
-	}
-}
 
 func TestProposalListPublishesCountAndByteTruncation(t *testing.T) {
 	t.Run("count budget", func(t *testing.T) {

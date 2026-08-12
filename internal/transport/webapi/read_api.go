@@ -31,13 +31,19 @@ type traceDTO struct {
 	MaxPaths     int             `json:"maxPaths,omitempty"`
 }
 
+// Page sizes are fixed server-side; clients no longer choose them.
+const (
+	defaultNodeSearchLimit = 20
+	defaultUnresolvedLimit = 20
+)
+
 func (h *handler) searchNodes(response http.ResponseWriter, request *http.Request) {
 	projectID, err := parseID(request.PathValue("projectID"))
 	if err != nil {
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
 		return
 	}
-	limit, err := queryLimit(request, 20, 100)
+	limit := defaultNodeSearchLimit
 	if h.services.Catalog == nil {
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
 		return
@@ -184,12 +190,12 @@ func (input traceDTO) toRequest(projectID int64) (graph.TraceRequest, error) {
 
 func (h *handler) listUnresolved(response http.ResponseWriter, request *http.Request) {
 	projectID, err := parseID(request.PathValue("projectID"))
-	limit, limitErr := queryLimit(request, 20, 100)
+	limit := defaultUnresolvedLimit
 	if h.services.Reconcile == nil {
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
 		return
 	}
-	if err != nil || limitErr != nil {
+	if err != nil {
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid unresolved query", nil)
 		return
 	}
@@ -253,16 +259,15 @@ func (h *handler) getInitSession(response http.ResponseWriter, request *http.Req
 
 func (h *handler) listAuditEvents(response http.ResponseWriter, request *http.Request) {
 	projectID, err := parseID(request.PathValue("projectID"))
-	limit, limitErr := queryLimit(request, 50, 1000)
 	if h.services.Audit == nil {
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
 		return
 	}
-	if err != nil || limitErr != nil {
+	if err != nil {
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid audit query", nil)
 		return
 	}
-	responseLimit := min(limit, maximumAuditResponseCount)
+	responseLimit := maximumAuditResponseCount
 	events, err := h.services.Audit.ListProject(request.Context(), projectID, responseLimit+1)
 	if err != nil {
 		if errors.Is(err, audit.ErrInvalidEvent) {
@@ -285,11 +290,7 @@ func (h *handler) listProjects(response http.ResponseWriter, request *http.Reque
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
 		return
 	}
-	limit, err := queryLimit(request, catalog.DefaultListLimit, catalog.MaximumListLimit)
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid limit", nil)
-		return
-	}
+	limit := catalog.DefaultListLimit
 	projects, err := h.services.Projects.List(request.Context(), limit)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, "INTERNAL", "request could not be completed", nil)
@@ -312,11 +313,7 @@ func (h *handler) listDataSources(response http.ResponseWriter, request *http.Re
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
 		return
 	}
-	limit, err := queryLimit(request, catalog.DefaultListLimit, catalog.MaximumListLimit)
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid limit", nil)
-		return
-	}
+	limit := catalog.DefaultListLimit
 	sources, err := h.services.Catalog.ListDataSources(request.Context(), projectID, limit)
 	if err != nil {
 		if errors.Is(err, catalog.ErrInvalidDataSource) {
@@ -347,11 +344,7 @@ func (h *handler) listRepositories(response http.ResponseWriter, request *http.R
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
 		return
 	}
-	limit, err := queryLimit(request, catalog.DefaultListLimit, catalog.MaximumListLimit)
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid limit", nil)
-		return
-	}
+	limit := catalog.DefaultListLimit
 	repositories, err := h.services.CodeRepositories.List(request.Context(), projectID, limit)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, "INTERNAL", "request could not be completed", nil)
@@ -362,18 +355,6 @@ func (h *handler) listRepositories(response http.ResponseWriter, request *http.R
 		output[index] = mapCodeRepository(repository)
 	}
 	writeJSON(response, http.StatusOK, output)
-}
-
-func queryLimit(request *http.Request, fallback int, maximum int) (int, error) {
-	value := request.URL.Query().Get("limit")
-	if value == "" {
-		return fallback, nil
-	}
-	limit, err := strconv.Atoi(value)
-	if err != nil || limit < 1 || limit > maximum {
-		return 0, errors.New("invalid limit")
-	}
-	return limit, nil
 }
 
 func pathProjectSubjectIDs(response http.ResponseWriter, request *http.Request, subject string) (int64, int64, bool) {

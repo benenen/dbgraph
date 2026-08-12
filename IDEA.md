@@ -371,7 +371,8 @@
   - expectedRevisionNo mismatch returns 409 with the current revision; never last-write-wins
   - parameterized SQLite queries only
   - escape all labels, reasons and evidence when rendering; do not render user HTML
-  - rate-limit state-changing routes and return generic errors without stack traces
+  - return generic errors without stack traces
+  - the Web adapter does not rate-limit. Page sizes are fixed server-side rather than taken from a `limit` query parameter, and state-changing routes are POST with a CSRF token. The MCP adapter keeps its own limits, because an Agent drives it unattended
   - write actor, origin=WEB, reason, requestId, expectedRevisionNo and timestamp to the audit log
 
   MCP tools：

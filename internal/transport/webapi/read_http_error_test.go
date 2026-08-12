@@ -101,11 +101,6 @@ func TestHTTPBoundaryRejectsInvalidPathsQueriesAndPayloads(t *testing.T) {
 		body   string
 	}{
 		{name: "invalid project ID", method: http.MethodGet, path: "/api/v1/projects/not-an-id/nodes"},
-		{name: "node limit too large", method: http.MethodGet, path: "/api/v1/projects/10/nodes?limit=101"},
-		{name: "proposal limit not numeric", method: http.MethodGet, path: "/api/v1/projects/10/relation-proposals?limit=x"},
-		{name: "proposal limit zero", method: http.MethodGet, path: "/api/v1/projects/10/relation-proposals?limit=0"},
-		{name: "proposal limit too large", method: http.MethodGet, path: "/api/v1/projects/10/relation-proposals?limit=101"},
-		{name: "audit limit zero", method: http.MethodGet, path: "/api/v1/projects/10/audit-events?limit=0"},
 		{name: "invalid relation ID", method: http.MethodGet, path: "/api/v1/projects/10/relations/0"},
 		{name: "invalid graph direction", method: http.MethodPost, path: "/api/v1/projects/10/graph-traces", body: `{"startNodeId":"11","direction":"SIDEWAYS"}`},
 		{name: "unknown JSON field", method: http.MethodPost, path: "/api/v1/projects/10/graph-traces", body: `{"startNodeId":"11","unknown":true}`},

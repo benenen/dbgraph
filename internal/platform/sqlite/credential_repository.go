@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	appauth "github.com/benenen/dbgraph/internal/auth"
@@ -56,6 +57,36 @@ ON CONFLICT(actor) DO UPDATE SET
 		return fmt.Errorf("sync access credentials: %w", err)
 	}
 	return nil
+}
+
+// PruneUnknownActors deletes stored credentials for actors the current scheme
+// no longer issues. Without it, tokens seeded under an earlier scheme would go
+// on authenticating forever, because nothing else ever removes a credential.
+func (r *CredentialRepository) PruneUnknownActors(ctx context.Context, known []string) (int64, error) {
+	if len(known) == 0 {
+		return 0, nil
+	}
+	placeholders := make([]string, len(known))
+	arguments := make([]any, len(known))
+	for index, actor := range known {
+		placeholders[index] = "?"
+		arguments[index] = actor
+	}
+	var removed int64
+	err := r.store.write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx,
+			"DELETE FROM access_credentials WHERE actor NOT IN ("+strings.Join(placeholders, ",")+")",
+			arguments...)
+		if err != nil {
+			return err
+		}
+		removed, err = result.RowsAffected()
+		return err
+	})
+	if err != nil {
+		return 0, fmt.Errorf("prune access credentials: %w", err)
+	}
+	return removed, nil
 }
 
 // ListCredentials returns every stored credential.

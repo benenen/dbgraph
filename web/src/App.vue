@@ -12,23 +12,17 @@ const router = useRouter();
 const session = ref<Session | null>(null);
 const ready = ref(false);
 
-// Data sources belong to a project, so the entry is meaningful only once one is
-// open. The open project comes from the route, never from a picker.
-const openProjectId = computed(() => (route.params.projectId as string | undefined) ?? "");
-
-const navigation = computed(() => [
-  { label: "Projects", icon: "pi pi-folder", to: { name: "projects" }, enabled: true },
-  {
-    label: "Data sources",
-    icon: "pi pi-database",
-    to: openProjectId.value
-      ? { name: "data-sources", params: { projectId: openProjectId.value } }
-      : { name: "projects" },
-    enabled: Boolean(openProjectId.value),
-  },
-]);
+// Both destinations stand on their own: data sources are shared across
+// projects, so the registry is reachable whether or not a project is open.
+const navigation = [
+  { label: "Projects", icon: "pi pi-folder", route: "projects" },
+  { label: "Data sources", icon: "pi pi-database", route: "data-sources" },
+];
 
 function isActive(name: string): boolean {
+  // A project's linked sources belong under Projects, which is where the
+  // navigation started.
+  if (name === "projects") return route.name === "projects" || route.name === "project-sources";
   return route.name === name;
 }
 
@@ -84,15 +78,13 @@ const chromeless = computed(() => route.meta.public === true);
         <RouterLink
           v-for="item in navigation"
           :key="item.label"
-          :to="item.to"
+          :to="{ name: item.route }"
           class="nav-item"
-          :class="{ active: isActive(item.label === 'Projects' ? 'projects' : 'data-sources'), disabled: !item.enabled }"
-          :aria-disabled="!item.enabled"
+          :class="{ active: isActive(item.route) }"
         >
           <i :class="item.icon" />
           <span>{{ item.label }}</span>
         </RouterLink>
-        <p v-if="!openProjectId" class="nav-hint">Open a project to reach its data sources.</p>
       </nav>
 
       <main class="workspace">

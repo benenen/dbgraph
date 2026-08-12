@@ -193,12 +193,7 @@ func (h *handler) listProposals(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
 		return
 	}
-	limit, err := queryLimit(request, 20, 100)
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid limit", nil)
-		return
-	}
-	responseCountLimit := min(limit, maximumProposalResponseCount)
+	responseCountLimit := maximumProposalResponseCount
 	repositoryLimit := responseCountLimit + 1
 	relationsFound, err := h.services.Relations.ListProposals(request.Context(), projectID, repositoryLimit)
 	if err != nil {

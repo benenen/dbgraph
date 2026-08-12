@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -42,6 +43,8 @@ type ProjectRepository interface {
 	CreateProjectWithAudit(context.Context, Project, audit.Event) error
 	GetProject(context.Context, int64) (Project, error)
 	ListProjects(context.Context, int) ([]Project, error)
+	UpdateProjectWithAudit(context.Context, Project, audit.Event) error
+	ArchiveProject(context.Context, int64, time.Time) error
 }
 
 type ProjectIDGenerator interface {
@@ -70,7 +73,7 @@ func (s *ProjectService) Create(ctx context.Context, command CreateProject) (Pro
 }
 
 func (s *ProjectService) CreateAsAdmin(ctx context.Context, command AdminCreateProject) (Project, error) {
-	actor, reason, requestID, err := validateAdminMetadata(command.Principal, command.Reason, command.RequestID)
+	actor, reason, requestID, err := validateAdminMetadata(command.Principal, command.Reason, command.RequestID, "Created from the console")
 	if err != nil {
 		return Project{}, err
 	}
@@ -121,19 +124,24 @@ func (s *ProjectService) create(ctx context.Context, command CreateProject, audi
 	return project, nil
 }
 
-func validateAdminMetadata(principal relations.Principal, reason string, requestID string) (string, string, string, error) {
+func validateAdminMetadata(
+	principal relations.Principal,
+	reason string,
+	requestID string,
+	fallbackReason string,
+) (string, string, string, error) {
 	if principal.Role != relations.RoleAdmin {
 		return "", "", "", ErrForbidden
 	}
 	actor := strings.TrimSpace(principal.Actor)
 	reason = strings.TrimSpace(reason)
 	requestID = strings.TrimSpace(requestID)
-	if actor == "" || len(actor) > 200 || reason == "" || len(reason) > 2000 ||
+	if actor == "" || len(actor) > 200 || len(reason) > 2000 ||
 		requestID == "" || len(requestID) > 200 ||
 		(principal.Origin != audit.OriginAgent && principal.Origin != audit.OriginWeb) {
 		return "", "", "", ErrInvalidProject
 	}
-	return actor, reason, requestID, nil
+	return actor, auditReason(reason, fallbackReason), requestID, nil
 }
 
 func (s *ProjectService) Get(ctx context.Context, projectID int64) (Project, error) {
@@ -145,4 +153,66 @@ func (s *ProjectService) Get(ctx context.Context, projectID int64) (Project, err
 
 func (s *ProjectService) List(ctx context.Context, limit int) ([]Project, error) {
 	return s.repository.ListProjects(ctx, clampListLimit(limit))
+}
+
+// AdminUpdateProject renames or re-describes a project.
+type AdminUpdateProject struct {
+	ProjectID   int64
+	Name        string
+	Description string
+	Principal   relations.Principal
+	Reason      string
+	RequestID   string
+}
+
+// UpdateAsAdmin changes a project's descriptive fields and records who did it.
+func (s *ProjectService) UpdateAsAdmin(ctx context.Context, command AdminUpdateProject) (Project, error) {
+	if command.Principal.Role != relations.RoleAdmin {
+		return Project{}, ErrForbidden
+	}
+	name := strings.TrimSpace(command.Name)
+	description := strings.TrimSpace(command.Description)
+	actor := strings.TrimSpace(command.Principal.Actor)
+	reason := strings.TrimSpace(command.Reason)
+	requestID := strings.TrimSpace(command.RequestID)
+	if command.ProjectID <= 0 || name == "" || len(name) > 200 || len(description) > 2000 ||
+		actor == "" || len(actor) > 200 || len(reason) > 2000 ||
+		requestID == "" || len(requestID) > 200 {
+		return Project{}, ErrInvalidProject
+	}
+	reason = auditReason(reason, "Updated from the console")
+
+	existing, err := s.repository.GetProject(ctx, command.ProjectID)
+	if err != nil {
+		return Project{}, err
+	}
+	eventID, err := s.ids.Next(ctx)
+	if err != nil {
+		return Project{}, fmt.Errorf("generate audit event ID: %w", err)
+	}
+	now := s.now().UTC()
+	updated := existing
+	updated.Name = name
+	updated.Description = description
+	updated.UpdatedAt = now
+
+	details, _ := json.Marshal(map[string]string{"name": name})
+	event := audit.Event{
+		ID: eventID, ProjectID: updated.ID, Actor: actor, Origin: command.Principal.Origin,
+		Action: "PROJECT_UPDATED", SubjectType: "PROJECT", SubjectID: updated.ID,
+		Reason: reason, RequestID: requestID, Details: details, OccurredAt: now,
+	}
+	if err := s.repository.UpdateProjectWithAudit(ctx, updated, event); err != nil {
+		return Project{}, err
+	}
+	return updated, nil
+}
+
+// Delete retires a project. It archives rather than removes, because the
+// project's audit history is append-only and must outlive it.
+func (s *ProjectService) Delete(ctx context.Context, projectID int64) error {
+	if projectID <= 0 {
+		return ErrInvalidProject
+	}
+	return s.repository.ArchiveProject(ctx, projectID, s.now().UTC())
 }

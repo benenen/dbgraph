@@ -93,8 +93,8 @@ func TestServeBootstrapsFreshDatabaseAndBecomesHealthy(t *testing.T) {
 	if envelope.Data.Status != "UP" {
 		t.Fatalf("health status value = %q, want UP", envelope.Data.Status)
 	}
-	if envelope.Data.SchemaVersion != 10 {
-		t.Fatalf("health schema version = %d, want 10", envelope.Data.SchemaVersion)
+	if envelope.Data.SchemaVersion != 12 {
+		t.Fatalf("health schema version = %d, want 12", envelope.Data.SchemaVersion)
 	}
 	if envelope.Error != nil {
 		t.Fatalf("health error = %#v, want null", envelope.Error)

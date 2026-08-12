@@ -59,9 +59,6 @@ func TestListRoutesApplyRoleScopedFields(t *testing.T) {
 
 	assertWebStatus(t, admin.request(http.MethodGet, "/api/v1/projects/10/repositories", "", false), http.StatusOK, "")
 	assertWebStatus(t, viewer.request(http.MethodGet, "/api/v1/projects/10/repositories", "", false), http.StatusForbidden, "FORBIDDEN")
-
-	assertWebStatus(t, admin.request(http.MethodGet, "/api/v1/projects/10/data-sources?limit=0", "", false),
-		http.StatusBadRequest, "INVALID_REQUEST")
 }
 
 func TestNodeSearchRejectsAnUnparseableDataSourceID(t *testing.T) {

@@ -44,7 +44,7 @@ func (r *CatalogRepository) CreateDataSource(
 		return insertDataSource(ctx, tx, source, projectID)
 	})
 	if err != nil {
-		return fmt.Errorf("insert data source: %w", err)
+		return translateDataSourceWrite(err)
 	}
 	return nil
 }
@@ -62,7 +62,7 @@ func (r *CatalogRepository) CreateDataSourceWithAudit(
 		return insertAuditEvent(ctx, tx, event)
 	})
 	if err != nil {
-		return fmt.Errorf("insert audited data source: %w", err)
+		return translateDataSourceWrite(err)
 	}
 	return nil
 }
@@ -97,6 +97,181 @@ VALUES (?, ?, ?)
 ON CONFLICT(project_id, data_source_id) DO NOTHING
 `, projectID, dataSourceID, at.Format(time.RFC3339Nano))
 	return err
+}
+
+// ListAllDataSources returns the shared registry, so a project can adopt a
+// source that already exists instead of registering it twice.
+func (r *CatalogRepository) ListAllDataSources(
+	ctx context.Context,
+	limit int,
+) (sources []catalog.DataSource, returnError error) {
+	rows, err := r.store.db.QueryContext(ctx, `
+SELECT id, name, source_kind, dsn_environment, dsn_key_id, dsn_ciphertext, created_at, updated_at
+FROM data_sources
+ORDER BY name, id
+LIMIT ?
+`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("select data sources: %w", err)
+	}
+	defer func() { returnError = errors.Join(returnError, rows.Close()) }()
+
+	for rows.Next() {
+		source, err := scanDataSourceRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		sources = append(sources, source)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate data sources: %w", err)
+	}
+	return sources, nil
+}
+
+// LinkDataSource adopts an existing source into a project.
+func (r *CatalogRepository) LinkDataSource(ctx context.Context, projectID int64, dataSourceID int64, at time.Time) error {
+	err := r.store.write(ctx, func(tx *sql.Tx) error {
+		var exists int
+		if err := tx.QueryRowContext(ctx,
+			"SELECT EXISTS(SELECT 1 FROM data_sources WHERE id = ?)", dataSourceID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists != 1 {
+			return catalog.ErrDataSourceNotFound
+		}
+		return linkDataSource(ctx, tx, projectID, dataSourceID, at)
+	})
+	if err != nil {
+		if errors.Is(err, catalog.ErrDataSourceNotFound) {
+			return err
+		}
+		return fmt.Errorf("link data source: %w", err)
+	}
+	return nil
+}
+
+// UnlinkDataSource drops the adoption. The source and any catalog the project
+// already scanned from it stay put; only the association goes.
+func (r *CatalogRepository) UnlinkDataSource(ctx context.Context, projectID int64, dataSourceID int64) error {
+	err := r.store.write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx,
+			"DELETE FROM project_data_sources WHERE project_id = ? AND data_source_id = ?",
+			projectID, dataSourceID)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("unlink data source: %w", err)
+	}
+	return nil
+}
+
+// UpdateDataSourceWithAudit renames a source and optionally replaces its
+// sealed DSN. A nil ciphertext leaves the stored credential exactly as it is,
+// because the connection string is write-only and the caller cannot echo back
+// what it does not know.
+func (r *CatalogRepository) UpdateDataSourceWithAudit(
+	ctx context.Context,
+	source catalog.DataSource,
+	replaceSecret bool,
+	event audit.Event,
+) error {
+	err := r.store.write(ctx, func(tx *sql.Tx) error {
+		var result sql.Result
+		var err error
+		if replaceSecret {
+			result, err = tx.ExecContext(ctx, `
+UPDATE data_sources
+SET name = ?, dsn_environment = ?, dsn_key_id = ?, dsn_ciphertext = ?, updated_at = ?
+WHERE id = ?
+`, source.Name, source.DSNEnvironment, optionalText(source.DSNKeyID),
+				optionalBlob(source.DSNCiphertext), source.UpdatedAt.Format(time.RFC3339Nano), source.ID)
+		} else {
+			result, err = tx.ExecContext(ctx, `
+UPDATE data_sources SET name = ?, dsn_environment = ?, updated_at = ?
+WHERE id = ?
+`, source.Name, source.DSNEnvironment, source.UpdatedAt.Format(time.RFC3339Nano), source.ID)
+		}
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected == 0 {
+			return catalog.ErrDataSourceNotFound
+		}
+		return insertAuditEvent(ctx, tx, event)
+	})
+	if err != nil {
+		if errors.Is(err, catalog.ErrDataSourceNotFound) {
+			return err
+		}
+		return translateDataSourceWrite(err)
+	}
+	return nil
+}
+
+// DeleteDataSource removes a source, every project's link to it, and the scan
+// runs that recorded the attempts to read it. It is refused only while catalog
+// nodes exist, because those are the imported data itself and deleting the
+// source would orphan them. A source whose scans all failed imported nothing,
+// and that is exactly the misconfigured source an operator needs to remove.
+func (r *CatalogRepository) DeleteDataSource(ctx context.Context, dataSourceID int64) error {
+	err := r.store.write(ctx, func(tx *sql.Tx) error {
+		var importedNodes int
+		if err := tx.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM nodes WHERE data_source_id = ?", dataSourceID).Scan(&importedNodes); err != nil {
+			return err
+		}
+		if importedNodes > 0 {
+			return catalog.ErrDataSourceInUse
+		}
+		var referencedContent int
+		if err := tx.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM relation_evidence WHERE data_source_id = ?",
+			dataSourceID).Scan(&referencedContent); err != nil {
+			return err
+		}
+		if referencedContent > 0 {
+			return catalog.ErrDataSourceInUse
+		}
+		// Scan artifacts describe attempts to read a source that is going away.
+		for _, table := range []string{
+			"schema_scan_foreign_keys",
+			"declared_foreign_key_relations",
+			"schema_scan_runs",
+		} {
+			if _, err := tx.ExecContext(ctx,
+				"DELETE FROM "+table+" WHERE data_source_id = ?", dataSourceID); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM project_data_sources WHERE data_source_id = ?", dataSourceID); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, "DELETE FROM data_sources WHERE id = ?", dataSourceID)
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected == 0 {
+			return catalog.ErrDataSourceNotFound
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, catalog.ErrDataSourceInUse) || errors.Is(err, catalog.ErrDataSourceNotFound) {
+			return err
+		}
+		return fmt.Errorf("delete data source: %w", err)
+	}
+	return nil
 }
 
 // GetProjectDataSource returns a data source only when the project links it,
@@ -802,26 +977,9 @@ LIMIT ?
 	defer func() { returnError = errors.Join(returnError, rows.Close()) }()
 
 	for rows.Next() {
-		var source catalog.DataSource
-		var createdAt string
-		var updatedAt string
-		var keyID sql.NullString
-		var ciphertext []byte
-		if err := rows.Scan(
-			&source.ID, &source.Name, &source.Kind,
-			&source.DSNEnvironment, &keyID, &ciphertext, &createdAt, &updatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan data source: %w", err)
-		}
-		source.DSNKeyID = keyID.String
-		source.DSNCiphertext = ciphertext
-		source.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+		source, err := scanDataSourceRow(rows)
 		if err != nil {
-			return nil, fmt.Errorf("parse data source creation time: %w", err)
-		}
-		source.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt)
-		if err != nil {
-			return nil, fmt.Errorf("parse data source update time: %w", err)
+			return nil, err
 		}
 		sources = append(sources, source)
 	}
@@ -843,4 +1001,42 @@ func optionalBlob(value []byte) any {
 		return nil
 	}
 	return value
+}
+
+// translateDataSourceWrite turns the name collision into a client-facing error.
+// Data source names are unique service-wide now that projects share them, so
+// this is a routine mistake rather than an internal fault.
+func translateDataSourceWrite(err error) error {
+	if strings.Contains(err.Error(), "UNIQUE constraint failed: data_sources.name") {
+		return catalog.ErrDataSourceNameTaken
+	}
+	return fmt.Errorf("insert data source: %w", err)
+}
+
+type rowScanner interface {
+	Scan(destination ...any) error
+}
+
+func scanDataSourceRow(row rowScanner) (catalog.DataSource, error) {
+	var source catalog.DataSource
+	var createdAt string
+	var updatedAt string
+	var keyID sql.NullString
+	var ciphertext []byte
+	if err := row.Scan(
+		&source.ID, &source.Name, &source.Kind,
+		&source.DSNEnvironment, &keyID, &ciphertext, &createdAt, &updatedAt,
+	); err != nil {
+		return catalog.DataSource{}, fmt.Errorf("scan data source: %w", err)
+	}
+	source.DSNKeyID = keyID.String
+	source.DSNCiphertext = ciphertext
+	var err error
+	if source.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
+		return catalog.DataSource{}, fmt.Errorf("parse data source creation time: %w", err)
+	}
+	if source.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt); err != nil {
+		return catalog.DataSource{}, fmt.Errorf("parse data source update time: %w", err)
+	}
+	return source, nil
 }

@@ -22,6 +22,12 @@ func (s *listProjectStub) CreateProjectWithAudit(context.Context, catalog.Projec
 func (s *listProjectStub) GetProject(context.Context, int64) (catalog.Project, error) {
 	return catalog.Project{}, catalog.ErrProjectNotFound
 }
+func (s *listProjectStub) ArchiveProject(context.Context, int64, time.Time) error { return nil }
+
+func (s *listProjectStub) UpdateProjectWithAudit(context.Context, catalog.Project, audit.Event) error {
+	return nil
+}
+
 func (s *listProjectStub) ListProjects(_ context.Context, limit int) ([]catalog.Project, error) {
 	s.limit = limit
 	return s.projects, nil
@@ -91,6 +97,20 @@ func (s *listCatalogStub) GetProjectDataSource(ctx context.Context, _ int64, dat
 }
 func (s *listCatalogStub) ListDataSources(context.Context, int64, int) ([]catalog.DataSource, error) {
 	return s.sources, nil
+}
+
+func (s *listCatalogStub) ListAllDataSources(context.Context, int) ([]catalog.DataSource, error) {
+	return s.sources, nil
+}
+
+func (s *listCatalogStub) LinkDataSource(context.Context, int64, int64, time.Time) error { return nil }
+
+func (s *listCatalogStub) UnlinkDataSource(context.Context, int64, int64) error { return nil }
+
+func (s *listCatalogStub) DeleteDataSource(context.Context, int64) error { return nil }
+
+func (s *listCatalogStub) UpdateDataSourceWithAudit(context.Context, catalog.DataSource, bool, audit.Event) error {
+	return nil
 }
 func (s *listCatalogStub) BeginSchemaScan(context.Context, catalog.SchemaScanRun) error { return nil }
 func (s *listCatalogStub) FailSchemaScan(context.Context, catalog.SchemaScanFailure) error {

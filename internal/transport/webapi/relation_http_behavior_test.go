@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/benenen/dbgraph/internal/audit"
-	"github.com/benenen/dbgraph/internal/graph"
 	"github.com/benenen/dbgraph/internal/relations"
 )
 
@@ -124,34 +123,6 @@ func TestRelationMutationsEnforceRoleAndCSRFBeforeServiceCalls(t *testing.T) {
 	assertWebStatus(t, withoutCSRF, http.StatusForbidden, "CSRF_REJECTED")
 	if service.mutationCalls != 0 {
 		t.Fatalf("mutation calls=%d", service.mutationCalls)
-	}
-}
-
-func TestGraphTraceUsesExpensiveReadLimitWithoutConsumingWriteBudget(t *testing.T) {
-	service := &graphHTTPStub{result: graph.TraceResult{}}
-	relationsService := &relationHTTPStub{relation: relations.Relation{
-		ID: 20, ProjectID: 10, Type: relations.TypeConditionalValueCopy,
-		LatestRevisionNo: 1, Status: relations.StatusPending, CreatedAt: testWebTime,
-	}}
-	client := newWebTestClient(t, Services{Graph: service, Relations: relationsService}, relations.RoleEditor)
-	body := `{"startNodeId":"11","direction":"DOWNSTREAM"}`
-	for attempt := 1; attempt <= maximumExpensiveReadsPerMinute+1; attempt++ {
-		response := client.request(http.MethodPost, "/api/v1/projects/10/graph-traces", body, true)
-		if attempt <= maximumExpensiveReadsPerMinute {
-			assertWebStatus(t, response, http.StatusOK, "")
-			continue
-		}
-		assertWebStatus(t, response, http.StatusTooManyRequests, "RATE_LIMITED")
-		if response.Header().Get("Retry-After") != "60" {
-			t.Fatalf("Retry-After=%q", response.Header().Get("Retry-After"))
-		}
-	}
-	if service.calls != maximumExpensiveReadsPerMinute {
-		t.Fatalf("trace calls=%d want=%d", service.calls, maximumExpensiveReadsPerMinute)
-	}
-	writeResponse := client.request(http.MethodPost, "/api/v1/projects/10/relations", validRelationBody, true)
-	if writeResponse.Code != http.StatusCreated || relationsService.mutationCalls != 1 {
-		t.Fatalf("write after read limit status=%d calls=%d body=%s", writeResponse.Code, relationsService.mutationCalls, writeResponse.Body.String())
 	}
 }
 

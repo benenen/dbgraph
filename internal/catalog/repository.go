@@ -80,7 +80,7 @@ func (s *CodeRepositoryService) CreateAsAdmin(
 	ctx context.Context,
 	command AdminCreateCodeRepository,
 ) (CodeRepository, error) {
-	actor, reason, requestID, err := validateAdminMetadata(command.Principal, command.Reason, command.RequestID)
+	actor, reason, requestID, err := validateAdminMetadata(command.Principal, command.Reason, command.RequestID, "Registered from the console")
 	if err != nil {
 		return CodeRepository{}, err
 	}

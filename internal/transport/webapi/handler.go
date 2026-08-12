@@ -36,11 +36,18 @@ type CatalogService interface {
 	GetCurrentNode(context.Context, int64, int64) (catalog.Node, error)
 	SearchCurrentNodes(context.Context, int64, int64, string, int) ([]catalog.Node, error)
 	ListDataSources(context.Context, int64, int) ([]catalog.DataSource, error)
+	ListAllDataSources(context.Context, int) ([]catalog.DataSource, error)
+	LinkDataSource(context.Context, int64, int64) error
+	UnlinkDataSource(context.Context, int64, int64) error
+	DeleteDataSource(context.Context, int64) error
+	UpdateDataSourceAsAdmin(context.Context, catalog.AdminUpdateDataSource) (catalog.DataSource, error)
 }
 
 type ProjectService interface {
 	CreateAsAdmin(context.Context, catalog.AdminCreateProject) (catalog.Project, error)
 	List(context.Context, int) ([]catalog.Project, error)
+	Delete(context.Context, int64) error
+	UpdateAsAdmin(context.Context, catalog.AdminUpdateProject) (catalog.Project, error)
 }
 
 type CodeRepositoryService interface {
@@ -103,9 +110,6 @@ type handler struct {
 	services   Services
 	sessions   *appauth.SessionManager
 	mux        *http.ServeMux
-	writes     *principalIPLimiter
-	reads      *principalIPLimiter
-	logins     *loginLimiter
 	cookieName string
 	secure     bool
 }
@@ -127,7 +131,6 @@ func WithCleartextCookies() Option {
 func NewHandler(services Services, sessions *appauth.SessionManager, options ...Option) http.Handler {
 	h := &handler{
 		services: services, sessions: sessions, mux: http.NewServeMux(),
-		writes: newPrincipalIPLimiter(), reads: newPrincipalIPLimiter(), logins: newLoginLimiter(),
 		cookieName: sessionCookieName, secure: true,
 	}
 	for _, option := range options {
@@ -136,25 +139,32 @@ func NewHandler(services Services, sessions *appauth.SessionManager, options ...
 	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/relations", h.proposeRelation)
 	h.mux.HandleFunc("POST /api/v1/projects", h.createProject)
 	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/repositories", h.createCodeRepository)
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/relations/{relationID}", h.limitExpensiveRead(h.getRelation))
+	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/relations/{relationID}", h.getRelation)
 	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/relations/{relationID}/revisions", h.proposeRevision)
 	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/relations/{relationID}/tombstones", h.proposeTombstone)
 	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/relations/{relationID}/reviews", h.reviewRelation)
 	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/relations/{relationID}/suppress", h.suppressRelation)
 	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/relations/{relationID}/restore", h.restoreRelation)
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/relation-proposals", h.limitExpensiveRead(h.listProposals))
+	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/relation-proposals", h.listProposals)
 	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/data-sources", h.createDataSource)
 	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/data-sources/{dataSourceID}/schema-scan-jobs", h.startSchemaScan)
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/nodes", h.limitExpensiveRead(h.searchNodes))
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/nodes/{nodeID}", h.limitExpensiveRead(h.getNode))
-	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/graph-traces", h.limitExpensiveRead(h.traceGraph))
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/unresolved-findings", h.limitExpensiveRead(h.listUnresolved))
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/schema-scan-jobs/{jobID}", h.limitExpensiveRead(h.getJob))
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/relation-init-sessions/{sessionID}", h.limitExpensiveRead(h.getInitSession))
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/audit-events", h.limitExpensiveRead(h.listAuditEvents))
-	h.mux.HandleFunc("GET /api/v1/projects", h.limitExpensiveRead(h.listProjects))
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/data-sources", h.limitExpensiveRead(h.listDataSources))
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/repositories", h.limitExpensiveRead(h.listRepositories))
+	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/nodes", h.searchNodes)
+	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/nodes/{nodeID}", h.getNode)
+	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/graph-traces", h.traceGraph)
+	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/unresolved-findings", h.listUnresolved)
+	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/schema-scan-jobs/{jobID}", h.getJob)
+	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/relation-init-sessions/{sessionID}", h.getInitSession)
+	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/audit-events", h.listAuditEvents)
+	h.mux.HandleFunc("GET /api/v1/projects", h.listProjects)
+	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/data-sources", h.listDataSources)
+	h.mux.HandleFunc("GET /api/v1/data-sources", h.listAllDataSources)
+	h.mux.HandleFunc("POST /api/v1/data-sources/{dataSourceID}/delete", h.deleteDataSource)
+	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/delete", h.deleteProject)
+	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/update", h.updateProject)
+	h.mux.HandleFunc("POST /api/v1/data-sources/{dataSourceID}/update", h.updateDataSource)
+	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/data-sources/{dataSourceID}/link", h.linkDataSource)
+	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/data-sources/{dataSourceID}/unlink", h.unlinkDataSource)
+	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/repositories", h.listRepositories)
 	h.mux.HandleFunc("GET /api/v1/session", h.getSession)
 	h.mux.HandleFunc("POST /logout", h.logout)
 	protection := http.NewCrossOriginProtection()
@@ -186,31 +196,8 @@ func (h *handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 			return
 		}
 	}
-	if isStateChanging(request.Method) && !isGraphTrace(request) {
-		if !h.writes.Allow(session.Principal, webClientIP(request.RemoteAddr), time.Now().UTC(), maximumWritesPerMinute) {
-			response.Header().Set("Retry-After", "60")
-			writeError(response, http.StatusTooManyRequests, "RATE_LIMITED", "too many state-changing requests", nil)
-			return
-		}
-	}
 	ctx := context.WithValue(request.Context(), sessionContextKey, requestSession{token: cookie.Value, session: session})
 	h.mux.ServeHTTP(response, request.WithContext(ctx))
-}
-
-func (h *handler) limitExpensiveRead(next http.HandlerFunc) http.HandlerFunc {
-	return func(response http.ResponseWriter, request *http.Request) {
-		principal := currentSession(request).session.Principal
-		if !h.reads.Allow(principal, webClientIP(request.RemoteAddr), time.Now().UTC(), maximumExpensiveReadsPerMinute) {
-			response.Header().Set("Retry-After", "60")
-			writeError(response, http.StatusTooManyRequests, "RATE_LIMITED", "too many expensive read requests", nil)
-			return
-		}
-		next(response, request)
-	}
-}
-
-func isGraphTrace(request *http.Request) bool {
-	return request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/graph-traces")
 }
 
 func (h *handler) login(response http.ResponseWriter, request *http.Request) {
@@ -219,11 +206,6 @@ func (h *handler) login(response http.ResponseWriter, request *http.Request) {
 	}
 	if err := decodeJSON(response, request, 8<<10, &input); err != nil {
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid login request", nil)
-		return
-	}
-	if !h.logins.Allow(webClientIP(request.RemoteAddr), input.Token, time.Now().UTC()) {
-		response.Header().Set("Retry-After", "60")
-		writeError(response, http.StatusTooManyRequests, "RATE_LIMITED", "too many login attempts", nil)
 		return
 	}
 	token, session, err := h.sessions.Create(strings.TrimSpace(input.Token))

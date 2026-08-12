@@ -20,13 +20,13 @@ The Makefile drives local development. `make run` builds `./bin/dbgraph` and ser
 make run
 ```
 
-Open `http://127.0.0.1:8080/` and sign in with the `DBGRAPH_WEB_ADMIN_TOKEN` printed at startup. Health is at `/healthz` and the Streamable HTTP MCP endpoint at `/mcp`, where loopback callers get anonymous Viewer access. `make watch` does the same and rebuilds and restarts on every source change; a failed build leaves the running process untouched.
+Open `http://127.0.0.1:8080/` and sign in with the `DBGRAPH_WEB_TOKEN` printed at startup. Health is at `/healthz` and the Streamable HTTP MCP endpoint at `/mcp`, where loopback callers get anonymous Viewer access. `make watch` does the same and rebuilds and restarts on every source change; a failed build leaves the running process untouched.
 
 Web sign-in over cleartext is an explicit development opt-in, because the `__Host-` session cookie requires HTTPS and dbgraph otherwise refuses to start with `DBGRAPH_WEB_*` tokens and no TLS. `make run` passes `--insecure-cleartext-web`, which:
 
 - is rejected unless the listener is loopback, and cannot be combined with TLS;
 - issues the session cookie as `dbgraph-session` without the `__Host-` prefix and without `Secure`, so a browser keeps it over HTTP;
-- keeps CSRF tokens, `HttpOnly`, `SameSite=Strict`, role authorization, rate limits, and audit unchanged;
+- keeps CSRF tokens, `HttpOnly`, `SameSite=Strict`, role authorization, and audit unchanged;
 - prints a warning at startup.
 
 The session cookie and every token cross the loopback interface unencrypted in that mode, and any local process can read them. Use TLS for anything another host can reach:
@@ -43,7 +43,7 @@ Development credentials are generated once into `.dbgraph-local/dev.env` and the
 
 ```sh
 go build -o ./bin/dbgraph ./cmd/dbgraph
-export DBGRAPH_WEB_ADMIN_TOKEN="$(openssl rand -hex 32)"
+export DBGRAPH_WEB_TOKEN="$(openssl rand -hex 32)"
 ./bin/dbgraph serve --database ./dbgraph.sqlite --listen 127.0.0.1:8080 \
   --insecure-cleartext-web
 ```
@@ -54,8 +54,8 @@ openssl req -x509 -newkey rsa:3072 -sha256 -days 30 -nodes \
   -keyout .dbgraph-local/key.pem -out .dbgraph-local/cert.pem \
   -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
 chmod 600 .dbgraph-local/key.pem
-export DBGRAPH_WEB_ADMIN_TOKEN="$(openssl rand -hex 32)"
-export DBGRAPH_MCP_AGENT_TOKEN="$(openssl rand -hex 32)"
+export DBGRAPH_WEB_TOKEN="$(openssl rand -hex 32)"
+export DBGRAPH_MCP_TOKEN="$(openssl rand -hex 32)"
 ./bin/dbgraph serve --database ./dbgraph.sqlite --listen 127.0.0.1:8080 \
   --tls-cert .dbgraph-local/cert.pem --tls-key .dbgraph-local/key.pem
 ```
@@ -63,7 +63,6 @@ export DBGRAPH_MCP_AGENT_TOKEN="$(openssl rand -hex 32)"
 The serving process is the only SQLite writer. `dbgraph mcp` is a stdio-to-HTTP transport proxy and never opens the database. `make mcp` runs it against the local server using the matching scheme, or run it directly:
 
 ```sh
-DBGRAPH_MCP_TOKEN="$DBGRAPH_MCP_AGENT_TOKEN" \
   ./bin/dbgraph mcp --server-url http://127.0.0.1:8080
 ```
 
@@ -108,13 +107,8 @@ Flags override environment variables.
 | `DBGRAPH_BACKUP_PATH` | Default `backup --output` path |
 | `DBGRAPH_MCP_SERVER_URL` | Server URL used by the stdio proxy |
 | `DBGRAPH_MCP_TOKEN` | Bearer token used by the stdio proxy |
-| `DBGRAPH_MCP_AGENT_TOKEN` | Agent MCP credential |
-| `DBGRAPH_MCP_REVIEWER_TOKEN` | Reviewer MCP credential |
-| `DBGRAPH_MCP_ADMIN_TOKEN` | Admin MCP credential |
-| `DBGRAPH_WEB_VIEWER_TOKEN` | Read-only Web credential |
-| `DBGRAPH_WEB_EDITOR_TOKEN` | Web create/revise/tombstone credential |
-| `DBGRAPH_WEB_REVIEWER_TOKEN` | Web review/revision/suppress/restore credential |
-| `DBGRAPH_WEB_ADMIN_TOKEN` | Web data-source and schema-scan credential |
+| `DBGRAPH_MCP_TOKEN` | The MCP credential; carries Admin |
+| `DBGRAPH_WEB_TOKEN` | The Web credential; carries Admin |
 
 Every configured access token must be 32 random bytes encoded as exactly 64 hexadecimal characters; generate one with `openssl rand -hex 32`. Tokens are seeded from the environment on startup and stored as SHA-256 digests in `access_credentials`; later starts authenticate from the database, so the variables only need to be present the first time or when rotating. The database holds no presentable credential, because the server verifies a token rather than reproducing one. Web credentials require TLS unless `--insecure-cleartext-web` is set, which is loopback-only and refuses to run alongside TLS. A non-loopback listener requires both `--tls-cert`/`--tls-key` and at least one `DBGRAPH_MCP_*_TOKEN`; anonymous MCP Viewer access is loopback-only. A data source resolves its DSN in one of two ways. Supply the connection string when creating it and dbgraph seals it with AES-256-GCM under `DBGRAPH_SECRET_KEY` and stores the ciphertext, so the database file and its backups hold no readable credential and the key never enters SQLite. Otherwise the source names an environment variable, such as `ORDERS_MYSQL_DSN`, that the serving process reads when a scan runs; that variable also serves as the fallback when no ciphertext is stored. A stored DSN that cannot be decrypted fails the scan rather than falling back, so a key problem is visible instead of silently connecting with a stale credential. The connection string is write-only: no Web, REST, or MCP response ever returns it. Use a read-only MySQL account with verified TLS; `--insecure-mysql-tls` waives the verified-TLS requirement for local development and, like the cleartext Web option, is refused unless the listener is loopback.
 

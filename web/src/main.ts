@@ -5,6 +5,7 @@ import ConfirmationService from "primevue/confirmationservice";
 import ToastService from "primevue/toastservice";
 
 import App from "./App.vue";
+import { onSignedOut } from "./api/client";
 import { router } from "./router";
 import "primeicons/primeicons.css";
 import "./style.css";
@@ -15,6 +16,10 @@ import "./style.css";
 const nonce = document
   .querySelector('meta[property="csp-nonce"]')
   ?.getAttribute("content") ?? "";
+
+onSignedOut(() => {
+  if (router.currentRoute.value.name !== "login") void router.replace({ name: "login" });
+});
 
 createApp(App)
   .use(router)

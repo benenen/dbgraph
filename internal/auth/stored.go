@@ -29,19 +29,17 @@ func EnvironmentCredentials(lookup EnvironmentLookup) ([]StoredCredential, error
 	if lookup == nil {
 		return nil, nil
 	}
+	// One credential per surface. Both carry Admin because a single token has to
+	// cover everything that surface can do; split them again by adding entries
+	// here if you want role separation back.
 	definitions := []struct {
 		key    string
 		actor  string
 		role   relations.Role
 		origin audit.Origin
 	}{
-		{"DBGRAPH_WEB_VIEWER_TOKEN", "web-viewer", relations.RoleViewer, audit.OriginWeb},
-		{"DBGRAPH_WEB_EDITOR_TOKEN", "web-editor", relations.RoleEditor, audit.OriginWeb},
-		{"DBGRAPH_WEB_REVIEWER_TOKEN", "web-reviewer", relations.RoleReviewer, audit.OriginWeb},
-		{"DBGRAPH_WEB_ADMIN_TOKEN", "web-admin", relations.RoleAdmin, audit.OriginWeb},
-		{"DBGRAPH_MCP_AGENT_TOKEN", "mcp-agent", relations.RoleAgent, audit.OriginAgent},
-		{"DBGRAPH_MCP_REVIEWER_TOKEN", "mcp-reviewer", relations.RoleReviewer, audit.OriginAgent},
-		{"DBGRAPH_MCP_ADMIN_TOKEN", "mcp-admin", relations.RoleAdmin, audit.OriginAgent},
+		{"DBGRAPH_WEB_TOKEN", "web", relations.RoleAdmin, audit.OriginWeb},
+		{"DBGRAPH_MCP_TOKEN", "mcp", relations.RoleAdmin, audit.OriginAgent},
 	}
 
 	credentials := make([]StoredCredential, 0, len(definitions))
@@ -70,6 +68,12 @@ func EnvironmentCredentials(lookup EnvironmentLookup) ([]StoredCredential, error
 		})
 	}
 	return credentials, nil
+}
+
+// KnownActors names every actor the current scheme issues. Anything else in
+// storage is a leftover from an earlier scheme and must not keep authenticating.
+func KnownActors() []string {
+	return []string{"web", "mcp"}
 }
 
 // NewTokenAuthenticatorFromStored builds an authenticator from persisted

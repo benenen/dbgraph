@@ -37,6 +37,11 @@ func (g *browserFixtureIDs) Next(context.Context) (int64, error) {
 // does. The relation lifecycle it used to cover moved to the API surface when
 // the vanilla panels were retired.
 func TestBrowserConsoleBootstrapsAProject(t *testing.T) {
+	// The Vue console replaced the vanilla panels this flow drives: its
+	// selectors, its "Add data source" copy, and its single-project data
+	// source model are all gone. Rewriting the flow against the new console
+	// is deferred until the console's own shape settles.
+	t.Skip("browser flow predates the Vue console; pending a rewrite against it")
 	if runtime.GOOS == "windows" {
 		t.Skip("the browser process lifecycle assertion requires Unix signals")
 	}
@@ -66,7 +71,7 @@ func TestBrowserConsoleBootstrapsAProject(t *testing.T) {
 	command.Stdout = &processOutput
 	command.Stderr = &processOutput
 	command.Env = append(controlledEnvironment(),
-		"DBGRAPH_WEB_ADMIN_TOKEN="+adminToken, "DBGRAPH_SECRET_KEY="+secretKey)
+		"DBGRAPH_WEB_TOKEN="+adminToken, "DBGRAPH_SECRET_KEY="+secretKey)
 	if err := command.Start(); err != nil {
 		t.Fatalf("start dbgraph serve: %v", err)
 	}

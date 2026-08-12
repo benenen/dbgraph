@@ -111,6 +111,10 @@ type catalogHTTPStub struct {
 	getNodeErr    error
 	sources       []catalog.DataSource
 	listSrcErr    error
+	linked        [][2]int64
+	unlinked      [][2]int64
+	linkErr       error
+	deleted       []int64
 }
 
 func (s *catalogHTTPStub) CreateDataSourceAsAdmin(_ context.Context, command catalog.AdminCreateDataSource) (catalog.DataSource, error) {
@@ -132,6 +136,29 @@ func (s *catalogHTTPStub) GetCurrentNode(context.Context, int64, int64) (catalog
 
 func (s *catalogHTTPStub) ListDataSources(context.Context, int64, int) ([]catalog.DataSource, error) {
 	return append([]catalog.DataSource(nil), s.sources...), s.listSrcErr
+}
+
+func (s *catalogHTTPStub) ListAllDataSources(context.Context, int) ([]catalog.DataSource, error) {
+	return append([]catalog.DataSource(nil), s.sources...), s.listSrcErr
+}
+
+func (s *catalogHTTPStub) LinkDataSource(_ context.Context, projectID int64, dataSourceID int64) error {
+	s.linked = append(s.linked, [2]int64{projectID, dataSourceID})
+	return s.linkErr
+}
+
+func (s *catalogHTTPStub) UpdateDataSourceAsAdmin(context.Context, catalog.AdminUpdateDataSource) (catalog.DataSource, error) {
+	return s.createResult, s.createErr
+}
+
+func (s *catalogHTTPStub) DeleteDataSource(_ context.Context, dataSourceID int64) error {
+	s.deleted = append(s.deleted, dataSourceID)
+	return s.linkErr
+}
+
+func (s *catalogHTTPStub) UnlinkDataSource(_ context.Context, projectID int64, dataSourceID int64) error {
+	s.unlinked = append(s.unlinked, [2]int64{projectID, dataSourceID})
+	return s.linkErr
 }
 
 type relationHTTPStub struct {

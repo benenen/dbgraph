@@ -19,6 +19,12 @@ type projectHTTPStub struct {
 	listErr  error
 }
 
+func (s *projectHTTPStub) Delete(context.Context, int64) error { return nil }
+
+func (s *projectHTTPStub) UpdateAsAdmin(context.Context, catalog.AdminUpdateProject) (catalog.Project, error) {
+	return catalog.Project{}, nil
+}
+
 func (s *projectHTTPStub) CreateAsAdmin(_ context.Context, command catalog.AdminCreateProject) (catalog.Project, error) {
 	s.command = command
 	s.calls++

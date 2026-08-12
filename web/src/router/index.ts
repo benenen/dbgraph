@@ -12,9 +12,10 @@ export const router = createRouter({
     { path: "/", redirect: { name: "projects" } },
     { path: "/login", name: "login", component: LoginView, meta: { public: true } },
     { path: "/projects", name: "projects", component: ProjectsView },
+    { path: "/data-sources", name: "data-sources", component: DataSourcesView },
     {
       path: "/projects/:projectId/data-sources",
-      name: "data-sources",
+      name: "project-sources",
       component: DataSourcesView,
       props: true,
     },

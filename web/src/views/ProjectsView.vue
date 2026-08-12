@@ -23,6 +23,8 @@ const failure = ref("");
 const dialogOpen = ref(false);
 const saving = ref(false);
 const draft = ref({ name: "", description: "", reason: "" });
+// Empty means the dialog is creating; an id means it is editing that project.
+const editingId = ref("");
 
 async function load(): Promise<void> {
   loading.value = true;
@@ -41,13 +43,27 @@ async function load(): Promise<void> {
 }
 
 function openDialog(): void {
+  editingId.value = "";
   draft.value = { name: "", description: "", reason: "" };
   dialogOpen.value = true;
 }
 
-async function create(): Promise<void> {
+function openEdit(project: Project): void {
+  editingId.value = project.id;
+  draft.value = { name: project.name, description: project.description, reason: "" };
+  dialogOpen.value = true;
+}
+
+async function save(): Promise<void> {
   saving.value = true;
   try {
+    if (editingId.value) {
+      const project = await api.updateProject(editingId.value, draft.value);
+      dialogOpen.value = false;
+      toast.add({ severity: "success", summary: `Project ${project.name} updated`, life: 4000 });
+      await load();
+      return;
+    }
     const project = await api.createProject(draft.value);
     dialogOpen.value = false;
     toast.add({ severity: "success", summary: `Project ${project.name} created`, life: 4000 });
@@ -56,7 +72,7 @@ async function create(): Promise<void> {
   } catch (error) {
     toast.add({
       severity: "error",
-      summary: "Could not create the project",
+      summary: editingId.value ? "Could not update the project" : "Could not create the project",
       detail: error instanceof Error ? error.message : "",
       life: 6000,
     });
@@ -65,8 +81,28 @@ async function create(): Promise<void> {
   }
 }
 
+const removing = ref("");
+
+async function remove(project: Project): Promise<void> {
+  removing.value = project.id;
+  try {
+    await api.deleteProject(project.id);
+    toast.add({ severity: "success", summary: `${project.name} deleted`, life: 3000 });
+    await load();
+  } catch (error) {
+    toast.add({
+      severity: "error",
+      summary: "Could not delete the project",
+      detail: error instanceof Error ? error.message : "",
+      life: 6000,
+    });
+  } finally {
+    removing.value = "";
+  }
+}
+
 async function open(project: Project): Promise<void> {
-  await router.push({ name: "data-sources", params: { projectId: project.id } });
+  await router.push({ name: "project-sources", params: { projectId: project.id } });
 }
 
 onMounted(load);
@@ -104,38 +140,60 @@ onMounted(load);
     <Column header="Created">
       <template #body="{ data }">{{ data.createdAt.slice(0, 10) }}</template>
     </Column>
-    <Column header="" style="width: 12rem">
+    <Column header="" style="width: 20rem">
       <template #body="{ data }">
-        <Button
-          label="Data sources"
-          icon="pi pi-database"
-          size="small"
-          severity="secondary"
-          outlined
-          @click="open(data as Project)"
-        />
+        <div class="row-actions">
+          <Button
+            label="Data sources"
+            icon="pi pi-database"
+            size="small"
+            severity="secondary"
+            outlined
+            @click="open(data as Project)"
+          />
+          <Button
+            label="Edit"
+            size="small"
+            severity="secondary"
+            text
+            @click.stop="openEdit(data as Project)"
+          />
+          <Button
+            label="Delete"
+            size="small"
+            severity="danger"
+            text
+            :loading="removing === data.id"
+            @click.stop="remove(data as Project)"
+          />
+        </div>
       </template>
     </Column>
   </DataTable>
 
-  <Dialog v-model:visible="dialogOpen" modal header="New project" :style="{ width: '30rem' }">
-    <form class="form" @submit.prevent="create">
+  <Dialog
+    v-model:visible="dialogOpen"
+    modal
+    :header="editingId ? 'Edit project' : 'New project'"
+    :style="{ width: '30rem' }"
+  >
+    <form v-if="dialogOpen" class="form" @submit.prevent="save">
       <label for="name">Name</label>
       <InputText id="name" v-model="draft.name" maxlength="200" required autofocus fluid />
 
       <label for="description">Description</label>
       <Textarea id="description" v-model="draft.description" maxlength="2000" rows="2" fluid />
 
-      <label for="reason">Reason <span class="muted">recorded in the audit log</span></label>
-      <Textarea id="reason" v-model="draft.reason" maxlength="2000" rows="2" required fluid />
+      <label for="reason">Reason <span class="muted">optional, recorded in the audit log</span></label>
+      <Textarea id="reason" v-model="draft.reason" maxlength="2000" rows="2" fluid />
 
       <div class="actions">
         <Button label="Cancel" severity="secondary" text @click="dialogOpen = false" />
         <Button
           type="submit"
-          label="Create project"
+          :label="editingId ? 'Save changes' : 'Create project'"
           :loading="saving"
-          :disabled="!draft.name.trim() || !draft.reason.trim()"
+          :disabled="!draft.name.trim()"
         />
       </div>
     </form>
@@ -170,6 +228,11 @@ h1 {
 
 .empty {
   color: var(--p-text-muted-color);
+}
+
+.row-actions {
+  display: flex;
+  gap: 0.4rem;
 }
 
 .form {

@@ -1,5 +1,6 @@
 // One place that knows how dbgraph talks: the response envelope, the CSRF
-// header, and what a 401 means.
+// header, and what a 401 means. The server rejects unknown JSON fields, so
+// every body below is built field by field instead of spread from form state.
 
 export interface Project {
   id: string;
@@ -54,6 +55,17 @@ export function setCsrfToken(token: string): void {
   csrfToken = token;
 }
 
+let signedOut: (() => void) | null = null;
+
+/**
+ * Registers what happens when the server says the session is gone. Every call
+ * routes through here, so an expired session sends you to the sign-in screen
+ * instead of failing whatever you were in the middle of.
+ */
+export function onSignedOut(handler: () => void): void {
+  signedOut = handler;
+}
+
 interface Envelope<T> {
   data: T;
   error: { code: string; message: string } | null;
@@ -77,7 +89,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!response.ok || !envelope.success) {
     const code = envelope.error?.code ?? "UNKNOWN";
     const message = envelope.error?.message ?? `Request failed with status ${response.status}.`;
-    if (response.status === 401) throw new UnauthenticatedError(message, response.status, code);
+    if (response.status === 401) {
+      csrfToken = "";
+      signedOut?.();
+      throw new UnauthenticatedError(message, response.status, code);
+    }
     throw new ApiError(message, response.status, code);
   }
   return envelope.data;
@@ -91,13 +107,71 @@ export const api = {
 
   session: () => request<Session>("/api/v1/session"),
 
-  listProjects: () => request<Project[]>("/api/v1/projects?limit=200"),
+  listProjects: () => request<Project[]>("/api/v1/projects"),
 
   createProject: (input: { name: string; description: string; reason: string }) =>
-    request<Project>("/api/v1/projects", { method: "POST", body: JSON.stringify(input) }),
+    request<Project>("/api/v1/projects", {
+      method: "POST",
+      body: JSON.stringify({
+        name: input.name,
+        description: input.description,
+        reason: input.reason,
+      }),
+    }),
 
   listDataSources: (projectId: string) =>
-    request<DataSource[]>(`/api/v1/projects/${projectId}/data-sources?limit=200`),
+    request<DataSource[]>(`/api/v1/projects/${projectId}/data-sources`),
+
+  listAllDataSources: () => request<DataSource[]>("/api/v1/data-sources"),
+
+  updateProject: (projectId: string, input: { name: string; description: string; reason: string }) =>
+    request<Project>(`/api/v1/projects/${projectId}/update`, {
+      method: "POST",
+      body: JSON.stringify({
+        name: input.name,
+        description: input.description,
+        reason: input.reason,
+      }),
+    }),
+
+  // An empty dsn leaves the stored connection string exactly as it is.
+  updateDataSource: (
+    dataSourceId: string,
+    input: { name: string; dsnEnvironment: string; dsn: string; reason: string },
+  ) =>
+    request<DataSource>(`/api/v1/data-sources/${dataSourceId}/update`, {
+      method: "POST",
+      body: JSON.stringify({
+        name: input.name,
+        dsnEnvironment: input.dsnEnvironment,
+        dsn: input.dsn,
+        reason: input.reason,
+      }),
+    }),
+
+  deleteProject: (projectId: string) =>
+    request<unknown>(`/api/v1/projects/${projectId}/delete`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  deleteDataSource: (dataSourceId: string) =>
+    request<unknown>(`/api/v1/data-sources/${dataSourceId}/delete`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  linkDataSource: (projectId: string, dataSourceId: string) =>
+    request<unknown>(`/api/v1/projects/${projectId}/data-sources/${dataSourceId}/link`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  unlinkDataSource: (projectId: string, dataSourceId: string) =>
+    request<unknown>(`/api/v1/projects/${projectId}/data-sources/${dataSourceId}/unlink`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
 
   createDataSource: (
     projectId: string,
@@ -105,7 +179,13 @@ export const api = {
   ) =>
     request<DataSource>(`/api/v1/projects/${projectId}/data-sources`, {
       method: "POST",
-      body: JSON.stringify({ kind: "MYSQL", ...input }),
+      body: JSON.stringify({
+        kind: "MYSQL",
+        name: input.name,
+        dsnEnvironment: input.dsnEnvironment,
+        dsn: input.dsn,
+        reason: input.reason,
+      }),
     }),
 
   startScan: (projectId: string, dataSourceId: string, reason: string) =>

@@ -167,7 +167,15 @@ func serve(serveConfig config.ServeConfig) (returnError error) {
 	if err != nil {
 		return err
 	}
-	catalogOptions := []catalog.ServiceOption{}
+	// The same policy the scanner will connect under, applied when the
+	// connection string is saved rather than when a scan finally runs.
+	catalogOptions := []catalog.ServiceOption{
+		catalog.WithDSNValidator(func(dsn string) error {
+			return mysqlingestion.ValidateDSN(dsn, mysqlingestion.ConnectionPolicy{
+				AllowInsecureTLS: serveConfig.AllowInsecureMySQLTLS,
+			})
+		}),
+	}
 	runnerOptions := []mysqlingestion.RunnerOption{}
 	if sealer != nil {
 		catalogOptions = append(catalogOptions, catalog.WithDSNSealer(dsnSealer{sealer: sealer}))
@@ -207,6 +215,14 @@ func serve(serveConfig config.ServeConfig) (returnError error) {
 	}
 	if err := credentialRepository.SyncCredentials(ctx, seedCredentials); err != nil {
 		return fmt.Errorf("store access tokens: %w", err)
+	}
+	removed, err := credentialRepository.PruneUnknownActors(ctx, appauth.KnownActors())
+	if err != nil {
+		return fmt.Errorf("prune access tokens: %w", err)
+	}
+	if removed > 0 {
+		writeDiagnostic(os.Stderr,
+			"removed %d access token(s) issued under an earlier scheme\n", removed)
 	}
 	storedCredentials, err := credentialRepository.ListCredentials(ctx)
 	if err != nil {

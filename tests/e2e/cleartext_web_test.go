@@ -39,7 +39,7 @@ func TestCleartextWebSignInWorksOverPlainHTTP(t *testing.T) {
 	)
 	command.Stdout = &processOutput
 	command.Stderr = &processOutput
-	command.Env = append(controlledEnvironment(), "DBGRAPH_WEB_ADMIN_TOKEN="+adminToken)
+	command.Env = append(controlledEnvironment(), "DBGRAPH_WEB_TOKEN="+adminToken)
 	if err := command.Start(); err != nil {
 		t.Fatalf("start dbgraph serve: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestServeRejectsWebCredentialsWithoutTLSOrOptIn(t *testing.T) {
 		"--database", filepath.Join(testDirectory, "dbgraph.sqlite"),
 		"--listen", reserveLoopbackAddress(t),
 	)
-	command.Env = append(controlledEnvironment(), "DBGRAPH_WEB_ADMIN_TOKEN="+adminToken)
+	command.Env = append(controlledEnvironment(), "DBGRAPH_WEB_TOKEN="+adminToken)
 	output, err := command.CombinedOutput()
 	if err == nil {
 		t.Fatalf("serve started with Web credentials over cleartext: %s", output)

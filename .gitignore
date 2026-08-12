@@ -44,3 +44,8 @@ dbgraph.sqlite*
 
 
 docs/superpowers
+
+# Vue console build output; run `npm run build` in web/ (the Makefile does it for you)
+internal/transport/webapi/app/*
+!internal/transport/webapi/app/.gitkeep
+web/node_modules/

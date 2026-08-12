@@ -22,6 +22,20 @@ type createDataSourceDTO struct {
 	Reason string `json:"reason"`
 }
 
+type updateProjectDTO struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Reason      string `json:"reason"`
+}
+
+type updateDataSourceDTO struct {
+	Name           string `json:"name"`
+	DSNEnvironment string `json:"dsnEnvironment"`
+	// DSN is write-only and optional: empty leaves the stored credential alone.
+	DSN    string `json:"dsn"`
+	Reason string `json:"reason"`
+}
+
 type createProjectDTO struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -202,6 +216,17 @@ func writeAdminError(response http.ResponseWriter, err error) {
 	case errors.Is(err, jobs.ErrQueueFull):
 		response.Header().Set("Retry-After", "30")
 		writeError(response, http.StatusServiceUnavailable, "QUEUE_FULL", "schema scan queue is full", nil)
+	case errors.Is(err, catalog.ErrDataSourceInUse):
+		writeError(response, http.StatusConflict, "IN_USE",
+			"this data source has an imported catalog; unlink it from every project instead", nil)
+	case errors.Is(err, catalog.ErrDataSourceNameTaken):
+		writeError(response, http.StatusConflict, "NAME_TAKEN",
+			"a data source with that name already exists; link it to this project instead", nil)
+	case errors.Is(err, catalog.ErrUnusableDSN):
+		// The text names parameters, never the connection string itself, so it
+		// is safe to hand back and is the only way the operator learns what to
+		// change.
+		writeError(response, http.StatusUnprocessableEntity, "UNUSABLE_DSN", err.Error(), nil)
 	case errors.Is(err, catalog.ErrSealerUnavailable):
 		writeError(response, http.StatusUnprocessableEntity, "SECRET_KEY_REQUIRED",
 			"storing a DSN requires DBGRAPH_SECRET_KEY on the server", nil)
@@ -247,4 +272,168 @@ func mapDataSourceForRole(source catalog.DataSource, role relations.Role) map[st
 		"id":   strconv.FormatInt(source.ID, 10),
 		"name": source.Name, "kind": "MYSQL",
 	}
+}
+
+// listAllDataSources serves the shared registry. Any signed-in role may see
+// which sources exist so a project can adopt one; the DSN environment variable
+// stays Admin-only, as it does everywhere else.
+func (h *handler) listAllDataSources(response http.ResponseWriter, request *http.Request) {
+	if h.services.Catalog == nil {
+		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
+		return
+	}
+	limit := catalog.DefaultListLimit
+	sources, err := h.services.Catalog.ListAllDataSources(request.Context(), limit)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, "INTERNAL", "request could not be completed", nil)
+		return
+	}
+	role := currentSession(request).session.Principal.Role
+	output := make([]map[string]any, len(sources))
+	for index, source := range sources {
+		output[index] = mapDataSourceForRole(source, role)
+	}
+	writeJSON(response, http.StatusOK, output)
+}
+
+func (h *handler) linkDataSource(response http.ResponseWriter, request *http.Request) {
+	h.changeDataSourceLink(response, request, true)
+}
+
+func (h *handler) unlinkDataSource(response http.ResponseWriter, request *http.Request) {
+	h.changeDataSourceLink(response, request, false)
+}
+
+// changeDataSourceLink adopts a shared source into a project or drops it.
+// Admin only: it decides which databases a project may scan.
+func (h *handler) changeDataSourceLink(response http.ResponseWriter, request *http.Request, link bool) {
+	if _, ok := requireAdmin(response, request); !ok {
+		return
+	}
+	if h.services.Catalog == nil {
+		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
+		return
+	}
+	projectID, dataSourceID, ok := pathProjectSubjectIDs(response, request, "dataSourceID")
+	if !ok {
+		return
+	}
+	var err error
+	if link {
+		err = h.services.Catalog.LinkDataSource(request.Context(), projectID, dataSourceID)
+	} else {
+		err = h.services.Catalog.UnlinkDataSource(request.Context(), projectID, dataSourceID)
+	}
+	if err != nil {
+		writeAdminError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{
+		"projectId":    strconv.FormatInt(projectID, 10),
+		"dataSourceId": strconv.FormatInt(dataSourceID, 10),
+		"linked":       link,
+	})
+}
+
+// deleteProject removes a project that has produced nothing. Admin only.
+func (h *handler) deleteProject(response http.ResponseWriter, request *http.Request) {
+	if _, ok := requireAdmin(response, request); !ok {
+		return
+	}
+	if h.services.Projects == nil {
+		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
+		return
+	}
+	projectID, err := parseID(request.PathValue("projectID"))
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
+		return
+	}
+	if err := h.services.Projects.Delete(request.Context(), projectID); err != nil {
+		writeAdminError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"deleted": strconv.FormatInt(projectID, 10)})
+}
+
+// deleteDataSource removes a source that has imported nothing. Admin only.
+func (h *handler) deleteDataSource(response http.ResponseWriter, request *http.Request) {
+	if _, ok := requireAdmin(response, request); !ok {
+		return
+	}
+	if h.services.Catalog == nil {
+		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
+		return
+	}
+	dataSourceID, err := parseID(request.PathValue("dataSourceID"))
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid data source ID", nil)
+		return
+	}
+	if err := h.services.Catalog.DeleteDataSource(request.Context(), dataSourceID); err != nil {
+		writeAdminError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"deleted": strconv.FormatInt(dataSourceID, 10)})
+}
+
+func (h *handler) updateProject(response http.ResponseWriter, request *http.Request) {
+	principal, ok := requireAdmin(response, request)
+	if !ok {
+		return
+	}
+	if h.services.Projects == nil {
+		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
+		return
+	}
+	projectID, err := parseID(request.PathValue("projectID"))
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
+		return
+	}
+	var input updateProjectDTO
+	if err := decodeJSON(response, request, maximumJSONRequestBytes, &input); err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project", nil)
+		return
+	}
+	project, err := h.services.Projects.UpdateAsAdmin(request.Context(), catalog.AdminUpdateProject{
+		ProjectID: projectID, Name: input.Name, Description: input.Description,
+		Principal: principal, Reason: input.Reason, RequestID: currentRequestID(request),
+	})
+	if err != nil {
+		writeAdminError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, mapProject(project))
+}
+
+func (h *handler) updateDataSource(response http.ResponseWriter, request *http.Request) {
+	principal, ok := requireAdmin(response, request)
+	if !ok {
+		return
+	}
+	if h.services.Catalog == nil {
+		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
+		return
+	}
+	dataSourceID, err := parseID(request.PathValue("dataSourceID"))
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid data source ID", nil)
+		return
+	}
+	var input updateDataSourceDTO
+	if err := decodeJSON(response, request, maximumJSONRequestBytes, &input); err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid data source", nil)
+		return
+	}
+	source, err := h.services.Catalog.UpdateDataSourceAsAdmin(request.Context(), catalog.AdminUpdateDataSource{
+		DataSourceID: dataSourceID, Name: input.Name, DSNEnvironment: input.DSNEnvironment,
+		DSN: input.DSN, Principal: principal, Reason: input.Reason,
+		RequestID: currentRequestID(request),
+	})
+	if err != nil {
+		writeAdminError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, mapDataSourceForRole(source, principal.Role))
 }
