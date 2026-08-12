@@ -95,7 +95,7 @@ func TestCredentialsSeedOnceThenLoadWithoutTheEnvironment(t *testing.T) {
 	}
 }
 
-func TestSyncCredentialsMovesADigestBetweenActorsWithoutViolatingUniqueness(t *testing.T) {
+func TestSyncCredentialsRefusesToMoveADigestBetweenActors(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -112,16 +112,18 @@ func TestSyncCredentialsMovesADigestBetweenActorsWithoutViolatingUniqueness(t *t
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// Handing the viewer's token to the admin actor would silently escalate
+	// whoever holds it. The unique index must refuse.
 	if err := repository.SyncCredentials(ctx, []appauth.StoredCredential{
 		{Actor: "web-admin", Role: relations.RoleAdmin, Origin: audit.OriginWeb, Digest: digest[:]},
-	}); err != nil {
-		t.Fatalf("re-pointing a digest at another actor: %v", err)
+	}); err == nil {
+		t.Fatal("re-pointing one actor's digest at another actor was accepted")
 	}
 	loaded, err := repository.ListCredentials(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded) != 1 || loaded[0].Actor != "web-admin" {
-		t.Fatalf("loaded = %#v, want only web-admin to hold the digest", loaded)
+	if len(loaded) != 1 || loaded[0].Actor != "web-viewer" || loaded[0].Role != relations.RoleViewer {
+		t.Fatalf("loaded = %#v, want the original viewer credential untouched", loaded)
 	}
 }

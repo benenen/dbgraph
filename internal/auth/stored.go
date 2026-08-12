@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/sha256"
+	"fmt"
 	"strings"
 
 	"github.com/benenen/dbgraph/internal/audit"
@@ -44,6 +45,7 @@ func EnvironmentCredentials(lookup EnvironmentLookup) ([]StoredCredential, error
 	}
 
 	credentials := make([]StoredCredential, 0, len(definitions))
+	seen := make(map[[sha256.Size]byte]string, len(definitions))
 	for _, definition := range definitions {
 		token, ok := lookup(definition.key)
 		token = strings.TrimSpace(token)
@@ -54,6 +56,14 @@ func EnvironmentCredentials(lookup EnvironmentLookup) ([]StoredCredential, error
 			return nil, ErrInvalidCredential
 		}
 		digest := sha256.Sum256([]byte(token))
+		// Two variables sharing a token would otherwise resolve to whichever
+		// actor is applied last, silently granting that actor's role to the
+		// other's holder. Refuse to start instead.
+		if previous, duplicate := seen[digest]; duplicate {
+			return nil, fmt.Errorf("%w: %s and %s hold the same token",
+				ErrInvalidCredential, previous, definition.key)
+		}
+		seen[digest] = definition.key
 		credentials = append(credentials, StoredCredential{
 			Actor: definition.actor, Role: definition.role,
 			Origin: definition.origin, Digest: digest[:],

@@ -115,3 +115,22 @@ func TestEnvironmentCredentialsCollectsBothSurfaces(t *testing.T) {
 		t.Fatalf("collected %d credentials from an empty environment", len(empty))
 	}
 }
+
+// TestEnvironmentCredentialsRefusesADuplicateToken keeps the pre-existing
+// fail-closed behaviour: two variables holding one token would otherwise
+// resolve to whichever actor is applied last, which is the more privileged.
+func TestEnvironmentCredentialsRefusesADuplicateToken(t *testing.T) {
+	t.Parallel()
+
+	environment := map[string]string{
+		"DBGRAPH_WEB_VIEWER_TOKEN": storedWebToken,
+		"DBGRAPH_WEB_ADMIN_TOKEN":  storedWebToken,
+	}
+	_, err := appauth.EnvironmentCredentials(func(key string) (string, bool) {
+		value, ok := environment[key]
+		return value, ok
+	})
+	if !errors.Is(err, appauth.ErrInvalidCredential) {
+		t.Fatalf("error = %v, want ErrInvalidCredential for a shared token", err)
+	}
+}

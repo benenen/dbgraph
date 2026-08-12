@@ -34,13 +34,10 @@ func (r *CredentialRepository) SyncCredentials(ctx context.Context, credentials 
 	now := r.now().UTC().Format(time.RFC3339Nano)
 	err := r.store.write(ctx, func(tx *sql.Tx) error {
 		for _, credential := range credentials {
-			// A digest is unique across actors, so re-seeding one actor with a
-			// token that already belongs to another must not silently move it.
-			if _, err := tx.ExecContext(ctx, `
-DELETE FROM access_credentials WHERE token_digest = ? AND actor <> ?
-`, credential.Digest, credential.Actor); err != nil {
-				return err
-			}
+			// No DELETE here on purpose: a digest that already belongs to
+			// another actor must collide against the unique index and fail the
+			// startup, rather than quietly moving the credential and handing
+			// one actor's role to the other's token holder.
 			if _, err := tx.ExecContext(ctx, `
 INSERT INTO access_credentials(actor, role, origin, token_digest, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)
