@@ -11,11 +11,35 @@ Requirements:
 - Go 1.26.5 or newer (the minimum patched toolchain required by the security gate)
 - Linux (required so dbgraph can verify local filesystem semantics before enabling SQLite WAL)
 - an embedded SQLite runtime accepted by dbgraph (3.51.3 or newer)
-- OpenSSL for the local TLS quick-start
+- OpenSSL, used by the Makefile to generate development tokens and the optional local certificate
 - Python Playwright with Chromium when running the mandatory browser E2E suite
+
+The Makefile drives local development. `make run` builds `./bin/dbgraph` and serves plain HTTP on `127.0.0.1:8080`:
+
+```sh
+make run
+```
+
+Health is available at `http://127.0.0.1:8080/healthz` and the Streamable HTTP MCP endpoint at `http://127.0.0.1:8080/mcp`, where loopback callers get anonymous Viewer access. `make watch` does the same and rebuilds and restarts on every source change; a failed build leaves the running process untouched.
+
+Cleartext serving cannot expose the Web UI: dbgraph refuses to start with `DBGRAPH_WEB_*` tokens configured but no TLS, and the `__Host-` session cookie requires HTTPS. Over HTTP the login page still renders, but it rejects every token because no Web credential is configured. Add `TLS=1` to serve the Web UI:
+
+```sh
+make run TLS=1
+```
+
+That generates `.dbgraph-local/cert.pem` and `.dbgraph-local/key.pem` on first use, prints the Web Admin and MCP Agent tokens, and serves HTTPS. Open `https://127.0.0.1:8080/`, accept the locally generated certificate for this development instance, and sign in with the printed Web Admin token.
+
+An unauthenticated or expired browser page request is answered with `303 See Other` to `/login`. That redirect is limited to `GET` and `HEAD` navigations outside `/api/` that accept HTML; every other unauthenticated request, including all `/api/v1` calls, still returns a `401 UNAUTHENTICATED` JSON body.
+
+Development credentials are generated once into `.dbgraph-local/dev.env` and then stay fixed: the Makefile only writes that file when it is missing, and `make clean` does not touch it, so the tokens survive every rebuild, restart, and `make watch` cycle. `make tokens` prints them, `make rotate-tokens` replaces them on purpose, and `make rotate-certs` does the same for the certificate. Never reuse these credentials outside a development machine. The equivalent commands without the Makefile are:
 
 ```sh
 go build -o ./bin/dbgraph ./cmd/dbgraph
+./bin/dbgraph serve --database ./dbgraph.sqlite --listen 127.0.0.1:8080
+```
+
+```sh
 install -d -m 700 .dbgraph-local
 openssl req -x509 -newkey rsa:3072 -sha256 -days 30 -nodes \
   -keyout .dbgraph-local/key.pem -out .dbgraph-local/cert.pem \
@@ -23,21 +47,18 @@ openssl req -x509 -newkey rsa:3072 -sha256 -days 30 -nodes \
 chmod 600 .dbgraph-local/key.pem
 export DBGRAPH_WEB_ADMIN_TOKEN="$(openssl rand -hex 32)"
 export DBGRAPH_MCP_AGENT_TOKEN="$(openssl rand -hex 32)"
-printf 'Web Admin token: %s\nMCP Agent token: %s\n' \
-  "$DBGRAPH_WEB_ADMIN_TOKEN" "$DBGRAPH_MCP_AGENT_TOKEN"
 ./bin/dbgraph serve --database ./dbgraph.sqlite --listen 127.0.0.1:8080 \
   --tls-cert .dbgraph-local/cert.pem --tls-key .dbgraph-local/key.pem
 ```
 
-Open `https://127.0.0.1:8080/`, accept the locally generated certificate for this development instance, and sign in with the printed Web Admin token. Health is available at `/healthz`, and the Streamable HTTP MCP endpoint is `/mcp`.
-
-The serving process is the only SQLite writer. `dbgraph mcp` is a stdio-to-HTTP transport proxy and never opens the database:
+The serving process is the only SQLite writer. `dbgraph mcp` is a stdio-to-HTTP transport proxy and never opens the database. `make mcp` runs it against the local server using the matching scheme, or run it directly:
 
 ```sh
 DBGRAPH_MCP_TOKEN="$DBGRAPH_MCP_AGENT_TOKEN" \
-SSL_CERT_FILE=.dbgraph-local/cert.pem \
-  ./bin/dbgraph mcp --server-url https://127.0.0.1:8080
+  ./bin/dbgraph mcp --server-url http://127.0.0.1:8080
 ```
+
+Against a TLS server, add `SSL_CERT_FILE=.dbgraph-local/cert.pem` and use the `https://` URL.
 
 Create a consistent online backup at a new path:
 
@@ -46,6 +67,21 @@ Create a consistent online backup at a new path:
 ```
 
 The backup command refuses to overwrite an existing file. The database, lock, WAL, backup, and shared-memory artifacts are restricted to the current user. SQLite databases on known network filesystems are rejected because WAL requires local filesystem semantics; on non-Linux platforms dbgraph fails closed instead of guessing the backing filesystem type.
+
+## Makefile targets
+
+`make` with no target lists everything. The most used targets are `build`, `run`, `watch`, `mcp`, `tokens`, `test`, `test-race`, `vet`, `fmt`, `lint`, `verify`, `cover`, and `clean`. Every setting is an overridable variable:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `TLS` | `0` | `1` serves HTTPS with the generated certificate and enables the Web UI |
+| `LISTEN` | `127.0.0.1:8080` | Listen address |
+| `DATABASE` | `./dbgraph.sqlite` | SQLite path |
+| `LOCAL_DIR` | `.dbgraph-local` | Directory holding `dev.env`, `cert.pem`, and `key.pem` |
+| `WATCH_INTERVAL` | `1` | Seconds between `make watch` change checks |
+| `CERT_DAYS` | `30` | Validity of the generated development certificate |
+
+For example, `make watch TLS=1 LISTEN=127.0.0.1:9090 DATABASE=/tmp/dbgraph.sqlite`.
 
 ## Configuration
 
@@ -132,11 +168,20 @@ Unconditional trace and impact use a bounded SQLite recursive CTE. Requests with
 ## Verification
 
 ```sh
+make verify
+```
+
+That runs the same gates directly:
+
+```sh
+gofmt -l -w cmd internal migrations tests
 go test ./...
 go test -race ./...
 go vet ./...
 staticcheck ./...
 golangci-lint run
 ```
+
+`make verify` skips `staticcheck` and `golangci-lint` with a printed notice when they are not installed; run them explicitly before a handoff.
 
 The test suite includes domain unit tests, real file-backed SQLite integration tests, subprocess serve/MCP checks, and a real Chromium workflow covering login, structured relation editing, evidence, review, traversal, and Reviewer state changes. Project coverage must remain at or above 80%.

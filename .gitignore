@@ -38,3 +38,6 @@ __pycache__/
 # Local quick-start credentials and database
 .dbgraph-local/
 dbgraph.sqlite*
+
+# Makefile build output
+/bin/
