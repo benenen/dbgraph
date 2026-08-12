@@ -37,9 +37,11 @@ WATCH_INTERVAL ?= 1
 TLS ?= 0
 
 # Read from the file rather than the environment so every token is listed even
-# when the current mode keeps some of them out of the server process.
-SHOW_TOKENS = printf 'Tokens (%s):\n' '$(ENV_FILE)'; \
-	awk -F= '/^DBGRAPH_[A-Z_]+_TOKEN=/ {printf "  %-28s %s\n", $$1, $$2}' $(ENV_FILE)
+# when the current mode keeps some of them out of the server process. Group them
+# by whether the running server actually accepts them: an unusable token printed
+# next to a usable one reads as a broken login.
+SHOW_MCP_TOKENS = awk -F= '/^DBGRAPH_MCP_[A-Z_]+_TOKEN=/ {printf "    %-28s %s\n", $$1, $$2}' $(ENV_FILE)
+SHOW_WEB_TOKENS = awk -F= '/^DBGRAPH_WEB_[A-Z_]+_TOKEN=/ {printf "    %-28s %s\n", $$1, $$2}' $(ENV_FILE)
 
 ifeq ($(TLS),0)
 SCHEME := http
@@ -50,20 +52,27 @@ MCP_TLS_ENV :=
 LOAD_ENV := set -a; . ./$(ENV_FILE); set +a; \
 	unset DBGRAPH_WEB_VIEWER_TOKEN DBGRAPH_WEB_EDITOR_TOKEN \
 		DBGRAPH_WEB_REVIEWER_TOKEN DBGRAPH_WEB_ADMIN_TOKEN;
-BANNER = $(SHOW_TOKENS); \
-	printf 'Active: the DBGRAPH_MCP_* tokens. The DBGRAPH_WEB_* tokens stay\n'; \
-	printf 'inactive because dbgraph rejects Web credentials over cleartext.\n'; \
-	printf 'Health: http://%s/healthz   MCP: http://%s/mcp\n' '$(LISTEN)' '$(LISTEN)'; \
-	printf 'Re-run with TLS=1 to sign in to the Web UI.\n\n'
+BANNER = printf 'Tokens (%s)\n' '$(ENV_FILE)'; \
+	printf '  USABLE NOW - MCP bearer tokens for http://%s/mcp\n' '$(LISTEN)'; \
+	$(SHOW_MCP_TOKENS); \
+	printf '  NOT LOADED - the server was started without TLS, so it holds no\n'; \
+	printf '  Web credential at all and rejects each of these with\n'; \
+	printf '  INVALID_CREDENTIALS. Restart with TLS=1 to use them.\n'; \
+	$(SHOW_WEB_TOKENS); \
+	printf 'Health: http://%s/healthz\n' '$(LISTEN)'; \
+	printf 'Web UI: unavailable in this mode.\n\n'
 else
 SCHEME := https
 TLS_FLAGS := --tls-cert $(TLS_CERT) --tls-key $(TLS_KEY)
 TLS_DEPS := $(TLS_CERT)
 MCP_TLS_ENV := SSL_CERT_FILE=$(TLS_CERT)
 LOAD_ENV := set -a; . ./$(ENV_FILE); set +a;
-BANNER = $(SHOW_TOKENS); \
-	printf 'Health: https://%s/healthz   MCP: https://%s/mcp\n' '$(LISTEN)' '$(LISTEN)'; \
-	printf 'Open https://%s/ and sign in with any DBGRAPH_WEB_* token\n\n' '$(LISTEN)'
+BANNER = printf 'Tokens (%s)\n' '$(ENV_FILE)'; \
+	printf '  Web sign-in at https://%s/ - paste one of these\n' '$(LISTEN)'; \
+	$(SHOW_WEB_TOKENS); \
+	printf '  MCP bearer tokens for https://%s/mcp\n' '$(LISTEN)'; \
+	$(SHOW_MCP_TOKENS); \
+	printf 'Health: https://%s/healthz\n\n' '$(LISTEN)'
 endif
 
 SERVER_URL ?= $(SCHEME)://$(LISTEN)
