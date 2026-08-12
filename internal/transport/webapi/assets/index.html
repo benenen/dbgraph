@@ -39,24 +39,23 @@
       <div id="global-message" class="message" role="status"></div>
 
       <section id="panel-overview" class="panel active">
-        <p class="eyebrow">OVERVIEW</p><h1>Conditional data lineage, with evidence.</h1>
+        <header class="panel-head"><p class="eyebrow">OVERVIEW</p><h1>Conditional data lineage, with evidence.</h1></header>
         <p class="lede">dbgraph stores immutable catalog snapshots and reviewable relations. Source-code analysis happens in your external Agent; this service validates, versions, reviews, and traverses the submitted graph.</p>
-        <div class="metric-grid"><article><strong>Agent-owned analysis</strong><span>No embedded code parser</span></article><article><strong>Three-valued traversal</strong><span>TRUE · FALSE · UNKNOWN</span></article><article><strong>Review before publication</strong><span>Proposals never change effective edges</span></article></div>
-      </section>
+        <div class="metric-grid"><article><strong>Agent-owned analysis</strong><span>No embedded code parser</span></article><article><strong>Three-valued traversal</strong><span><b class="sig sig-true">TRUE</b> · <b class="sig sig-false">FALSE</b> · <b class="sig sig-unknown">UNKNOWN</b></span></article><article><strong>Review before publication</strong><span>Proposals never change effective edges</span></article></div><ol class="startup"><li><span>Create a project, then keep it selected in the header.</span><span class="muted">Settings</span></li><li><span>Register the evidence repository your Agent will cite.</span><span class="muted">Settings</span></li><li><span>Add a MySQL data source by environment variable name.</span><span class="muted">Settings</span></li><li><span>Run a schema scan, then <a href="#schema" data-panel-link="schema">search the catalog</a>.</span><span class="muted">Schema Explorer</span></li><li><span>Review what the Agent proposes before it reaches the graph.</span><span class="muted">Relation Review</span></li></ol></section>
 
       <section id="panel-schema" class="panel">
-        <p class="eyebrow">SCHEMA EXPLORER</p><h1>Find current nodes</h1>
+        <header class="panel-head"><p class="eyebrow">SCHEMA EXPLORER</p><h1>Find current nodes</h1></header>
         <form id="node-search-form" class="inline-form"><input id="node-query" required placeholder="orders.total or customer_id"><button>Search</button></form>
         <div id="node-results" class="result-list"></div>
       </section>
 
       <section id="panel-node-details" class="panel">
-        <p class="eyebrow">NODE DETAILS</p><h1>Current catalog node</h1>
+        <header class="panel-head"><p class="eyebrow">NODE DETAILS</p><h1>Current catalog node</h1></header>
         <pre id="node-details" class="details tall">Select a node in Schema Explorer or Graph Explorer to inspect it here.</pre>
       </section>
 
       <section id="panel-graph" class="panel">
-        <p class="eyebrow">GRAPH EXPLORER</p><h1>Trace effective relations</h1>
+        <header class="panel-head"><p class="eyebrow">GRAPH EXPLORER</p><h1>Trace effective relations</h1></header>
 		<form id="graph-node-search-form" class="inline-form"><input id="graph-node-query" required placeholder="Search columns or tables"><button>Search graph nodes</button></form>
 		<div id="graph-node-results" class="result-list graph-node-results"></div>
         <form id="trace-form" class="form-grid compact">
@@ -93,7 +92,7 @@
       </section>
 
       <section id="panel-relation" class="panel">
-        <p class="eyebrow">RELATION DETAILS</p><h1>Create or revise a relation</h1>
+        <header class="panel-head"><p class="eyebrow">RELATION DETAILS</p><h1>Create or revise a relation</h1></header>
         <div class="two-column">
 		  <form id="proposal-form" class="form-grid">
 			<h2>Relation content editor</h2>
@@ -140,12 +139,12 @@
         </div>
       </section>
 
-      <section id="panel-review" class="panel"><p class="eyebrow">RELATION REVIEW</p><h1>Pending proposals</h1><button id="load-proposals">Refresh proposals</button><div id="proposal-results" class="result-list"></div></section>
-      <section id="panel-unresolved" class="panel"><p class="eyebrow">UNRESOLVED FINDINGS</p><h1>Agent-reported uncertainty</h1><button id="load-unresolved">Refresh findings</button><div id="unresolved-results" class="result-list"></div></section>
-      <section id="panel-jobs" class="panel"><p class="eyebrow">SCHEMA SCAN JOBS</p><h1>Inspect a scan job</h1><form id="job-form" class="inline-form"><input id="job-id" required placeholder="Job ID"><button>Load job</button></form><pre id="job-details" class="details"></pre></section>
-      <section id="panel-relation-init" class="panel"><p class="eyebrow">RELATION INIT SESSIONS</p><h1>Inspect Agent initialization</h1><form id="init-form" class="inline-form"><input id="init-id" required placeholder="Session ID"><button>Load session</button></form><pre id="init-details" class="details"></pre></section>
-      <section id="panel-audit" class="panel"><p class="eyebrow">AUDIT HISTORY</p><h1>Immutable changes</h1><button id="load-audit">Refresh audit</button><div id="audit-results" class="result-list"></div></section>
-      <section id="panel-settings" class="panel"><p class="eyebrow">SETTINGS</p><h1>Runtime boundaries</h1><div class="notice"><strong>Credentials stay outside dbgraph.</strong><p>MySQL DSNs and Web/MCP access tokens are loaded only from environment variables. Repository records hold evidence provenance; dbgraph never clones or analyzes source code.</p></div>
+      <section id="panel-review" class="panel"><header class="panel-head"><p class="eyebrow">RELATION REVIEW</p><h1>Pending proposals</h1></header><button id="load-proposals">Refresh proposals</button><div id="proposal-results" class="result-list"></div></section>
+      <section id="panel-unresolved" class="panel"><header class="panel-head"><p class="eyebrow">UNRESOLVED FINDINGS</p><h1>Agent-reported uncertainty</h1></header><button id="load-unresolved">Refresh findings</button><div id="unresolved-results" class="result-list"></div></section>
+      <section id="panel-jobs" class="panel"><header class="panel-head"><p class="eyebrow">SCHEMA SCAN JOBS</p><h1>Inspect a scan job</h1></header><form id="job-form" class="inline-form"><input id="job-id" required placeholder="Job ID"><button>Load job</button></form><pre id="job-details" class="details"></pre></section>
+      <section id="panel-relation-init" class="panel"><header class="panel-head"><p class="eyebrow">RELATION INIT SESSIONS</p><h1>Inspect Agent initialization</h1></header><form id="init-form" class="inline-form"><input id="init-id" required placeholder="Session ID"><button>Load session</button></form><pre id="init-details" class="details"></pre></section>
+      <section id="panel-audit" class="panel"><header class="panel-head"><p class="eyebrow">AUDIT HISTORY</p><h1>Immutable changes</h1></header><button id="load-audit">Refresh audit</button><div id="audit-results" class="result-list"></div></section>
+      <section id="panel-settings" class="panel"><header class="panel-head"><p class="eyebrow">SETTINGS</p><h1>Runtime boundaries</h1></header><div class="notice"><strong>Credentials stay outside dbgraph.</strong><p>MySQL DSNs and Web/MCP access tokens are loaded only from environment variables. Repository records hold evidence provenance; dbgraph never clones or analyzes source code.</p></div>
         <div class="two-column admin-controls" data-capability="admin">
           <form id="project-form" class="form-grid"><h2>Create a project</h2><label>Name<input id="project-name" required maxlength="200"></label><label>Description<textarea id="project-description" maxlength="2000"></textarea></label><label>Reason<textarea id="project-reason" required maxlength="2000"></textarea></label><button>Create project</button></form>
           <form id="repository-form" class="form-grid"><h2>Register an evidence repository</h2><label>Name<input id="repository-name" required maxlength="200"></label><label>Remote URL <span class="muted">metadata only</span><input id="repository-url" maxlength="2000"></label><label>Default branch<input id="repository-branch" maxlength="500" value="main"></label><label>Reason<textarea id="repository-reason" required maxlength="2000"></textarea></label><button>Register repository</button><pre id="repository-result" class="details"></pre></form>

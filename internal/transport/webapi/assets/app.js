@@ -96,9 +96,10 @@ function requireProject() {
   return value;
 }
 
-function resultCard(title, detail, meta = "") {
+function resultCard(title, detail, meta = "", state = "") {
   const card = document.createElement("article");
   card.className = "result-card";
+  if (state) card.dataset.state = state;
   const strong = document.createElement("strong"); strong.textContent = title;
   const body = document.createElement("small"); body.textContent = detail;
   card.append(strong, body);
@@ -212,9 +213,9 @@ function renderGraph(data) {
   state.graph = window.cytoscape({
     container: byId("graph-canvas"), elements: [...elements.values()],
     style: [
-      { selector: "node", style: { "background-color": "#176b5b", label: "data(label)", color: "#17211f", "font-size": 10, "text-valign": "bottom", "text-margin-y": 8 } },
-      { selector: "edge", style: { width: 2, "line-color": "#98aaa5", "target-arrow-color": "#98aaa5", "target-arrow-shape": "triangle", "curve-style": "bezier", label: "data(label)", "font-size": 8, "text-background-opacity": 1, "text-background-color": "#fffdf8" } },
-      { selector: "edge[truth = 'UNKNOWN']", style: { "line-style": "dashed", "line-color": "#d46a3a", "target-arrow-color": "#d46a3a" } },
+      { selector: "node", style: { "background-color": "#0d1b21", label: "data(label)", color: "#0d1b21", "font-size": 10, "text-valign": "bottom", "text-margin-y": 8 } },
+      { selector: "edge", style: { width: 2, "line-color": "#8fa1a4", "target-arrow-color": "#8fa1a4", "target-arrow-shape": "triangle", "curve-style": "bezier", label: "data(label)", "font-size": 8, "text-background-opacity": 1, "text-background-color": "#f7f9f9" } },
+      { selector: "edge[truth = 'UNKNOWN']", style: { "line-style": "dashed", "line-color": "#6a4fbf", "target-arrow-color": "#6a4fbf" } },
     ], layout: { name: "breadthfirst", directed: true, padding: 30 },
   });
   state.graph.on("tap", "node", async event => {
@@ -232,7 +233,7 @@ function renderGraph(data) {
 
 function renderGraphRelationResults(steps) {
   const cards = steps.map(step => {
-    const card = resultCard(`${step.type} · ${step.truth}`, `Relation ${step.relationId}`, `${step.status} · confidence ${step.confidence}`);
+    const card = resultCard(`${step.type} · ${step.truth}`, `Relation ${step.relationId}`, `${step.status} · confidence ${step.confidence}`, step.truth);
     card.classList.add("graph-edge-item");
     card.append(builderButton(`Inspect relation ${step.relationId}`, "inspect-relation", `graph-relation.${step.relationId}`, () => loadGraphRelation(step.relationId)));
     return card;
@@ -699,7 +700,7 @@ function initializeReview() {
     try {
       const data = await api(`/api/v1/projects/${requireProject()}/relation-proposals?limit=100`);
       replaceCards(byId("proposal-results"), data.relations.map(relation => {
-        const card = resultCard(`${relation.type} · ${relation.status}`, `Revision ${relation.latestRevisionNo}`, `Relation ${relation.id}`);
+        const card = resultCard(`${relation.type} · ${relation.status}`, `Revision ${relation.latestRevisionNo}`, `Relation ${relation.id}`, relation.status);
         card.addEventListener("click", () => { byId("relation-id").value = relation.id; showRelation(relation); location.hash = "relation"; activatePanel("relation"); });
         return card;
       }), "No pending proposals");

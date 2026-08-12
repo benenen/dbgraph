@@ -1,5 +1,5 @@
 .message.good {
-  color: var(--accent);
+  color: var(--true);
 }
 
 [hidden] {
@@ -13,28 +13,28 @@
   margin: 1rem 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 0;
   background: var(--line);
 }
 
 .diff-grid > * {
   min-width: 0;
   padding: 0.65rem;
-  background: var(--surface);
+  background: var(--plate);
   white-space: pre-wrap;
   word-break: break-word;
   font: 12px/1.45 ui-monospace, monospace;
 }
 
 .diff-grid .diff-head {
-  background: #eef2ea;
+  background: color-mix(in srgb, var(--ink) 7%, var(--plate));
   font-family: inherit;
   font-weight: 800;
 }
 
 .diff-grid .diff-changed {
-  background: #fff4df;
-  box-shadow: inset 3px 0 #d46a3a;
+  background: color-mix(in srgb, var(--unknown) 8%, var(--plate));
+  box-shadow: inset 3px 0 var(--unknown);
 }
 
 .ast-builder {
@@ -49,14 +49,14 @@
   gap: 0.55rem;
   padding: 0.7rem;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 88%, var(--background));
+  border-radius: 0;
+  background: var(--plate);
 }
 
 .builder-child,
 .case-branch {
   margin-left: 0.8rem;
-  border-left: 3px solid #b8d8cf;
+  border-left: 1px solid var(--rule);
 }
 
 .builder-control {
@@ -75,8 +75,8 @@
   margin: 1rem 0;
   padding: 1rem;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
+  border-radius: 0;
+  background: var(--plate);
 }
 
 .edge-detail-grid h3 {
