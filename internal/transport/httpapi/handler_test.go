@@ -15,7 +15,7 @@ import (
 func TestHealthReportsServiceStatus(t *testing.T) {
 	handler := NewHandler(statusStub{
 		snapshot: appstatus.Snapshot{SchemaVersion: 3},
-	}, nil, nil)
+	}, nil, nil, nil)
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 
@@ -44,7 +44,7 @@ func TestHealthReportsServiceStatus(t *testing.T) {
 }
 
 func TestHealthReturnsSafeUnavailableResponse(t *testing.T) {
-	handler := NewHandler(statusStub{err: errors.New("database password secret-value")}, nil, nil)
+	handler := NewHandler(statusStub{err: errors.New("database password secret-value")}, nil, nil, nil)
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 
@@ -71,7 +71,7 @@ func TestHandlerComposesHealthMCPAndWebRoutes(t *testing.T) {
 		response.Header().Set("X-Handler", "web")
 		response.WriteHeader(http.StatusCreated)
 	})
-	handler := NewHandler(statusStub{snapshot: appstatus.Snapshot{SchemaVersion: 3}}, mcpHandler, webHandler)
+	handler := NewHandler(statusStub{snapshot: appstatus.Snapshot{SchemaVersion: 3}}, mcpHandler, webHandler, nil)
 
 	testCases := []struct {
 		name            string
@@ -103,7 +103,7 @@ func TestHandlerComposesHealthMCPAndWebRoutes(t *testing.T) {
 }
 
 func TestHandlerWithoutOptionalMountsReturnsNotFound(t *testing.T) {
-	handler := NewHandler(statusStub{snapshot: appstatus.Snapshot{SchemaVersion: 3}}, nil, nil)
+	handler := NewHandler(statusStub{snapshot: appstatus.Snapshot{SchemaVersion: 3}}, nil, nil, nil)
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 

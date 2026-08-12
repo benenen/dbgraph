@@ -16,12 +16,22 @@ type handler struct {
 	status statusReader
 }
 
-func NewHandler(status statusReader, mcpHandler http.Handler, webHandler http.Handler) http.Handler {
+func NewHandler(
+	status statusReader,
+	mcpHandler http.Handler,
+	webHandler http.Handler,
+	consoleHandler http.Handler,
+) http.Handler {
 	h := &handler{status: status}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", h.health)
 	if mcpHandler != nil {
 		mux.Handle("/mcp", mcpHandler)
+	}
+	// The console owns its prefix; the existing panels keep everything else.
+	if consoleHandler != nil {
+		mux.Handle("/app/", consoleHandler)
+		mux.Handle("/app", http.RedirectHandler("/app/", http.StatusMovedPermanently))
 	}
 	if webHandler != nil {
 		mux.Handle("/", webHandler)

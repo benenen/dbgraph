@@ -247,13 +247,18 @@ func serve(serveConfig config.ServeConfig) (returnError error) {
 		Reconcile: reconcileService, Jobs: schemaScans, Audit: auditService,
 	}, appauth.NewSessionManager(webAuthenticator, time.Now, nil), webOptions...)
 
+	consoleHandler, err := webapi.NewConsoleHandler()
+	if err != nil {
+		return fmt.Errorf("load the console: %w", err)
+	}
+
 	listener, err := net.Listen("tcp", serveConfig.ListenAddress)
 	if err != nil {
 		return fmt.Errorf("listen on HTTP address: %w", err)
 	}
 
 	server := &http.Server{
-		Handler:           httpapi.NewHandler(store, mcpHandler, webHandler),
+		Handler:           httpapi.NewHandler(store, mcpHandler, webHandler, consoleHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
