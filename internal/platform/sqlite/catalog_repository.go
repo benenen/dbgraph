@@ -35,9 +35,13 @@ func NewCatalogRepository(store *Store, ids catalogIDGenerator) *CatalogReposito
 	return &CatalogRepository{store: store, ids: ids}
 }
 
-func (r *CatalogRepository) CreateDataSource(ctx context.Context, source catalog.DataSource) error {
+func (r *CatalogRepository) CreateDataSource(
+	ctx context.Context,
+	source catalog.DataSource,
+	projectID int64,
+) error {
 	err := r.store.write(ctx, func(tx *sql.Tx) error {
-		return insertDataSource(ctx, tx, source)
+		return insertDataSource(ctx, tx, source, projectID)
 	})
 	if err != nil {
 		return fmt.Errorf("insert data source: %w", err)
@@ -48,10 +52,11 @@ func (r *CatalogRepository) CreateDataSource(ctx context.Context, source catalog
 func (r *CatalogRepository) CreateDataSourceWithAudit(
 	ctx context.Context,
 	source catalog.DataSource,
+	projectID int64,
 	event audit.Event,
 ) error {
 	err := r.store.write(ctx, func(tx *sql.Tx) error {
-		if err := insertDataSource(ctx, tx, source); err != nil {
+		if err := insertDataSource(ctx, tx, source, projectID); err != nil {
 			return err
 		}
 		return insertAuditEvent(ctx, tx, event)
@@ -62,14 +67,13 @@ func (r *CatalogRepository) CreateDataSourceWithAudit(
 	return nil
 }
 
-func insertDataSource(ctx context.Context, tx *sql.Tx, source catalog.DataSource) error {
+func insertDataSource(ctx context.Context, tx *sql.Tx, source catalog.DataSource, projectID int64) error {
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO data_sources(
-    id, project_id, name, source_kind, dsn_environment, dsn_key_id, dsn_ciphertext, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    id, name, source_kind, dsn_environment, dsn_key_id, dsn_ciphertext, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `,
 		source.ID,
-		source.ProjectID,
 		source.Name,
 		source.Kind,
 		source.DSNEnvironment,
@@ -78,7 +82,40 @@ INSERT INTO data_sources(
 		source.CreatedAt.Format(time.RFC3339Nano),
 		source.UpdatedAt.Format(time.RFC3339Nano),
 	)
+	if err != nil {
+		return err
+	}
+	return linkDataSource(ctx, tx, projectID, source.ID, source.CreatedAt)
+}
+
+// linkDataSource records that a project uses a data source. Linking twice is a
+// no-op so a repeated request is harmless.
+func linkDataSource(ctx context.Context, tx *sql.Tx, projectID int64, dataSourceID int64, at time.Time) error {
+	_, err := tx.ExecContext(ctx, `
+INSERT INTO project_data_sources(project_id, data_source_id, created_at)
+VALUES (?, ?, ?)
+ON CONFLICT(project_id, data_source_id) DO NOTHING
+`, projectID, dataSourceID, at.Format(time.RFC3339Nano))
 	return err
+}
+
+// GetProjectDataSource returns a data source only when the project links it,
+// so a scan cannot run against a source the project never adopted.
+func (r *CatalogRepository) GetProjectDataSource(
+	ctx context.Context,
+	projectID int64,
+	dataSourceID int64,
+) (catalog.DataSource, error) {
+	var linked int
+	if err := r.store.db.QueryRowContext(ctx, `
+SELECT EXISTS(SELECT 1 FROM project_data_sources WHERE project_id = ? AND data_source_id = ?)
+`, projectID, dataSourceID).Scan(&linked); err != nil {
+		return catalog.DataSource{}, fmt.Errorf("verify data source link: %w", err)
+	}
+	if linked != 1 {
+		return catalog.DataSource{}, catalog.ErrDataSourceNotFound
+	}
+	return r.GetDataSource(ctx, dataSourceID)
 }
 
 func (r *CatalogRepository) GetDataSource(ctx context.Context, dataSourceID int64) (catalog.DataSource, error) {
@@ -88,12 +125,11 @@ func (r *CatalogRepository) GetDataSource(ctx context.Context, dataSourceID int6
 	var keyID sql.NullString
 	var ciphertext []byte
 	err := r.store.db.QueryRowContext(ctx, `
-SELECT id, project_id, name, source_kind, dsn_environment, dsn_key_id, dsn_ciphertext, created_at, updated_at
+SELECT id, name, source_kind, dsn_environment, dsn_key_id, dsn_ciphertext, created_at, updated_at
 FROM data_sources
 WHERE id = ?
 `, dataSourceID).Scan(
 		&source.ID,
-		&source.ProjectID,
 		&source.Name,
 		&source.Kind,
 		&source.DSNEnvironment,
@@ -552,7 +588,7 @@ func verifyDataSource(ctx context.Context, tx *sql.Tx, projectID int64, dataSour
 	var found int
 	if err := tx.QueryRowContext(ctx, `
 SELECT EXISTS(
-    SELECT 1 FROM data_sources WHERE id = ? AND project_id = ?
+    SELECT 1 FROM project_data_sources WHERE data_source_id = ? AND project_id = ?
 )
 `, dataSourceID, projectID).Scan(&found); err != nil {
 		return fmt.Errorf("verify data source: %w", err)
@@ -752,10 +788,12 @@ func (r *CatalogRepository) ListDataSources(
 	limit int,
 ) (sources []catalog.DataSource, returnError error) {
 	rows, err := r.store.db.QueryContext(ctx, `
-SELECT id, project_id, name, source_kind, dsn_environment, dsn_key_id, dsn_ciphertext, created_at, updated_at
-FROM data_sources
-WHERE project_id = ?
-ORDER BY name, id
+SELECT s.id, s.name, s.source_kind, s.dsn_environment, s.dsn_key_id, s.dsn_ciphertext,
+       s.created_at, s.updated_at
+FROM data_sources s
+JOIN project_data_sources link ON link.data_source_id = s.id
+WHERE link.project_id = ?
+ORDER BY s.name, s.id
 LIMIT ?
 `, projectID, limit)
 	if err != nil {
@@ -770,7 +808,7 @@ LIMIT ?
 		var keyID sql.NullString
 		var ciphertext []byte
 		if err := rows.Scan(
-			&source.ID, &source.ProjectID, &source.Name, &source.Kind,
+			&source.ID, &source.Name, &source.Kind,
 			&source.DSNEnvironment, &keyID, &ciphertext, &createdAt, &updatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan data source: %w", err)

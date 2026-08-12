@@ -20,7 +20,7 @@ func TestSchemaScanCoordinatorPersistsRunnerFailure(t *testing.T) {
 	store := &schemaScanStore{completed: make(chan jobs.Job, 1)}
 	coordinator := jobs.NewSchemaScanCoordinator(
 		store,
-		dataSourceCatalog{source: catalog.DataSource{ID: 8, ProjectID: 7, Kind: catalog.DataSourceMySQL}},
+		dataSourceCatalog{source: catalog.DataSource{ID: 8, Kind: catalog.DataSourceMySQL}},
 		schemaRunner{called: make(chan int64, 1), err: errors.New("source unavailable")},
 		&sequenceIDs{next: 200},
 		func() time.Time { return fixedTime },
@@ -55,7 +55,7 @@ func TestSchemaScanCoordinatorResumesPendingJobAfterRestart(t *testing.T) {
 	fixedTime := time.Date(2026, time.August, 11, 20, 30, 0, 0, time.UTC)
 	store := &schemaScanStore{completed: make(chan jobs.Job, 1)}
 	catalogSource := dataSourceCatalog{
-		source: catalog.DataSource{ID: 8, ProjectID: 7, Kind: catalog.DataSourceMySQL},
+		source: catalog.DataSource{ID: 8, Kind: catalog.DataSourceMySQL},
 	}
 	ids := &sequenceIDs{next: 300}
 	beforeRestart := jobs.NewSchemaScanCoordinator(
@@ -102,7 +102,7 @@ func TestSchemaScanCoordinatorRejectsInvalidPublicInputs(t *testing.T) {
 
 	coordinator := jobs.NewSchemaScanCoordinator(
 		&schemaScanStore{completed: make(chan jobs.Job, 1)},
-		dataSourceCatalog{source: catalog.DataSource{ID: 8, ProjectID: 7, Kind: catalog.DataSourceMySQL}},
+		dataSourceCatalog{source: catalog.DataSource{ID: 8, Kind: catalog.DataSourceMySQL}},
 		schemaRunner{called: make(chan int64, 1)},
 		&sequenceIDs{},
 		time.Now,

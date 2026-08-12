@@ -15,7 +15,7 @@ func TestCreateDataSourceAcceptsADSNAndNeverReturnsIt(t *testing.T) {
 	const dsn = "root:TotallySecretPassword123@tcp(127.0.0.1:3306)/orders?charset=utf8mb4"
 
 	stub := &catalogHTTPStub{createResult: catalog.DataSource{
-		ID: 30, ProjectID: 10, Name: "orders-primary", Kind: catalog.DataSourceMySQL,
+		ID: 30, Name: "orders-primary", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "ORDERS_DSN", DSNKeyID: "abcd1234", DSNCiphertext: []byte("sealed"),
 	}}
 	client := newWebTestClient(t, Services{Catalog: stub}, relations.RoleAdmin)
@@ -38,7 +38,7 @@ func TestCreateDataSourceAcceptsADSNAndNeverReturnsIt(t *testing.T) {
 	}
 
 	listStub := &catalogHTTPStub{sources: []catalog.DataSource{{
-		ID: 30, ProjectID: 10, Name: "orders-primary", Kind: catalog.DataSourceMySQL,
+		ID: 30, Name: "orders-primary", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "ORDERS_DSN", DSNKeyID: "abcd1234", DSNCiphertext: []byte("sealed"),
 	}}}
 	admin := newWebTestClient(t, Services{Catalog: listStub}, relations.RoleAdmin)

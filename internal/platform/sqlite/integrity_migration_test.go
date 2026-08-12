@@ -38,8 +38,8 @@ func TestFoundationEnumsAndRelationProjectionPairsAreDatabaseEnforced(t *testing
 		arguments []any
 	}{
 		{
-			`INSERT INTO data_sources(id, project_id, name, source_kind, dsn_environment, created_at, updated_at)
-             VALUES (20, 1, 'invalid-kind', 99, 'INVALID_KIND_DSN', ?, ?)`,
+			`INSERT INTO data_sources(id, name, source_kind, dsn_environment, created_at, updated_at)
+             VALUES (20, 'invalid-kind', 99, 'INVALID_KIND_DSN', ?, ?)`,
 			[]any{timestamp, timestamp},
 		},
 		{
@@ -125,8 +125,10 @@ func openIntegrityFixture(t *testing.T) *sql.DB {
 	}{
 		{`INSERT INTO projects(id, name, created_at, updated_at) VALUES (1, 'integrity', ?, ?)`, []any{timestamp, timestamp}},
 		{`INSERT INTO data_sources(
-             id, project_id, name, source_kind, dsn_environment, created_at, updated_at
-         ) VALUES (2, 1, 'source', 1, 'INTEGRITY_DSN', ?, ?)`, []any{timestamp, timestamp}},
+             id, name, source_kind, dsn_environment, created_at, updated_at
+         ) VALUES (2, 'source', 1, 'INTEGRITY_DSN', ?, ?)`, []any{timestamp, timestamp}},
+		{`INSERT INTO project_data_sources(project_id, data_source_id, created_at)
+         VALUES (1, 2, ?)`, []any{timestamp}},
 		{`INSERT INTO schema_scan_runs(
              id, project_id, data_source_id, status, started_at, completed_at
          ) VALUES (3, 1, 2, 2, ?, ?)`, []any{timestamp, timestamp}},

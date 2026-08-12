@@ -51,7 +51,7 @@ func (s *adminCodeRepositoryStub) CreateAsAdmin(_ context.Context, command catal
 func (s *adminCatalogStub) CreateDataSourceAsAdmin(_ context.Context, command catalog.AdminCreateDataSource) (catalog.DataSource, error) {
 	s.command = command
 	return catalog.DataSource{
-		ID: 31, ProjectID: command.ProjectID, Name: command.Name,
+		ID: 31, Name: command.Name,
 		Kind: command.Kind, DSNEnvironment: command.DSNEnvironment,
 	}, nil
 }

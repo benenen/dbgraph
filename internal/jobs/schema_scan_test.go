@@ -112,10 +112,26 @@ func (s *schemaScanStore) GetJob(_ context.Context, jobID int64) (jobs.Job, erro
 
 type dataSourceCatalog struct {
 	source catalog.DataSource
+	// linkedProject is the only project that may scan the source, mirroring
+	// project_data_sources.
+	linkedProject int64
 }
 
 func (s dataSourceCatalog) GetDataSource(context.Context, int64) (catalog.DataSource, error) {
 	return s.source, nil
+}
+
+// The link is what authorizes a scan, so the double answers only for the
+// project that owns the fixture.
+func (s dataSourceCatalog) GetProjectDataSource(
+	ctx context.Context,
+	projectID int64,
+	dataSourceID int64,
+) (catalog.DataSource, error) {
+	if s.linkedProject != 0 && projectID != s.linkedProject {
+		return catalog.DataSource{}, catalog.ErrDataSourceNotFound
+	}
+	return s.GetDataSource(ctx, dataSourceID)
 }
 
 type schemaRunner struct {
@@ -124,7 +140,7 @@ type schemaRunner struct {
 	err    error
 }
 
-func (r schemaRunner) Run(_ context.Context, dataSourceID int64) (catalog.PublishedSnapshot, error) {
+func (r schemaRunner) Run(_ context.Context, _ int64, dataSourceID int64) (catalog.PublishedSnapshot, error) {
 	r.called <- dataSourceID
 	return r.result, r.err
 }
@@ -134,13 +150,11 @@ type incrementalJobRunner struct {
 	result catalog.PublishedSnapshot
 }
 
-func (r incrementalJobRunner) Run(context.Context, int64) (catalog.PublishedSnapshot, error) {
+func (r incrementalJobRunner) Run(context.Context, int64, int64) (catalog.PublishedSnapshot, error) {
 	return catalog.PublishedSnapshot{}, errors.New("full schema scan was called")
 }
 
-func (r incrementalJobRunner) RunIncremental(
-	_ context.Context,
-	dataSourceID int64,
+func (r incrementalJobRunner) RunIncremental(_ context.Context, _ int64, dataSourceID int64,
 	tables []string,
 ) (catalog.PublishedSnapshot, error) {
 	if dataSourceID != 8 {
@@ -161,7 +175,7 @@ func TestSchemaScanCoordinatorDispatchesIncrementalTableScope(t *testing.T) {
 	}
 	coordinator := jobs.NewSchemaScanCoordinator(
 		store,
-		dataSourceCatalog{source: catalog.DataSource{ID: 8, ProjectID: 7, Kind: catalog.DataSourceMySQL}},
+		dataSourceCatalog{source: catalog.DataSource{ID: 8, Kind: catalog.DataSourceMySQL}},
 		runner,
 		&sequenceIDs{next: 120},
 		func() time.Time { return fixedTime },
@@ -199,7 +213,7 @@ func TestSchemaScanCoordinatorQueuesAuditsAndCompletesJob(t *testing.T) {
 	}
 	coordinator := jobs.NewSchemaScanCoordinator(
 		store,
-		dataSourceCatalog{source: catalog.DataSource{ID: 8, ProjectID: 7, Kind: catalog.DataSourceMySQL}},
+		dataSourceCatalog{source: catalog.DataSource{ID: 8, Kind: catalog.DataSourceMySQL}},
 		runner,
 		&sequenceIDs{next: 100},
 		func() time.Time { return fixedTime },
@@ -262,7 +276,7 @@ func TestSchemaScanCoordinatorRejectsUnauthorizedOrMismatchedProject(t *testing.
 	store := &schemaScanStore{completed: make(chan jobs.Job, 1)}
 	coordinator := jobs.NewSchemaScanCoordinator(
 		store,
-		dataSourceCatalog{source: catalog.DataSource{ID: 8, ProjectID: 7, Kind: catalog.DataSourceMySQL}},
+		dataSourceCatalog{source: catalog.DataSource{ID: 8, Kind: catalog.DataSourceMySQL}, linkedProject: 7},
 		schemaRunner{called: make(chan int64, 1)},
 		&sequenceIDs{},
 		time.Now,
@@ -277,8 +291,10 @@ func TestSchemaScanCoordinatorRejectsUnauthorizedOrMismatchedProject(t *testing.
 	}
 	viewer.Principal = relations.Principal{Actor: "admin", Role: relations.RoleAdmin, Origin: audit.OriginWeb}
 	viewer.ProjectID = 9
-	if _, err := coordinator.Start(context.Background(), viewer); !errors.Is(err, jobs.ErrInvalidJob) {
-		t.Fatalf("cross-project start error = %v, want invalid job", err)
+	// A project that has not linked the source is told the source does not
+	// exist, rather than that it exists and belongs to someone else.
+	if _, err := coordinator.Start(context.Background(), viewer); !errors.Is(err, catalog.ErrDataSourceNotFound) {
+		t.Fatalf("cross-project start error = %v, want data source not found", err)
 	}
 	if store.job.ID != 0 || store.audit.ID != 0 {
 		t.Fatalf("rejected command persisted state: job=%#v audit=%#v", store.job, store.audit)
@@ -303,7 +319,8 @@ func TestSchemaScanCoordinatorPersistsLifecycleAndAudit(t *testing.T) {
 	}
 	catalogService := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 	source, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID, Name: "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "PRIMARY_MYSQL_DSN",
+		ProjectID: project.ID,
+		Name:      "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "PRIMARY_MYSQL_DSN",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -365,7 +382,7 @@ func TestSchemaScanCoordinatorRecoversRunningJobAfterRestart(t *testing.T) {
 	}
 	coordinator := jobs.NewSchemaScanCoordinator(
 		store,
-		dataSourceCatalog{source: catalog.DataSource{ID: 8, ProjectID: 7, Kind: catalog.DataSourceMySQL}},
+		dataSourceCatalog{source: catalog.DataSource{ID: 8, Kind: catalog.DataSourceMySQL}},
 		schemaRunner{called: make(chan int64, 1), result: catalog.PublishedSnapshot{ScanRunID: 92, PublishedAt: fixedTime}},
 		&sequenceIDs{},
 		func() time.Time { return fixedTime },
@@ -395,7 +412,7 @@ func TestSchemaScanCoordinatorRetriesTemporaryStoreBackpressure(t *testing.T) {
 	}
 	coordinator := jobs.NewSchemaScanCoordinator(
 		store,
-		dataSourceCatalog{source: catalog.DataSource{ID: 8, ProjectID: 7, Kind: catalog.DataSourceMySQL}},
+		dataSourceCatalog{source: catalog.DataSource{ID: 8, Kind: catalog.DataSourceMySQL}},
 		schemaRunner{called: make(chan int64, 1), result: catalog.PublishedSnapshot{ScanRunID: 93, PublishedAt: fixedTime}},
 		&sequenceIDs{},
 		func() time.Time { return fixedTime },

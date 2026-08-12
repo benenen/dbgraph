@@ -63,10 +63,14 @@ function openDialog(): void {
 
 async function create(): Promise<void> {
   saving.value = true;
+  // Hand the connection string to the request and drop it from reactive state
+  // in the same breath. Clearing it after the await left it sitting in the
+  // input's value attribute for the length of the round trip and the dialog's
+  // close transition.
+  const submitted = { ...draft.value };
+  draft.value.dsn = "";
   try {
-    const source = await api.createDataSource(props.projectId, draft.value);
-    // The connection string is write-only; drop it as soon as it is sent.
-    draft.value.dsn = "";
+    const source = await api.createDataSource(props.projectId, submitted);
     dialogOpen.value = false;
     toast.add({ severity: "success", summary: `Data source ${source.name} created`, life: 4000 });
     await load();
@@ -193,8 +197,14 @@ onUnmounted(() => {
     </Column>
   </DataTable>
 
-  <Dialog v-model:visible="dialogOpen" modal header="Add a MySQL data source" :style="{ width: '34rem' }">
-    <form class="form" @submit.prevent="create">
+  <Dialog
+    v-model:visible="dialogOpen"
+    modal
+    header="Add a MySQL data source"
+    :style="{ width: '34rem' }"
+    :dismissable-mask="false"
+  >
+    <form v-if="dialogOpen" class="form" @submit.prevent="create">
       <label for="name">Name</label>
       <InputText id="name" v-model="draft.name" maxlength="200" required autofocus fluid />
 

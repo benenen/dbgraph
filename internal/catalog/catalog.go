@@ -69,10 +69,11 @@ const (
 )
 
 type DataSource struct {
-	ID        int64
-	ProjectID int64
-	Name      string
-	Kind      DataSourceKind
+	ID int64
+	// A data source is shared: projects link to it through
+	// project_data_sources rather than owning it.
+	Name string
+	Kind DataSourceKind
 	// DSNEnvironment names the environment variable holding the DSN. It is the
 	// fallback used when no sealed DSN is stored for this source.
 	DSNEnvironment string
@@ -193,9 +194,10 @@ type PublishedSnapshot struct {
 }
 
 type CatalogRepository interface {
-	CreateDataSource(context.Context, DataSource) error
-	CreateDataSourceWithAudit(context.Context, DataSource, audit.Event) error
+	CreateDataSource(context.Context, DataSource, int64) error
+	CreateDataSourceWithAudit(context.Context, DataSource, int64, audit.Event) error
 	GetDataSource(context.Context, int64) (DataSource, error)
+	GetProjectDataSource(context.Context, int64, int64) (DataSource, error)
 	ListDataSources(context.Context, int64, int) ([]DataSource, error)
 	BeginSchemaScan(context.Context, SchemaScanRun) error
 	FailSchemaScan(context.Context, SchemaScanFailure) error
@@ -203,6 +205,19 @@ type CatalogRepository interface {
 	FindCurrentNode(context.Context, int64, int64, string) (Node, error)
 	GetCurrentNode(context.Context, int64, int64) (Node, error)
 	SearchCurrentNodes(context.Context, int64, int64, string, int) ([]Node, error)
+}
+
+// GetProjectDataSource resolves a data source through the project that links
+// it. Anything scanning or publishing goes through this rather than a bare id.
+func (s *Service) GetProjectDataSource(
+	ctx context.Context,
+	projectID int64,
+	dataSourceID int64,
+) (DataSource, error) {
+	if projectID <= 0 || dataSourceID <= 0 {
+		return DataSource{}, ErrInvalidDataSource
+	}
+	return s.repository.GetProjectDataSource(ctx, projectID, dataSourceID)
 }
 
 func (s *Service) GetDataSource(ctx context.Context, dataSourceID int64) (DataSource, error) {
@@ -287,7 +302,7 @@ func (s *Service) CreateDataSourceAsAdmin(
 			"dsnStored": storedLabel(source),
 		})
 		return audit.Event{
-			ID: eventID, ProjectID: source.ProjectID, Actor: actor, Origin: command.Principal.Origin,
+			ID: eventID, ProjectID: command.ProjectID, Actor: actor, Origin: command.Principal.Origin,
 			Action: "DATA_SOURCE_CREATED", SubjectType: "DATA_SOURCE", SubjectID: source.ID,
 			Reason: reason, RequestID: requestID, Details: details, OccurredAt: occurredAt,
 		}
@@ -321,7 +336,6 @@ func (s *Service) createDataSource(
 	}
 	dataSource := DataSource{
 		ID:             dataSourceID,
-		ProjectID:      command.ProjectID,
 		Name:           name,
 		Kind:           command.Kind,
 		DSNEnvironment: dsnEnvironment,
@@ -335,12 +349,12 @@ func (s *Service) createDataSource(
 		if err != nil {
 			return DataSource{}, fmt.Errorf("generate data source audit ID: %w", err)
 		}
-		if err := s.repository.CreateDataSourceWithAudit(ctx, dataSource, auditBuilder(dataSource, auditID, now)); err != nil {
+		if err := s.repository.CreateDataSourceWithAudit(ctx, dataSource, command.ProjectID, auditBuilder(dataSource, auditID, now)); err != nil {
 			return DataSource{}, err
 		}
 		return dataSource, nil
 	}
-	if err := s.repository.CreateDataSource(ctx, dataSource); err != nil {
+	if err := s.repository.CreateDataSource(ctx, dataSource, command.ProjectID); err != nil {
 		return DataSource{}, err
 	}
 	return dataSource, nil

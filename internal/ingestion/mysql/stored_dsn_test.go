@@ -18,6 +18,10 @@ func (c *resolveCatalog) GetDataSource(context.Context, int64) (catalog.DataSour
 	return c.source, nil
 }
 
+func (c *resolveCatalog) GetProjectDataSource(ctx context.Context, _ int64, dataSourceID int64) (catalog.DataSource, error) {
+	return c.GetDataSource(ctx, dataSourceID)
+}
+
 func (c *resolveCatalog) BeginSchemaScan(_ context.Context, projectID, dataSourceID int64) (catalog.SchemaScanRun, error) {
 	return catalog.SchemaScanRun{ID: 40, ProjectID: projectID, DataSourceID: dataSourceID}, nil
 }
@@ -46,7 +50,7 @@ func TestRunnerPrefersTheSealedDSNOverTheEnvironment(t *testing.T) {
 	environmentReads := 0
 	runner := mysqlingestion.NewRunner(
 		&resolveCatalog{source: catalog.DataSource{
-			ID: 30, ProjectID: 10, Kind: catalog.DataSourceMySQL,
+			ID: 30, Kind: catalog.DataSourceMySQL,
 			DSNEnvironment: "ORDERS_DSN", DSNKeyID: "abcd1234",
 			DSNCiphertext: []byte("ciphertext"),
 		}},
@@ -67,7 +71,7 @@ func TestRunnerPrefersTheSealedDSNOverTheEnvironment(t *testing.T) {
 		}),
 	)
 
-	_, err := runner.Run(context.Background(), 30)
+	_, err := runner.Run(context.Background(), 10, 30)
 	if err == nil {
 		t.Fatal("expected the run to stop at the dial")
 	}
@@ -89,7 +93,7 @@ func TestRunnerFallsBackToTheEnvironmentWithoutCiphertext(t *testing.T) {
 	var dialled string
 	runner := mysqlingestion.NewRunner(
 		&resolveCatalog{source: catalog.DataSource{
-			ID: 31, ProjectID: 10, Kind: catalog.DataSourceMySQL, DSNEnvironment: "ORDERS_DSN",
+			ID: 31, Kind: catalog.DataSourceMySQL, DSNEnvironment: "ORDERS_DSN",
 		}},
 		nil,
 		func(_ context.Context, dsn string) (*sql.DB, error) {
@@ -108,7 +112,7 @@ func TestRunnerFallsBackToTheEnvironmentWithoutCiphertext(t *testing.T) {
 		}),
 	)
 
-	if _, err := runner.Run(context.Background(), 31); err == nil {
+	if _, err := runner.Run(context.Background(), 10, 31); err == nil {
 		t.Fatal("expected the run to stop at the dial")
 	}
 	if dialled != environmentDSN {
@@ -123,7 +127,7 @@ func TestRunnerReportsAnUnreadableSealedDSN(t *testing.T) {
 
 	runner := mysqlingestion.NewRunner(
 		&resolveCatalog{source: catalog.DataSource{
-			ID: 32, ProjectID: 10, Kind: catalog.DataSourceMySQL,
+			ID: 32, Kind: catalog.DataSourceMySQL,
 			DSNEnvironment: "ORDERS_DSN", DSNKeyID: "old-key", DSNCiphertext: []byte("ciphertext"),
 		}},
 		nil,
@@ -137,7 +141,7 @@ func TestRunnerReportsAnUnreadableSealedDSN(t *testing.T) {
 		}),
 	)
 
-	if _, err := runner.Run(context.Background(), 32); err == nil {
+	if _, err := runner.Run(context.Background(), 10, 32); err == nil {
 		t.Fatal("expected an error for an unreadable stored DSN")
 	}
 }

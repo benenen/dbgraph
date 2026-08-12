@@ -29,6 +29,10 @@ func (service *runnerCatalog) GetDataSource(context.Context, int64) (catalog.Dat
 	return service.dataSource, service.getError
 }
 
+func (service *runnerCatalog) GetProjectDataSource(ctx context.Context, _ int64, dataSourceID int64) (catalog.DataSource, error) {
+	return service.GetDataSource(ctx, dataSourceID)
+}
+
 func (service *runnerCatalog) BeginSchemaScan(
 	_ context.Context,
 	projectID int64,
@@ -73,7 +77,7 @@ func (function scannerFunc) Scan(ctx context.Context, database *sql.DB, schema s
 
 func validRunnerSource() catalog.DataSource {
 	return catalog.DataSource{
-		ID: 11, ProjectID: 7, Kind: catalog.DataSourceMySQL,
+		ID: 11, Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "SOURCE_DSN",
 	}
 }
@@ -108,7 +112,7 @@ func TestRunnerRejectsSourceAndConfigurationBeforeOpeningDatabase(t *testing.T) 
 				opened = true
 				return nil, errors.New("unexpected open")
 			}, test.lookup)
-			_, err := runner.Run(context.Background(), 11)
+			_, err := runner.Run(context.Background(), 7, 11)
 			if !errors.Is(err, test.want) || opened {
 				t.Fatalf("Run error = %v, want %v, opened = %v", err, test.want, opened)
 			}
@@ -124,7 +128,7 @@ func TestRunnerPropagatesOpenScanCloseAndPublishFailures(t *testing.T) {
 	openFailure := errors.New("open failed")
 	openRunner := mysqlingestion.NewRunner(&runnerCatalog{dataSource: validRunnerSource()}, nil,
 		func(context.Context, string) (*sql.DB, error) { return nil, openFailure }, lookup)
-	if _, err := openRunner.Run(context.Background(), 11); !errors.Is(err, openFailure) {
+	if _, err := openRunner.Run(context.Background(), 7, 11); !errors.Is(err, openFailure) {
 		t.Fatalf("open error = %v", err)
 	}
 
@@ -159,7 +163,7 @@ func TestRunnerPropagatesOpenScanCloseAndPublishFailures(t *testing.T) {
 				return snapshot, test.scanErr
 			}), func(context.Context, string) (*sql.DB, error) { return database, nil }, lookup)
 
-			result, runErr := runner.Run(context.Background(), 11)
+			result, runErr := runner.Run(context.Background(), 7, 11)
 			want := test.scanErr
 			if want == nil {
 				want = test.closeErr
@@ -222,7 +226,7 @@ func TestRunnerPublishesExplicitIncrementalTableScope(t *testing.T) {
 		func(context.Context, string) (*sql.DB, error) { return database, nil },
 		func(string) (string, bool) { return "user:secret@tcp(localhost:3306)/source?tls=true", true },
 	)
-	if _, err := runner.RunIncremental(context.Background(), 11, []string{"source.orders"}); err != nil {
+	if _, err := runner.RunIncremental(context.Background(), 7, 11, []string{"source.orders"}); err != nil {
 		t.Fatalf("run incremental schema scan: %v", err)
 	}
 	if !scanner.called || len(service.published.ScopeTables) != 1 || service.published.ScopeTables[0] != "source.orders" {

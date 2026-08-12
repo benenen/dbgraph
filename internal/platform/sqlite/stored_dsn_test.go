@@ -36,10 +36,10 @@ func TestStoredDSNCiphertextNeverLandsInTheDatabaseAsPlaintext(t *testing.T) {
 	ciphertext := []byte("sealed-bytes-standing-in-for-aes-gcm-output")
 	repository := dbsqlite.NewCatalogRepository(store, nil)
 	if err := repository.CreateDataSource(ctx, catalog.DataSource{
-		ID: 30, ProjectID: 10, Name: "orders-primary", Kind: catalog.DataSourceMySQL,
+		ID: 30, Name: "orders-primary", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "ORDERS_DSN", DSNKeyID: "abcd1234", DSNCiphertext: ciphertext,
 		CreatedAt: createdAt, UpdatedAt: createdAt,
-	}); err != nil {
+	}, 10); err != nil {
 		t.Fatalf("CreateDataSource: %v", err)
 	}
 
@@ -86,9 +86,9 @@ func TestDataSourceWithoutCiphertextKeepsWorking(t *testing.T) {
 	}
 	repository := dbsqlite.NewCatalogRepository(store, nil)
 	if err := repository.CreateDataSource(ctx, catalog.DataSource{
-		ID: 31, ProjectID: 10, Name: "legacy", Kind: catalog.DataSourceMySQL,
+		ID: 31, Name: "legacy", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "LEGACY_DSN", CreatedAt: createdAt, UpdatedAt: createdAt,
-	}); err != nil {
+	}, 10); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := repository.GetDataSource(ctx, 31)

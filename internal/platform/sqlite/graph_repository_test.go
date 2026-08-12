@@ -44,7 +44,8 @@ func TestGraphRepositoryLoadsRecursivePathsAcrossMultipleDepths(t *testing.T) {
 		dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime },
 	)
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID, Name: "recursive", Kind: catalog.DataSourceMySQL,
+		ProjectID: project.ID,
+		Name:      "recursive", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "RECURSIVE_GRAPH_MYSQL_DSN",
 	})
 	if err != nil {
@@ -215,7 +216,8 @@ func TestGraphRepositoryBoundsDenseCyclicLargeASTTraversal(t *testing.T) {
 		dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime },
 	)
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID, Name: "dense", Kind: catalog.DataSourceMySQL,
+		ProjectID: project.ID,
+		Name:      "dense", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "DENSE_GRAPH_MYSQL_DSN",
 	})
 	if err != nil {

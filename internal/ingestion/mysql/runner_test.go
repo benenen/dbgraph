@@ -100,7 +100,7 @@ func TestRunnerLoadsDSNFromEnvironmentAndPublishesSnapshot(t *testing.T) {
 	}
 	runner := mysql.NewRunner(catalogService, mysql.NewScanner(), openDatabase, lookupEnvironment)
 
-	published, err := runner.Run(ctx, dataSource.ID)
+	published, err := runner.Run(ctx, project.ID, dataSource.ID)
 	if err != nil {
 		t.Fatalf("run schema scan: %v", err)
 	}
@@ -141,7 +141,8 @@ func TestRunnerIgnoresCrossSchemaForeignKeysThatCatalogCannotRepresent(t *testin
 		dbsqlite.NewCatalogRepository(store, idGenerator), idGenerator, func() time.Time { return fixedTime },
 	)
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID, Name: "primary", Kind: catalog.DataSourceMySQL,
+		ProjectID: project.ID,
+		Name:      "primary", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "CROSS_SCHEMA_MYSQL_DSN",
 	})
 	if err != nil {
@@ -190,7 +191,7 @@ func TestRunnerIgnoresCrossSchemaForeignKeysThatCatalogCannotRepresent(t *testin
 		},
 	)
 
-	published, err := runner.Run(ctx, dataSource.ID)
+	published, err := runner.Run(ctx, project.ID, dataSource.ID)
 	if err != nil {
 		t.Fatalf("publish schema containing external foreign key metadata: %v", err)
 	}
@@ -236,7 +237,8 @@ func TestRunnerPersistsFailedScanRunWhenSourceCannotConnect(t *testing.T) {
 		dbsqlite.NewCatalogRepository(store, idGenerator), idGenerator, func() time.Time { return fixedTime },
 	)
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID, Name: "unavailable", Kind: catalog.DataSourceMySQL,
+		ProjectID: project.ID,
+		Name:      "unavailable", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "FAILED_SCAN_DSN",
 	})
 	if err != nil {
@@ -252,7 +254,7 @@ func TestRunnerPersistsFailedScanRunWhenSourceCannotConnect(t *testing.T) {
 			return "readonly:secret@tcp(mysql.example.test:3306)/learn?tls=true", true
 		},
 	)
-	if _, err := runner.Run(ctx, dataSource.ID); !errors.Is(err, connectFailure) {
+	if _, err := runner.Run(ctx, project.ID, dataSource.ID); !errors.Is(err, connectFailure) {
 		t.Fatalf("run scan error = %v, want source failure", err)
 	}
 

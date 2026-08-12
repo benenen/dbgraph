@@ -17,7 +17,7 @@ func TestListRoutesApplyRoleScopedFields(t *testing.T) {
 				{ID: 10, Name: "orders", Description: "order domain", CreatedAt: createdAt, UpdatedAt: createdAt},
 			}},
 			Catalog: &catalogHTTPStub{sources: []catalog.DataSource{
-				{ID: 30, ProjectID: 10, Name: "orders-primary", Kind: catalog.DataSourceMySQL,
+				{ID: 30, Name: "orders-primary", Kind: catalog.DataSourceMySQL,
 					DSNEnvironment: "ORDERS_DSN", CreatedAt: createdAt, UpdatedAt: createdAt},
 			}},
 			CodeRepositories: &repositoryHTTPStub{repositories: []catalog.CodeRepository{

@@ -33,12 +33,15 @@ func TestListQueriesOrderByNameAndScopeToTheirProject(t *testing.T) {
 	}
 
 	catalogRepository := dbsqlite.NewCatalogRepository(store, nil)
-	for _, source := range []catalog.DataSource{
-		{ID: 31, ProjectID: 10, Name: "orders-replica", Kind: catalog.DataSourceMySQL, DSNEnvironment: "ORDERS_REPLICA_DSN", CreatedAt: createdAt, UpdatedAt: createdAt},
-		{ID: 30, ProjectID: 10, Name: "orders-primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "ORDERS_DSN", CreatedAt: createdAt, UpdatedAt: createdAt},
-		{ID: 32, ProjectID: 20, Name: "warehouse-primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "WAREHOUSE_DSN", CreatedAt: createdAt, UpdatedAt: createdAt},
+	for _, linked := range []struct {
+		source    catalog.DataSource
+		projectID int64
+	}{
+		{source: catalog.DataSource{ID: 31, Name: "orders-replica", Kind: catalog.DataSourceMySQL, DSNEnvironment: "ORDERS_REPLICA_DSN", CreatedAt: createdAt, UpdatedAt: createdAt}, projectID: 10},
+		{source: catalog.DataSource{ID: 30, Name: "orders-primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "ORDERS_DSN", CreatedAt: createdAt, UpdatedAt: createdAt}, projectID: 10},
+		{source: catalog.DataSource{ID: 32, Name: "warehouse-primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "WAREHOUSE_DSN", CreatedAt: createdAt, UpdatedAt: createdAt}, projectID: 20},
 	} {
-		if err := catalogRepository.CreateDataSource(ctx, source); err != nil {
+		if err := catalogRepository.CreateDataSource(ctx, linked.source, linked.projectID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -119,10 +122,10 @@ func TestSearchCurrentNodesFiltersByDataSource(t *testing.T) {
 	}
 	catalogRepository := dbsqlite.NewCatalogRepository(store, ids)
 	for _, source := range []catalog.DataSource{
-		{ID: 30, ProjectID: 10, Name: "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "PRIMARY_DSN", CreatedAt: createdAt, UpdatedAt: createdAt},
-		{ID: 31, ProjectID: 10, Name: "replica", Kind: catalog.DataSourceMySQL, DSNEnvironment: "REPLICA_DSN", CreatedAt: createdAt, UpdatedAt: createdAt},
+		{ID: 30, Name: "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "PRIMARY_DSN", CreatedAt: createdAt, UpdatedAt: createdAt},
+		{ID: 31, Name: "replica", Kind: catalog.DataSourceMySQL, DSNEnvironment: "REPLICA_DSN", CreatedAt: createdAt, UpdatedAt: createdAt},
 	} {
-		if err := catalogRepository.CreateDataSource(ctx, source); err != nil {
+		if err := catalogRepository.CreateDataSource(ctx, source, 10); err != nil {
 			t.Fatal(err)
 		}
 	}

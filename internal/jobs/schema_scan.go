@@ -67,15 +67,15 @@ type SchemaScanStore interface {
 }
 
 type DataSourceCatalog interface {
-	GetDataSource(context.Context, int64) (catalog.DataSource, error)
+	GetProjectDataSource(context.Context, int64, int64) (catalog.DataSource, error)
 }
 
 type SchemaRunner interface {
-	Run(context.Context, int64) (catalog.PublishedSnapshot, error)
+	Run(context.Context, int64, int64) (catalog.PublishedSnapshot, error)
 }
 
 type incrementalSchemaRunner interface {
-	RunIncremental(context.Context, int64, []string) (catalog.PublishedSnapshot, error)
+	RunIncremental(context.Context, int64, int64, []string) (catalog.PublishedSnapshot, error)
 }
 
 type SchemaScanCoordinator struct {
@@ -116,11 +116,13 @@ func (c *SchemaScanCoordinator) Start(ctx context.Context, command StartSchemaSc
 	if c.store == nil || c.catalog == nil || c.ids == nil {
 		return Job{}, ErrInvalidJob
 	}
-	source, err := c.catalog.GetDataSource(ctx, command.DataSourceID)
+	// The link is the authorization: a project may only scan a source it has
+	// adopted, and GetProjectDataSource fails when it has not.
+	source, err := c.catalog.GetProjectDataSource(ctx, command.ProjectID, command.DataSourceID)
 	if err != nil {
 		return Job{}, err
 	}
-	if source.ProjectID != command.ProjectID || source.Kind != catalog.DataSourceMySQL {
+	if source.Kind != catalog.DataSourceMySQL {
 		return Job{}, ErrInvalidJob
 	}
 	payload, err := json.Marshal(schemaScanPayload{
@@ -239,9 +241,9 @@ func (c *SchemaScanCoordinator) processNext(ctx context.Context) (bool, error) {
 		if !ok {
 			return true, c.finishFailure(ctx, job, StatusFailed, "INCREMENTAL_SCAN_UNSUPPORTED")
 		}
-		published, runErr = incrementalRunner.RunIncremental(ctx, scanRequest.DataSourceID, scanRequest.Tables)
+		published, runErr = incrementalRunner.RunIncremental(ctx, job.ProjectID, scanRequest.DataSourceID, scanRequest.Tables)
 	} else {
-		published, runErr = c.runner.Run(ctx, scanRequest.DataSourceID)
+		published, runErr = c.runner.Run(ctx, job.ProjectID, scanRequest.DataSourceID)
 	}
 	if runErr != nil {
 		if ctx.Err() != nil {

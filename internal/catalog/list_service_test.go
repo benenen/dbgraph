@@ -76,12 +76,18 @@ func TestListMethodsRejectAnInvalidProject(t *testing.T) {
 
 type listCatalogStub struct{ sources []catalog.DataSource }
 
-func (s *listCatalogStub) CreateDataSource(context.Context, catalog.DataSource) error { return nil }
-func (s *listCatalogStub) CreateDataSourceWithAudit(context.Context, catalog.DataSource, audit.Event) error {
+func (s *listCatalogStub) CreateDataSource(context.Context, catalog.DataSource, int64) error {
+	return nil
+}
+func (s *listCatalogStub) CreateDataSourceWithAudit(context.Context, catalog.DataSource, int64, audit.Event) error {
 	return nil
 }
 func (s *listCatalogStub) GetDataSource(context.Context, int64) (catalog.DataSource, error) {
 	return catalog.DataSource{}, catalog.ErrDataSourceNotFound
+}
+
+func (s *listCatalogStub) GetProjectDataSource(ctx context.Context, _ int64, dataSourceID int64) (catalog.DataSource, error) {
+	return s.GetDataSource(ctx, dataSourceID)
 }
 func (s *listCatalogStub) ListDataSources(context.Context, int64, int) ([]catalog.DataSource, error) {
 	return s.sources, nil

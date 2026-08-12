@@ -33,8 +33,8 @@ func TestStoreOpensMigratedDatabase(t *testing.T) {
 		t.Fatalf("read status: %v", err)
 	}
 
-	if status.SchemaVersion != 9 {
-		t.Fatalf("schema version = %d, want 9", status.SchemaVersion)
+	if status.SchemaVersion != 10 {
+		t.Fatalf("schema version = %d, want 10", status.SchemaVersion)
 	}
 	if status.SQLiteVersion == "" {
 		t.Fatal("SQLite version is empty")

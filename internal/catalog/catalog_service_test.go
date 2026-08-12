@@ -39,7 +39,8 @@ func TestAdminCreatesAuditedDataSource(t *testing.T) {
 	}
 	service := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 	command := catalog.AdminCreateDataSource{
-		ProjectID: project.ID, Name: "primary", Kind: catalog.DataSourceMySQL,
+		ProjectID: project.ID,
+		Name:      "primary", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "PRIMARY_MYSQL_DSN", Reason: "Configure production metadata source", RequestID: "web-1",
 		Principal: relations.Principal{Actor: "viewer", Role: relations.RoleViewer, Origin: audit.OriginWeb},
 	}
@@ -83,7 +84,8 @@ func TestPublishSnapshotPublishesAndReconcilesDeclaredForeignKey(t *testing.T) {
 	}
 	service := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 	source, err := service.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID, Name: "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "FK_MYSQL_DSN",
+		ProjectID: project.ID,
+		Name:      "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "FK_MYSQL_DSN",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -377,7 +379,8 @@ func TestIncrementalSnapshotMarksOnlyNodesInsideExplicitTableScopeStale(t *testi
 		dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime },
 	)
 	source, err := service.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID, Name: "primary", Kind: catalog.DataSourceMySQL,
+		ProjectID: project.ID,
+		Name:      "primary", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "INCREMENTAL_MYSQL_DSN",
 	})
 	if err != nil {

@@ -75,6 +75,7 @@ func TestCleartextWebSignInWorksOverPlainHTTP(t *testing.T) {
 	}
 	base := "http://" + listenAddress
 
+	// The root now hands off to the console, which owns the sign-in form.
 	navigation, err := http.NewRequest(http.MethodGet, base+"/", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +88,7 @@ func TestCleartextWebSignInWorksOverPlainHTTP(t *testing.T) {
 	if err := redirect.Body.Close(); err != nil {
 		t.Errorf("close redirect response: %v", err)
 	}
-	if redirect.StatusCode != http.StatusSeeOther || redirect.Header.Get("Location") != "/login" {
+	if redirect.StatusCode != http.StatusFound || redirect.Header.Get("Location") != "/app/" {
 		t.Fatalf("GET / status=%d location=%q", redirect.StatusCode, redirect.Header.Get("Location"))
 	}
 
@@ -122,7 +123,7 @@ func TestCleartextWebSignInWorksOverPlainHTTP(t *testing.T) {
 		t.Fatalf("cookie jar over plain HTTP holds %#v, want a single dbgraph-session cookie", stored)
 	}
 
-	authenticated, err := http.NewRequest(http.MethodGet, base+"/", nil)
+	authenticated, err := http.NewRequest(http.MethodGet, base+"/app/", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +143,7 @@ func TestCleartextWebSignInWorksOverPlainHTTP(t *testing.T) {
 		t.Fatalf("authenticated GET / status=%d body=%q", page.StatusCode, body.String())
 	}
 	if !strings.Contains(body.String(), "dbgraph") {
-		t.Fatalf("authenticated page body=%q", body.String())
+		t.Fatalf("console shell body=%q", body.String())
 	}
 
 	// Read the captured output only after the process exits: exec writes into

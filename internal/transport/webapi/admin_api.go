@@ -230,7 +230,7 @@ func mapCodeRepository(repository catalog.CodeRepository) map[string]any {
 
 func mapDataSource(source catalog.DataSource) map[string]any {
 	return map[string]any{
-		"id": strconv.FormatInt(source.ID, 10), "projectId": strconv.FormatInt(source.ProjectID, 10),
+		"id":   strconv.FormatInt(source.ID, 10),
 		"name": source.Name, "kind": "MYSQL", "dsnEnvironment": source.DSNEnvironment,
 		"createdAt": source.CreatedAt.UTC().Format(time.RFC3339Nano), "updatedAt": source.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
@@ -244,7 +244,7 @@ func mapDataSourceForRole(source catalog.DataSource, role relations.Role) map[st
 		return mapDataSource(source)
 	}
 	return map[string]any{
-		"id": strconv.FormatInt(source.ID, 10), "projectId": strconv.FormatInt(source.ProjectID, 10),
+		"id":   strconv.FormatInt(source.ID, 10),
 		"name": source.Name, "kind": "MYSQL",
 	}
 }

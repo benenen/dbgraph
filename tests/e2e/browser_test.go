@@ -33,7 +33,10 @@ func (g *browserFixtureIDs) Next(context.Context) (int64, error) {
 	return g.next, nil
 }
 
-func TestBrowserLoginProposalReviewRevisionAndTrace(t *testing.T) {
+// TestBrowserConsoleBootstrapsAProject drives the console the way an operator
+// does. The relation lifecycle it used to cover moved to the API surface when
+// the vanilla panels were retired.
+func TestBrowserConsoleBootstrapsAProject(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the browser process lifecycle assertion requires Unix signals")
 	}
@@ -43,9 +46,10 @@ func TestBrowserLoginProposalReviewRevisionAndTrace(t *testing.T) {
 
 	testDirectory := t.TempDir()
 	adminToken := createBrowserToken(t)
-	reviewerToken := createBrowserToken(t)
+	// The flow stores a connection string, which requires a sealing key.
+	secretKey := createBrowserToken(t)
 	databasePath := filepath.Join(testDirectory, "dbgraph.sqlite")
-	projectID, sourceNodeID, targetNodeID := seedBrowserDatabase(t, databasePath)
+	projectID, _, _ := seedBrowserDatabase(t, databasePath)
 	certificatePath, keyPath := createLoopbackCertificate(t, testDirectory)
 	binaryPath := filepath.Join(testDirectory, "dbgraph")
 	build := exec.Command("go", "build", "-o", binaryPath, "../../cmd/dbgraph")
@@ -61,7 +65,8 @@ func TestBrowserLoginProposalReviewRevisionAndTrace(t *testing.T) {
 	)
 	command.Stdout = &processOutput
 	command.Stderr = &processOutput
-	command.Env = append(controlledEnvironment(), "DBGRAPH_WEB_ADMIN_TOKEN="+adminToken, "DBGRAPH_WEB_REVIEWER_TOKEN="+reviewerToken)
+	command.Env = append(controlledEnvironment(),
+		"DBGRAPH_WEB_ADMIN_TOKEN="+adminToken, "DBGRAPH_SECRET_KEY="+secretKey)
 	if err := command.Start(); err != nil {
 		t.Fatalf("start dbgraph serve: %v", err)
 	}
@@ -86,10 +91,7 @@ func TestBrowserLoginProposalReviewRevisionAndTrace(t *testing.T) {
 	browser.Env = append(os.Environ(),
 		"DBGRAPH_BROWSER_BASE_URL="+baseURL,
 		"DBGRAPH_BROWSER_TOKEN="+adminToken,
-		"DBGRAPH_BROWSER_REVIEWER_TOKEN="+reviewerToken,
 		"DBGRAPH_BROWSER_PROJECT_ID="+strconv.FormatInt(projectID, 10),
-		"DBGRAPH_BROWSER_SOURCE_NODE_ID="+strconv.FormatInt(sourceNodeID, 10),
-		"DBGRAPH_BROWSER_TARGET_NODE_ID="+strconv.FormatInt(targetNodeID, 10),
 		"DBGRAPH_BROWSER_ARTIFACTS="+testDirectory,
 	)
 	if output, err := browser.CombinedOutput(); err != nil {
@@ -135,7 +137,8 @@ func seedBrowserDatabase(t *testing.T, databasePath string) (int64, int64, int64
 	}
 	catalogService := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return now })
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID, Name: "browser-fixture", Kind: catalog.DataSourceMySQL,
+		ProjectID: project.ID,
+		Name:      "browser-fixture", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "BROWSER_E2E_MYSQL_DSN",
 	})
 	if err != nil {

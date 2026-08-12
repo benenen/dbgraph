@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -249,6 +250,51 @@ func (s *Store) migrate(ctx context.Context) error {
 	return nil
 }
 
+// noTransactionMarker opts a migration out of the surrounding transaction.
+const noTransactionMarker = "-- dbgraph:no-transaction"
+
+// applyMigrationOutsideTransaction runs SQLite's documented table-rebuild
+// procedure: foreign keys off, the script's own transaction, then
+// foreign_key_check before the version is recorded. A failed check leaves the
+// version unrecorded so the migration is retried rather than silently skipped.
+func (s *Store) applyMigrationOutsideTransaction(
+	ctx context.Context,
+	name string,
+	version int,
+	script []byte,
+) (returnError error) {
+	if _, err := s.db.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
+		return fmt.Errorf("disable foreign keys for migration %q: %w", name, err)
+	}
+	defer func() {
+		if _, err := s.db.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
+			returnError = errors.Join(returnError, fmt.Errorf("restore foreign keys: %w", err))
+		}
+	}()
+
+	if _, err := s.db.ExecContext(ctx, string(script)); err != nil {
+		return fmt.Errorf("execute migration %q: %w", name, err)
+	}
+
+	violations, err := s.db.QueryContext(ctx, "PRAGMA foreign_key_check")
+	if err != nil {
+		return fmt.Errorf("check foreign keys after migration %q: %w", name, err)
+	}
+	broken := violations.Next()
+	if err := errors.Join(violations.Err(), violations.Close()); err != nil {
+		return fmt.Errorf("check foreign keys after migration %q: %w", name, err)
+	}
+	if broken {
+		return fmt.Errorf("migration %q left dangling foreign key references", name)
+	}
+
+	if _, err := s.db.ExecContext(ctx,
+		"INSERT INTO schema_migrations(version) VALUES (?)", version); err != nil {
+		return fmt.Errorf("record migration %q: %w", name, err)
+	}
+	return nil
+}
+
 func (s *Store) applyMigration(ctx context.Context, name string) error {
 	versionText, _, ok := strings.Cut(name, "_")
 	if !ok {
@@ -270,6 +316,12 @@ func (s *Store) applyMigration(ctx context.Context, name string) error {
 	script, err := migrations.Files.ReadFile(name)
 	if err != nil {
 		return fmt.Errorf("read migration %q: %w", name, err)
+	}
+	// SQLite ignores PRAGMA foreign_keys inside a transaction, so a migration
+	// that rebuilds a referenced table has to run outside one. Such a migration
+	// says so, and integrity is checked before the version is recorded.
+	if bytes.Contains(script, []byte(noTransactionMarker)) {
+		return s.applyMigrationOutsideTransaction(ctx, name, version, script)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

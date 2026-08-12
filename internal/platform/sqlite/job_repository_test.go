@@ -32,9 +32,9 @@ func TestJobRepositoryRecoveryTerminatesOrphanedSchemaScanRun(t *testing.T) {
 	}
 	catalogRepository := dbsqlite.NewCatalogRepository(store, nil)
 	if err := catalogRepository.CreateDataSource(ctx, catalog.DataSource{
-		ID: 20, ProjectID: 10, Name: "interrupted", Kind: catalog.DataSourceMySQL,
+		ID: 20, Name: "interrupted", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "INTERRUPTED_SCAN_DSN", CreatedAt: startedAt, UpdatedAt: startedAt,
-	}); err != nil {
+	}, 10); err != nil {
 		t.Fatal(err)
 	}
 	if err := catalogRepository.BeginSchemaScan(ctx, catalog.SchemaScanRun{

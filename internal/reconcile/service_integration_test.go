@@ -379,7 +379,8 @@ func createInitFixture(
 	}
 	catalogService := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID, Name: "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "DBGRAPH_INIT_TEST_DSN",
+		ProjectID: project.ID,
+		Name:      "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "DBGRAPH_INIT_TEST_DSN",
 	})
 	if err != nil {
 		t.Fatalf("create data source: %v", err)

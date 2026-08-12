@@ -41,7 +41,8 @@ func TestDeclaredForeignKeyCannotBeRestoredWhileAbsent(t *testing.T) {
 		dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime },
 	)
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID, Name: "primary", Kind: catalog.DataSourceMySQL,
+		ProjectID: project.ID,
+		Name:      "primary", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "DECLARED_FK_STATE_MYSQL_DSN",
 	})
 	if err != nil {
