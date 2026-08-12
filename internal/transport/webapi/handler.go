@@ -41,6 +41,7 @@ type CatalogService interface {
 	UnlinkDataSource(context.Context, int64, int64) error
 	DeleteDataSource(context.Context, int64) error
 	UpdateDataSourceAsAdmin(context.Context, catalog.AdminUpdateDataSource) (catalog.DataSource, error)
+	ListTables(context.Context, int64, int64, string, int) ([]catalog.TableSummary, error)
 }
 
 type ProjectService interface {
@@ -68,6 +69,7 @@ type RelationService interface {
 
 type GraphService interface {
 	Trace(context.Context, graph.TraceRequest) (graph.TraceResult, error)
+	DataSourceGraph(context.Context, int64, int64) (graph.DataSourceGraph, error)
 }
 
 type ReconcileService interface {
@@ -164,6 +166,8 @@ func NewHandler(services Services, sessions *appauth.SessionManager, options ...
 	h.mux.HandleFunc("POST /api/v1/data-sources/{dataSourceID}/update", h.updateDataSource)
 	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/data-sources/{dataSourceID}/link", h.linkDataSource)
 	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/data-sources/{dataSourceID}/unlink", h.unlinkDataSource)
+	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/data-sources/{dataSourceID}/tables", h.listTables)
+	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/data-sources/{dataSourceID}/relation-graph", h.dataSourceGraph)
 	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/repositories", h.listRepositories)
 	h.mux.HandleFunc("GET /api/v1/session", h.getSession)
 	h.mux.HandleFunc("POST /logout", h.logout)

@@ -78,6 +78,12 @@ const (
 	MaximumListLimit = 200
 )
 
+// MaximumTableListLimit bounds a table browse. It is far above the list limit
+// because browsing is the whole point: one database here holds 459 tables, and
+// a reader scanning names for the right one needs all of them. The rows are
+// three short fields read from an index, not a page of full records.
+const MaximumTableListLimit = 5000
+
 func clampListLimit(limit int) int {
 	if limit < MinimumListLimit {
 		return DefaultListLimit
@@ -220,6 +226,21 @@ type PublishedSnapshot struct {
 	PublishedAt time.Time
 }
 
+// TableSummary identifies one table for browsing. It is deliberately thin: a
+// catalog holds 459 of these for a single database, and the console lists them
+// before it knows which one the reader wants.
+type TableSummary struct {
+	ID            int64
+	Name          string
+	QualifiedName string
+}
+
+// TableLister is optional on a repository, in the same way the recursive graph
+// reader is: a Service without it cannot browse tables.
+type TableLister interface {
+	ListTables(ctx context.Context, projectID int64, dataSourceID int64, filter string, limit int) ([]TableSummary, error)
+}
+
 type CatalogRepository interface {
 	CreateDataSource(context.Context, DataSource, int64) error
 	CreateDataSourceWithAudit(context.Context, DataSource, int64, audit.Event) error
@@ -337,6 +358,32 @@ func (s *Service) UpdateDataSourceAsAdmin(
 		return DataSource{}, err
 	}
 	return updated, nil
+}
+
+// ListTables browses the tables one data source imported. A catalog with no
+// relations is still worth reading, which is the state every source is in
+// between its first scan and its first approved relation.
+func (s *Service) ListTables(
+	ctx context.Context,
+	projectID int64,
+	dataSourceID int64,
+	filter string,
+	limit int,
+) ([]TableSummary, error) {
+	if projectID <= 0 || dataSourceID <= 0 {
+		return nil, ErrInvalidDataSource
+	}
+	if len(filter) > 200 {
+		return nil, ErrInvalidDataSource
+	}
+	lister, ok := s.repository.(TableLister)
+	if !ok {
+		return nil, ErrInvalidDataSource
+	}
+	if limit < MinimumListLimit || limit > MaximumTableListLimit {
+		limit = MaximumTableListLimit
+	}
+	return lister.ListTables(ctx, projectID, dataSourceID, filter, limit)
 }
 
 // DeleteDataSource removes a source that has imported nothing yet.

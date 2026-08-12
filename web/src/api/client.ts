@@ -20,6 +20,28 @@ export interface DataSource {
   createdAt?: string;
 }
 
+export interface TableSummary {
+  id: string;
+  name: string;
+  qualifiedName: string;
+}
+
+export interface RelationEdge {
+  relationId: string;
+  sourceTableId: string;
+  targetTableId: string;
+  sourceColumn: string;
+  targetColumn: string;
+  conditional: boolean;
+  confidence: number;
+}
+
+export interface RelationGraph {
+  tables: TableSummary[];
+  edges: RelationEdge[];
+  truncated: boolean;
+}
+
 export interface Job {
   id: string;
   projectId: string;
@@ -193,6 +215,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ mode: "FULL", reason }),
     }),
+
+  listTables: (projectId: string, dataSourceId: string, filter: string) =>
+    request<{ tables: TableSummary[]; truncated: boolean }>(
+      `/api/v1/projects/${projectId}/data-sources/${dataSourceId}/tables?q=${encodeURIComponent(filter)}`,
+    ),
+
+  relationGraph: (projectId: string, dataSourceId: string) =>
+    request<RelationGraph>(
+      `/api/v1/projects/${projectId}/data-sources/${dataSourceId}/relation-graph`,
+    ),
 
   job: (projectId: string, jobId: string) =>
     request<Job>(`/api/v1/projects/${projectId}/schema-scan-jobs/${jobId}`),

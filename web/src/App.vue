@@ -13,7 +13,10 @@ const session = ref<Session | null>(null);
 const ready = ref(false);
 
 // One workspace, so the sidebar names the one thing an operator manages.
-const navigation = [{ label: "Data sources", icon: "pi pi-database", route: "data-sources" }];
+const navigation = [
+  { label: "Data sources", icon: "pi pi-database", route: "data-sources" },
+  { label: "Relation graph", icon: "pi pi-share-alt", route: "relation-graph" },
+];
 
 function isActive(name: string): boolean {
   return route.name === name;

@@ -102,6 +102,9 @@ func webErrorCode(t *testing.T, response *httptest.ResponseRecorder) string {
 }
 
 type catalogHTTPStub struct {
+	tables        []catalog.TableSummary
+	tablesFilter  string
+	tablesErr     error
 	createCommand catalog.AdminCreateDataSource
 	createResult  catalog.DataSource
 	createErr     error
@@ -224,10 +227,35 @@ func (s *relationHTTPStub) ListProposals(_ context.Context, _ int64, limit int) 
 }
 
 type graphHTTPStub struct {
-	result  graph.TraceResult
-	err     error
-	calls   int
-	request graph.TraceRequest
+	result           graph.TraceResult
+	err              error
+	calls            int
+	request          graph.TraceRequest
+	dataSourceGraph  graph.DataSourceGraph
+	dataSourceErr    error
+	dataSourceCalls  int
+	dataSourceSource int64
+}
+
+func (s *graphHTTPStub) DataSourceGraph(
+	_ context.Context,
+	_ int64,
+	dataSourceID int64,
+) (graph.DataSourceGraph, error) {
+	s.dataSourceCalls++
+	s.dataSourceSource = dataSourceID
+	return s.dataSourceGraph, s.dataSourceErr
+}
+
+func (s *catalogHTTPStub) ListTables(
+	_ context.Context,
+	_ int64,
+	_ int64,
+	filter string,
+	_ int,
+) ([]catalog.TableSummary, error) {
+	s.tablesFilter = filter
+	return s.tables, s.tablesErr
 }
 
 func (s *graphHTTPStub) Trace(_ context.Context, request graph.TraceRequest) (graph.TraceResult, error) {
