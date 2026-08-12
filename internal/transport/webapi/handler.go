@@ -157,7 +157,6 @@ func NewHandler(services Services, sessions *appauth.SessionManager, options ...
 	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/repositories", h.limitExpensiveRead(h.listRepositories))
 	h.mux.HandleFunc("GET /api/v1/session", h.getSession)
 	h.mux.HandleFunc("POST /logout", h.logout)
-	h.mux.HandleFunc("GET /", h.indexPage)
 	protection := http.NewCrossOriginProtection()
 	return protection.Handler(h)
 }
@@ -167,16 +166,8 @@ func (h *handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	requestID := newRequestID()
 	response.Header().Set("X-Request-ID", requestID)
 	request = request.WithContext(context.WithValue(request.Context(), requestIDContextKey, requestID))
-	if request.URL.Path == loginPath && request.Method == http.MethodGet {
-		servePageTemplate(response, "login.html")
-		return
-	}
 	if request.URL.Path == loginPath && request.Method == http.MethodPost {
 		h.login(response, request)
-		return
-	}
-	if strings.HasPrefix(request.URL.Path, "/assets/") && request.Method == http.MethodGet {
-		serveStaticAsset(response, request)
 		return
 	}
 	cookie, err := request.Cookie(h.cookieName)
@@ -220,10 +211,6 @@ func (h *handler) limitExpensiveRead(next http.HandlerFunc) http.HandlerFunc {
 
 func isGraphTrace(request *http.Request) bool {
 	return request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/graph-traces")
-}
-
-func (h *handler) indexPage(response http.ResponseWriter, _ *http.Request) {
-	servePageTemplate(response, "index.html")
 }
 
 func (h *handler) login(response http.ResponseWriter, request *http.Request) {
@@ -330,13 +317,13 @@ func setSecurityHeaders(response http.ResponseWriter) {
 	response.Header().Set("X-Frame-Options", "DENY")
 }
 
-// rejectUnauthenticated sends a browser page navigation to the login form and
-// keeps the JSON error contract for every other caller, including the fetch
-// requests in assets/app.js that already redirect on 401 themselves.
+// rejectUnauthenticated sends a browser page navigation to the console, which
+// owns the sign-in form, and keeps the JSON error contract for every other
+// caller: the console's fetch layer routes a 401 to its own login route.
 func rejectUnauthenticated(response http.ResponseWriter, request *http.Request) {
 	if isPageNavigation(request) {
 		response.Header().Set("Cache-Control", "no-store")
-		http.Redirect(response, request, loginPath, http.StatusSeeOther)
+		http.Redirect(response, request, ConsolePathPrefix+"login", http.StatusSeeOther)
 		return
 	}
 	writeError(response, http.StatusUnauthorized, "UNAUTHENTICATED", "authentication required", nil)

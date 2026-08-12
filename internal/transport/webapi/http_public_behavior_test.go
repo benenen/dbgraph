@@ -27,14 +27,6 @@ func TestPublicLoginSessionLogoutAndSecurityHeaders(t *testing.T) {
 	}
 	handler := NewHandler(Services{}, appauth.NewSessionManager(authenticator, func() time.Time { return testWebTime }, nil))
 
-	loginPage := httptest.NewRecorder()
-	handler.ServeHTTP(loginPage, httptest.NewRequest(http.MethodGet, "https://localhost/login", nil))
-	assertWebStatus(t, loginPage, http.StatusOK, "")
-	if !strings.Contains(loginPage.Body.String(), "Sign in to dbgraph") {
-		t.Fatalf("login page body=%q", loginPage.Body.String())
-	}
-	assertSecurityHeaders(t, loginPage)
-
 	loginRequest := httptest.NewRequest(http.MethodPost, "https://localhost/login", strings.NewReader(`{"token":"`+testWebToken+`"}`))
 	loginRequest.Header.Set("Content-Type", "application/json")
 	loginRequest.RemoteAddr = "192.0.2.15:5544"
@@ -80,50 +72,6 @@ func TestPublicLoginSessionLogoutAndSecurityHeaders(t *testing.T) {
 	assertWebStatus(t, afterLogout, http.StatusUnauthorized, "UNAUTHENTICATED")
 }
 
-func TestPublicAssetsAreVendoredAndSafelyServed(t *testing.T) {
-	authenticator, err := appauth.NewTokenAuthenticator(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler := NewHandler(Services{}, appauth.NewSessionManager(authenticator, time.Now, nil))
-	tests := []struct {
-		name          string
-		path          string
-		status        int
-		contentType   string
-		bodyContains  string
-		cacheContains string
-	}{
-		{name: "application JavaScript", path: "/assets/app.js", status: http.StatusOK, contentType: "javascript", bodyContains: "renderConditionNode"},
-		{name: "editor controls JavaScript", path: "/assets/editor_controls.js", status: http.StatusOK, contentType: "javascript", bodyContains: "initializeStructuredEditors"},
-		{name: "application CSS", path: "/assets/app.css", status: http.StatusOK, contentType: "text/css", bodyContains: ":root"},
-		{name: "workflow CSS", path: "/assets/workflows.css", status: http.StatusOK, contentType: "text/css"},
-		{name: "SVG favicon", path: "/assets/favicon.svg", status: http.StatusOK, contentType: "image/svg+xml", bodyContains: "<svg"},
-		{name: "Cytoscape", path: "/assets/cytoscape.min.js", status: http.StatusOK, contentType: "javascript", bodyContains: "cytoscape", cacheContains: "max-age=3600"},
-		{name: "missing asset", path: "/assets/missing.js", status: http.StatusNotFound},
-		{name: "path traversal", path: "/assets/../handler.go", status: http.StatusNotFound},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "https://localhost"+test.path, nil))
-			if response.Code != test.status {
-				t.Fatalf("status=%d want=%d body=%q", response.Code, test.status, response.Body.String())
-			}
-			assertSecurityHeaders(t, response)
-			if test.contentType != "" && !strings.Contains(response.Header().Get("Content-Type"), test.contentType) {
-				t.Fatalf("Content-Type=%q", response.Header().Get("Content-Type"))
-			}
-			if test.bodyContains != "" && !strings.Contains(response.Body.String(), test.bodyContains) {
-				t.Fatalf("asset body does not contain %q", test.bodyContains)
-			}
-			if test.cacheContains != "" && !strings.Contains(response.Header().Get("Cache-Control"), test.cacheContains) {
-				t.Fatalf("Cache-Control=%q", response.Header().Get("Cache-Control"))
-			}
-		})
-	}
-}
-
 func TestAuthenticatedGETRoutesReturnProjectScopedResources(t *testing.T) {
 	now := testWebTime
 	revision := &relations.Revision{
@@ -160,7 +108,6 @@ func TestAuthenticatedGETRoutesReturnProjectScopedResources(t *testing.T) {
 		path     string
 		contains string
 	}{
-		{name: "index", path: "/", contains: "Conditional data lineage"},
 		{name: "nodes", path: "/api/v1/projects/10/nodes?q=student&limit=5", contains: "school.student.id"},
 		{name: "node details", path: "/api/v1/projects/10/nodes/11", contains: "school.student.id"},
 		{name: "relation", path: "/api/v1/projects/10/relations/20", contains: `"relationId":"20"`},
@@ -213,15 +160,15 @@ func TestUnauthenticatedPageNavigationRedirectsToLogin(t *testing.T) {
 	}{
 		{
 			name: "page navigation without a session", method: http.MethodGet, path: "/",
-			accept: browserAccept, status: http.StatusSeeOther, location: "/login",
+			accept: browserAccept, status: http.StatusSeeOther, location: "/app/login",
 		},
 		{
 			name: "page navigation with an expired session", method: http.MethodGet, path: "/",
-			accept: browserAccept, cookie: staleCookie, status: http.StatusSeeOther, location: "/login",
+			accept: browserAccept, cookie: staleCookie, status: http.StatusSeeOther, location: "/app/login",
 		},
 		{
 			name: "HEAD page navigation", method: http.MethodHead, path: "/",
-			accept: browserAccept, status: http.StatusSeeOther, location: "/login",
+			accept: browserAccept, status: http.StatusSeeOther, location: "/app/login",
 		},
 		{
 			name: "API read stays a JSON error", method: http.MethodGet, path: "/api/v1/session",

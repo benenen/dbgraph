@@ -28,10 +28,11 @@ func NewHandler(
 	if mcpHandler != nil {
 		mux.Handle("/mcp", mcpHandler)
 	}
-	// The console owns its prefix; the existing panels keep everything else.
+	// The console is the Web UI; webHandler keeps the JSON surface it runs on.
 	if consoleHandler != nil {
 		mux.Handle("/app/", consoleHandler)
 		mux.Handle("/app", http.RedirectHandler("/app/", http.StatusMovedPermanently))
+		mux.Handle("GET /{$}", http.RedirectHandler("/app/", http.StatusFound))
 	}
 	if webHandler != nil {
 		mux.Handle("/", webHandler)
