@@ -294,6 +294,18 @@ func TestServicePublishesCurrentSchemaSnapshot(t *testing.T) {
 	if len(matches) != 4 {
 		t.Fatalf("search match count = %d, want table and column from both data sources", len(matches))
 	}
+	scopedMatches, err := service.SearchCurrentNodes(ctx, project.ID, secondarySource.ID, "student", 10)
+	if err != nil {
+		t.Fatalf("search current nodes scoped to a data source: %v", err)
+	}
+	if len(scopedMatches) != 2 {
+		t.Fatalf("scoped search match count = %d, want table and column from the secondary data source only", len(scopedMatches))
+	}
+	for _, match := range scopedMatches {
+		if match.DataSourceID != secondarySource.ID {
+			t.Fatalf("scoped search returned a node from another data source: %#v", match)
+		}
+	}
 	matchCounts := map[int64]int{}
 	for _, match := range matches {
 		matchCounts[match.DataSourceID]++
