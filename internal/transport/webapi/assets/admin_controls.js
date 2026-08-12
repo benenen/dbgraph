@@ -10,6 +10,7 @@ function initializeAdmin() {
       }) });
       await loadProjects(project.id);
       byId("project-id").value = project.id;
+      byId("project-id").dispatchEvent(new Event("change"));
       loadProjectList();
       showMessage(`Project ${project.id} created.`, true);
     } catch (error) { showMessage(error.message); }

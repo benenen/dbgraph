@@ -26,6 +26,7 @@ async function api(path, options = {}) {
     if (response.status === 401 && location.pathname !== "/login") location.assign("/login");
     const error = new Error(envelope.error?.message || `HTTP ${response.status}`);
     error.details = envelope.error?.details;
+    error.status = response.status;
     throw error;
   }
   return envelope.data;
@@ -70,13 +71,14 @@ function initializeNavigation() {
 function activatePanel(name) {
   document.querySelectorAll(".panel").forEach(panel => panel.classList.toggle("active", panel.id === `panel-${name}`));
   document.querySelectorAll("[data-panel-link]").forEach(link => link.classList.toggle("active", link.dataset.panelLink === name));
-  // Covers every path that lands on Schema Explorer without a click on its
-  // nav link: the initial location.hash check and the hashchange listener
-  // in initializeNavigation() both call activatePanel() directly. The
-  // request-token guard in loadNodeDataSources() makes any redundant call
-  // here (e.g. one that also arrives via the dedicated click listener in
-  // initializeNodeSearch()) harmless.
+  // Covers every path that lands on one of these panels without a click on
+  // its nav link: the initial location.hash check and the hashchange
+  // listener in initializeNavigation() both call activatePanel() directly.
+  // The request-token guards in the underlying load functions make any
+  // redundant call here (e.g. one that also arrives via a page-load catch-up
+  // call, or the project select's "change" listener) harmless.
   if (name === "schema") loadNodeDataSources();
+  if (name === "data-sources") { loadDataSourceList(); loadRepositoryList(); }
 }
 
 function applyRoleCapabilities() {
@@ -158,7 +160,11 @@ async function loadNodeDataSources() {
     if (requestToken !== nodeDataSourcesRequestToken) return; // a newer call already superseded this one
     state.dataSourceNames = new Map(sources.map(source => [source.id, source.name]));
     for (const source of sources) select.append(new Option(source.name, source.id));
-  } catch { /* the picker stays on "All data sources" */ }
+  } catch (error) {
+    // The picker stays on "All data sources", but the operator needs to know
+    // why — otherwise the filter silently degrades and rows show raw ids.
+    if (requestToken === nodeDataSourcesRequestToken) showMessage(error.message);
+  }
 }
 
 function showNodeDetails(node) {
@@ -203,7 +209,6 @@ function initializeNodeSearch() {
       }), "No nodes found");
     } catch (error) { showMessage(error.message); }
   });
-  document.querySelectorAll('[data-panel-link="schema"]').forEach(link => link.addEventListener("click", loadNodeDataSources));
 }
 
 function initializeGraphNodeSearch() {
@@ -786,12 +791,13 @@ async function initializeApp() {
   if (await initializeLogin()) return;
   try {
     await initializeSession(); initializeNavigation(); applyRoleCapabilities(); initializeProjectPicker(); await loadProjects();
-    // initializeNavigation() runs (and may activate Schema Explorer from
-    // location.hash) before loadProjects() has restored/auto-selected a
-    // project, so that first activatePanel("schema") call finds no project
-    // yet and its loadNodeDataSources() call is a no-op. Catch up now that
-    // a project is known, guarded by the same request token.
+    // initializeNavigation() runs (and may activate Schema Explorer or Data
+    // sources from location.hash) before loadProjects() has restored/auto-
+    // selected a project, so that first activatePanel() call finds no
+    // project yet and its project-scoped load calls are no-ops. Catch up now
+    // that a project is known, guarded by the same request tokens.
     if (byId("panel-schema").classList.contains("active")) loadNodeDataSources();
+    if (byId("panel-data-sources").classList.contains("active")) { loadDataSourceList(); loadRepositoryList(); }
     initializeNodeSearch(); initializeGraphNodeSearch(); initializeTrace(); initializeStructuredEditors(); initializeProposal();
     initializeRelationActions(); initializeGraphRelationActions(); initializeReview(); initializeQueries(); initializeAdmin(); initializeWorkspace();
     ["trace-type-filter", "trace-status-filter", "trace-confidence-filter"].forEach(id => byId(id).addEventListener("change", () => {
