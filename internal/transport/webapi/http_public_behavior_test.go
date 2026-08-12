@@ -192,6 +192,73 @@ func TestUnauthenticatedApplicationRequestIsRejected(t *testing.T) {
 	assertWebStatus(t, response, http.StatusUnauthorized, "UNAUTHENTICATED")
 }
 
+func TestUnauthenticatedPageNavigationRedirectsToLogin(t *testing.T) {
+	const browserAccept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+	authenticator, err := appauth.NewTokenAuthenticator(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(Services{}, appauth.NewSessionManager(authenticator, time.Now, nil))
+	staleCookie := &http.Cookie{Name: sessionCookieName, Value: "expired-session-token"}
+
+	tests := []struct {
+		name     string
+		method   string
+		path     string
+		accept   string
+		cookie   *http.Cookie
+		status   int
+		location string
+		code     string
+	}{
+		{
+			name: "page navigation without a session", method: http.MethodGet, path: "/",
+			accept: browserAccept, status: http.StatusSeeOther, location: "/login",
+		},
+		{
+			name: "page navigation with an expired session", method: http.MethodGet, path: "/",
+			accept: browserAccept, cookie: staleCookie, status: http.StatusSeeOther, location: "/login",
+		},
+		{
+			name: "HEAD page navigation", method: http.MethodHead, path: "/",
+			accept: browserAccept, status: http.StatusSeeOther, location: "/login",
+		},
+		{
+			name: "API read stays a JSON error", method: http.MethodGet, path: "/api/v1/session",
+			accept: browserAccept, status: http.StatusUnauthorized, code: "UNAUTHENTICATED",
+		},
+		{
+			name: "API write stays a JSON error", method: http.MethodPost, path: "/api/v1/projects",
+			accept: browserAccept, status: http.StatusUnauthorized, code: "UNAUTHENTICATED",
+		},
+		{
+			name: "non-browser client stays a JSON error", method: http.MethodGet, path: "/",
+			accept: "application/json", status: http.StatusUnauthorized, code: "UNAUTHENTICATED",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, "https://localhost"+test.path, nil)
+			request.Header.Set("Accept", test.accept)
+			if test.cookie != nil {
+				request.AddCookie(test.cookie)
+			}
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if test.code != "" {
+				assertWebStatus(t, response, test.status, test.code)
+				return
+			}
+			if response.Code != test.status {
+				t.Fatalf("status=%d body=%q, want %d", response.Code, response.Body.String(), test.status)
+			}
+			if location := response.Header().Get("Location"); location != test.location {
+				t.Fatalf("Location=%q, want %q", location, test.location)
+			}
+		})
+	}
+}
+
 func TestGraphTraceMapsContextualPathsAndPreservesThreeValuedResults(t *testing.T) {
 	column := conditions.Value{Kind: conditions.ValueColumn, NodeID: 11}
 	parameter := conditions.Value{Kind: conditions.ValueParameter, Parameter: "tenant"}

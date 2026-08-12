@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 
 const (
 	sessionCookieName       = "__Host-dbgraph-session"
+	loginPath               = "/login"
 	maximumJSONRequestBytes = 256 << 10
 )
 
@@ -136,11 +138,11 @@ func (h *handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	requestID := newRequestID()
 	response.Header().Set("X-Request-ID", requestID)
 	request = request.WithContext(context.WithValue(request.Context(), requestIDContextKey, requestID))
-	if request.URL.Path == "/login" && request.Method == http.MethodGet {
+	if request.URL.Path == loginPath && request.Method == http.MethodGet {
 		servePageTemplate(response, "login.html")
 		return
 	}
-	if request.URL.Path == "/login" && request.Method == http.MethodPost {
+	if request.URL.Path == loginPath && request.Method == http.MethodPost {
 		h.login(response, request)
 		return
 	}
@@ -150,12 +152,12 @@ func (h *handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	}
 	cookie, err := request.Cookie(sessionCookieName)
 	if err != nil {
-		writeError(response, http.StatusUnauthorized, "UNAUTHENTICATED", "authentication required", nil)
+		rejectUnauthenticated(response, request)
 		return
 	}
 	session, ok := h.sessions.Get(cookie.Value)
 	if !ok {
-		writeError(response, http.StatusUnauthorized, "UNAUTHENTICATED", "authentication required", nil)
+		rejectUnauthenticated(response, request)
 		return
 	}
 	if isStateChanging(request.Method) {
@@ -297,6 +299,37 @@ func setSecurityHeaders(response http.ResponseWriter) {
 	response.Header().Set("Referrer-Policy", "no-referrer")
 	response.Header().Set("X-Content-Type-Options", "nosniff")
 	response.Header().Set("X-Frame-Options", "DENY")
+}
+
+// rejectUnauthenticated sends a browser page navigation to the login form and
+// keeps the JSON error contract for every other caller, including the fetch
+// requests in assets/app.js that already redirect on 401 themselves.
+func rejectUnauthenticated(response http.ResponseWriter, request *http.Request) {
+	if isPageNavigation(request) {
+		response.Header().Set("Cache-Control", "no-store")
+		http.Redirect(response, request, loginPath, http.StatusSeeOther)
+		return
+	}
+	writeError(response, http.StatusUnauthorized, "UNAUTHENTICATED", "authentication required", nil)
+}
+
+func isPageNavigation(request *http.Request) bool {
+	if request.Method != http.MethodGet && request.Method != http.MethodHead {
+		return false
+	}
+	if strings.HasPrefix(request.URL.Path, "/api/") {
+		return false
+	}
+	for _, mediaRange := range strings.Split(request.Header.Get("Accept"), ",") {
+		mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(mediaRange))
+		if err != nil {
+			continue
+		}
+		if mediaType == "text/html" || mediaType == "application/xhtml+xml" {
+			return true
+		}
+	}
+	return false
 }
 
 func isStateChanging(method string) bool {
