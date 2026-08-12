@@ -24,6 +24,7 @@ import (
 	dbsqlite "github.com/benenen/dbgraph/internal/platform/sqlite"
 	"github.com/benenen/dbgraph/internal/reconcile"
 	"github.com/benenen/dbgraph/internal/relations"
+	"github.com/benenen/dbgraph/internal/secret"
 	"github.com/benenen/dbgraph/internal/transport/httpapi"
 	"github.com/benenen/dbgraph/internal/transport/mcpapi"
 	"github.com/benenen/dbgraph/internal/transport/mcpproxy"
@@ -110,6 +111,35 @@ func mysqlOpener(allowInsecure bool) mysqlingestion.OpenDatabase {
 	}
 }
 
+// loadSealer builds the DSN sealer from the environment. The key is a
+// credential, so it is never read from a flag or stored in SQLite. Its absence
+// is not an error: a deployment that only uses DSN environment variables needs
+// no key.
+func loadSealer(lookup func(string) (string, bool)) (*secret.Sealer, error) {
+	key, ok := lookup("DBGRAPH_SECRET_KEY")
+	if !ok || strings.TrimSpace(key) == "" {
+		return nil, nil
+	}
+	sealer, err := secret.NewSealer(key)
+	if err != nil {
+		return nil, fmt.Errorf("configure the secret key: %w", err)
+	}
+	return sealer, nil
+}
+
+// dsnSealer adapts the secret package to the catalog service's seam.
+type dsnSealer struct {
+	sealer *secret.Sealer
+}
+
+func (d dsnSealer) Seal(plaintext string) (string, []byte, error) {
+	sealed, err := d.sealer.Seal(plaintext)
+	if err != nil {
+		return "", nil, err
+	}
+	return sealed.KeyID, sealed.Ciphertext, nil
+}
+
 func writeUsage(output *os.File) {
 	writeDiagnostic(output, "usage: dbgraph serve --database <path> [--listen <address>]\n")
 	writeDiagnostic(output, "       dbgraph mcp [--server-url <url>]\n")
@@ -133,7 +163,23 @@ func serve(serveConfig config.ServeConfig) (returnError error) {
 	if err != nil {
 		return fmt.Errorf("configure persistent IDs: %w", err)
 	}
-	catalogService := catalog.NewService(dbsqlite.NewCatalogRepository(store, allocator), allocator, time.Now)
+	sealer, err := loadSealer(os.LookupEnv)
+	if err != nil {
+		return err
+	}
+	catalogOptions := []catalog.ServiceOption{}
+	runnerOptions := []mysqlingestion.RunnerOption{}
+	if sealer != nil {
+		catalogOptions = append(catalogOptions, catalog.WithDSNSealer(dsnSealer{sealer: sealer}))
+		runnerOptions = append(runnerOptions, mysqlingestion.WithSecretOpener(
+			func(keyID string, ciphertext []byte) (string, error) {
+				return sealer.Open(secret.Sealed{KeyID: keyID, Ciphertext: ciphertext})
+			},
+		))
+	}
+	catalogService := catalog.NewService(
+		dbsqlite.NewCatalogRepository(store, allocator), allocator, time.Now, catalogOptions...,
+	)
 	projectService := catalog.NewProjectService(dbsqlite.NewProjectRepository(store), allocator, time.Now)
 	codeRepositoryService := catalog.NewCodeRepositoryService(dbsqlite.NewCodeRepository(store), allocator, time.Now)
 	relationCommands := relations.NewCommands(dbsqlite.NewRelationRepository(store), allocator, time.Now)
@@ -148,11 +194,27 @@ func serve(serveConfig config.ServeConfig) (returnError error) {
 	}
 	schemaRunner := mysqlingestion.NewRunner(
 		catalogService, mysqlingestion.NewScanner(),
-		mysqlOpener(serveConfig.AllowInsecureMySQLTLS), os.LookupEnv,
+		mysqlOpener(serveConfig.AllowInsecureMySQLTLS), os.LookupEnv, runnerOptions...,
 	)
 	schemaScans := jobs.NewSchemaScanCoordinator(jobRepository, catalogService, schemaRunner, allocator, time.Now)
 	auditService := audit.NewService(dbsqlite.NewAuditRepository(store), allocator, time.Now)
-	authenticator, err := appauth.LoadMCPAuthenticator(os.LookupEnv)
+	// Access tokens are seeded from the environment once and then live in
+	// SQLite as digests, so a running server needs no token in its environment.
+	credentialRepository := dbsqlite.NewCredentialRepository(store, time.Now)
+	seedCredentials, err := appauth.EnvironmentCredentials(os.LookupEnv)
+	if err != nil {
+		return fmt.Errorf("read access tokens from the environment: %w", err)
+	}
+	if err := credentialRepository.SyncCredentials(ctx, seedCredentials); err != nil {
+		return fmt.Errorf("store access tokens: %w", err)
+	}
+	storedCredentials, err := credentialRepository.ListCredentials(ctx)
+	if err != nil {
+		return fmt.Errorf("load access tokens: %w", err)
+	}
+	authenticator, err := appauth.NewTokenAuthenticatorFromStored(
+		appauth.Filter(storedCredentials, audit.OriginAgent),
+	)
 	if err != nil {
 		return fmt.Errorf("configure MCP authentication: %w", err)
 	}
@@ -163,7 +225,9 @@ func serve(serveConfig config.ServeConfig) (returnError error) {
 		Status: store, Catalog: catalogService, Relations: relationCommands,
 		Graph: graphService, Reconcile: reconcileService, Jobs: schemaScans,
 	}, authenticator)
-	webAuthenticator, err := appauth.LoadWebAuthenticator(os.LookupEnv)
+	webAuthenticator, err := appauth.NewTokenAuthenticatorFromStored(
+		appauth.Filter(storedCredentials, audit.OriginWeb),
+	)
 	if err != nil {
 		return fmt.Errorf("configure Web authentication: %w", err)
 	}

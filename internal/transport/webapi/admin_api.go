@@ -16,7 +16,10 @@ type createDataSourceDTO struct {
 	Name           string `json:"name"`
 	Kind           string `json:"kind"`
 	DSNEnvironment string `json:"dsnEnvironment"`
-	Reason         string `json:"reason"`
+	// DSN is write-only. It is sealed before storage and is never rendered back
+	// to any client, so an Agent reading the catalog cannot recover it.
+	DSN    string `json:"dsn"`
+	Reason string `json:"reason"`
 }
 
 type createProjectDTO struct {
@@ -121,7 +124,7 @@ func (h *handler) createDataSource(response http.ResponseWriter, request *http.R
 	}
 	source, err := h.services.Catalog.CreateDataSourceAsAdmin(request.Context(), catalog.AdminCreateDataSource{
 		ProjectID: projectID, Name: input.Name, Kind: catalog.DataSourceMySQL,
-		DSNEnvironment: input.DSNEnvironment, Principal: principal,
+		DSNEnvironment: input.DSNEnvironment, DSN: input.DSN, Principal: principal,
 		Reason: input.Reason, RequestID: currentRequestID(request),
 	})
 	if err != nil {
@@ -199,6 +202,9 @@ func writeAdminError(response http.ResponseWriter, err error) {
 	case errors.Is(err, jobs.ErrQueueFull):
 		response.Header().Set("Retry-After", "30")
 		writeError(response, http.StatusServiceUnavailable, "QUEUE_FULL", "schema scan queue is full", nil)
+	case errors.Is(err, catalog.ErrSealerUnavailable):
+		writeError(response, http.StatusUnprocessableEntity, "SECRET_KEY_REQUIRED",
+			"storing a DSN requires DBGRAPH_SECRET_KEY on the server", nil)
 	case errors.Is(err, catalog.ErrInvalidProject), errors.Is(err, catalog.ErrInvalidRepository),
 		errors.Is(err, catalog.ErrInvalidDataSource), errors.Is(err, jobs.ErrInvalidJob):
 		writeError(response, http.StatusUnprocessableEntity, "INVALID_COMMAND", "admin command was rejected", nil)
