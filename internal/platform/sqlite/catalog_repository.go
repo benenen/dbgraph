@@ -38,10 +38,9 @@ func NewCatalogRepository(store *Store, ids catalogIDGenerator) *CatalogReposito
 func (r *CatalogRepository) CreateDataSource(
 	ctx context.Context,
 	source catalog.DataSource,
-	projectID int64,
 ) error {
 	err := r.store.write(ctx, func(tx *sql.Tx) error {
-		return insertDataSource(ctx, tx, source, projectID)
+		return insertDataSource(ctx, tx, source)
 	})
 	if err != nil {
 		return translateDataSourceWrite(err)
@@ -52,11 +51,10 @@ func (r *CatalogRepository) CreateDataSource(
 func (r *CatalogRepository) CreateDataSourceWithAudit(
 	ctx context.Context,
 	source catalog.DataSource,
-	projectID int64,
 	event audit.Event,
 ) error {
 	err := r.store.write(ctx, func(tx *sql.Tx) error {
-		if err := insertDataSource(ctx, tx, source, projectID); err != nil {
+		if err := insertDataSource(ctx, tx, source); err != nil {
 			return err
 		}
 		return insertAuditEvent(ctx, tx, event)
@@ -67,7 +65,7 @@ func (r *CatalogRepository) CreateDataSourceWithAudit(
 	return nil
 }
 
-func insertDataSource(ctx context.Context, tx *sql.Tx, source catalog.DataSource, projectID int64) error {
+func insertDataSource(ctx context.Context, tx *sql.Tx, source catalog.DataSource int64) error {
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO data_sources(
     id, name, source_kind, dsn_environment, dsn_key_id, dsn_ciphertext, created_at, updated_at
@@ -85,17 +83,17 @@ INSERT INTO data_sources(
 	if err != nil {
 		return err
 	}
-	return linkDataSource(ctx, tx, projectID, source.ID, source.CreatedAt)
+	return linkDataSource(ctx, tx, source.ID, source.CreatedAt)
 }
 
 // linkDataSource records that a project uses a data source. Linking twice is a
 // no-op so a repeated request is harmless.
-func linkDataSource(ctx context.Context, tx *sql.Tx, projectID int64, dataSourceID int64, at time.Time) error {
+func linkDataSource(ctx context.Context, tx *sql.Tx int64, dataSourceID int64, at time.Time) error {
 	_, err := tx.ExecContext(ctx, `
-INSERT INTO project_data_sources(project_id, data_source_id, created_at)
+INSERT INTO project_data_sources(data_source_id, created_at)
 VALUES (?, ?, ?)
-ON CONFLICT(project_id, data_source_id) DO NOTHING
-`, projectID, dataSourceID, at.Format(time.RFC3339Nano))
+ON CONFLICT(data_source_id) DO NOTHING
+`, dataSourceID, at.Format(time.RFC3339Nano))
 	return err
 }
 
@@ -130,7 +128,7 @@ LIMIT ?
 }
 
 // LinkDataSource adopts an existing source into a project.
-func (r *CatalogRepository) LinkDataSource(ctx context.Context, projectID int64, dataSourceID int64, at time.Time) error {
+func (r *CatalogRepository) LinkDataSource(ctx context.Context, dataSourceID int64, at time.Time) error {
 	err := r.store.write(ctx, func(tx *sql.Tx) error {
 		var exists int
 		if err := tx.QueryRowContext(ctx,
@@ -140,7 +138,7 @@ func (r *CatalogRepository) LinkDataSource(ctx context.Context, projectID int64,
 		if exists != 1 {
 			return catalog.ErrDataSourceNotFound
 		}
-		return linkDataSource(ctx, tx, projectID, dataSourceID, at)
+		return linkDataSource(ctx, tx, dataSourceID, at)
 	})
 	if err != nil {
 		if errors.Is(err, catalog.ErrDataSourceNotFound) {
@@ -153,11 +151,11 @@ func (r *CatalogRepository) LinkDataSource(ctx context.Context, projectID int64,
 
 // UnlinkDataSource drops the adoption. The source and any catalog the project
 // already scanned from it stay put; only the association goes.
-func (r *CatalogRepository) UnlinkDataSource(ctx context.Context, projectID int64, dataSourceID int64) error {
+func (r *CatalogRepository) UnlinkDataSource(ctx context.Context, dataSourceID int64) error {
 	err := r.store.write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
-			"DELETE FROM project_data_sources WHERE project_id = ? AND data_source_id = ?",
-			projectID, dataSourceID)
+			"DELETE FROM project_data_sources WHERE data_source_id = ?",
+			dataSourceID)
 		return err
 	})
 	if err != nil {
@@ -278,13 +276,12 @@ func (r *CatalogRepository) DeleteDataSource(ctx context.Context, dataSourceID i
 // so a scan cannot run against a source the project never adopted.
 func (r *CatalogRepository) GetProjectDataSource(
 	ctx context.Context,
-	projectID int64,
 	dataSourceID int64,
 ) (catalog.DataSource, error) {
 	var linked int
 	if err := r.store.db.QueryRowContext(ctx, `
-SELECT EXISTS(SELECT 1 FROM project_data_sources WHERE project_id = ? AND data_source_id = ?)
-`, projectID, dataSourceID).Scan(&linked); err != nil {
+SELECT EXISTS(SELECT 1 FROM project_data_sources WHERE data_source_id = ?)
+`, dataSourceID).Scan(&linked); err != nil {
 		return catalog.DataSource{}, fmt.Errorf("verify data source link: %w", err)
 	}
 	if linked != 1 {
@@ -334,14 +331,14 @@ WHERE id = ?
 
 func (r *CatalogRepository) BeginSchemaScan(ctx context.Context, run catalog.SchemaScanRun) error {
 	err := r.store.write(ctx, func(tx *sql.Tx) error {
-		if err := verifyDataSource(ctx, tx, run.ProjectID, run.DataSourceID); err != nil {
+		if err := verifyDataSource(ctx, tx, run.DataSourceID); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `
 INSERT INTO schema_scan_runs(
-    id, project_id, data_source_id, status, started_at
+    id, data_source_id, status, started_at
 ) VALUES (?, ?, ?, ?, ?)
-`, run.ID, run.ProjectID, run.DataSourceID, scanStatusRunning, run.StartedAt.Format(time.RFC3339Nano))
+`, run.ID, run.DataSourceID, scanStatusRunning, run.StartedAt.Format(time.RFC3339Nano))
 		return err
 	})
 	if err != nil {
@@ -355,14 +352,13 @@ func (r *CatalogRepository) FailSchemaScan(ctx context.Context, failure catalog.
 		result, err := tx.ExecContext(ctx, `
 UPDATE schema_scan_runs
 SET status = ?, error_code = ?, error_message = ?, completed_at = ?
-WHERE id = ? AND project_id = ? AND data_source_id = ? AND status = ?
+WHERE id = ?  AND data_source_id = ? AND status = ?
 `,
 			scanStatusFailed,
 			failure.ErrorCode,
 			failure.ErrorMessage,
 			failure.CompletedAt.Format(time.RFC3339Nano),
 			failure.Run.ID,
-			failure.Run.ProjectID,
 			failure.Run.DataSourceID,
 			scanStatusRunning,
 		)
@@ -410,7 +406,7 @@ func (r *CatalogRepository) publishSnapshot(
 	publication catalog.SnapshotPublication,
 ) (catalog.PublishedSnapshot, error) {
 
-	if err := verifyDataSource(ctx, tx, publication.ProjectID, publication.DataSourceID); err != nil {
+	if err := verifyDataSource(ctx, tx, publication.DataSourceID); err != nil {
 		return catalog.PublishedSnapshot{}, err
 	}
 	startedAt := publication.StartedAt.Format(time.RFC3339Nano)
@@ -420,11 +416,10 @@ func (r *CatalogRepository) publishSnapshot(
 		}
 	} else if _, err := tx.ExecContext(ctx, `
 INSERT INTO schema_scan_runs(
-    id, project_id, data_source_id, status, started_at
+    id, data_source_id, status, started_at
 ) VALUES (?, ?, ?, ?, ?)
 `,
 		publication.ScanRunID,
-		publication.ProjectID,
 		publication.DataSourceID,
 		scanStatusRunning,
 		startedAt,
@@ -527,9 +522,9 @@ ON CONFLICT(node_id) DO UPDATE SET
 		}
 		if record, active := searchRecords[nodeID]; active {
 			if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_search(node_id, project_id, name, qualified_name, data_type)
+INSERT INTO node_search(node_id, name, qualified_name, data_type)
 VALUES (?, ?, ?, ?, ?)
-`, nodeID, publication.ProjectID, record.Name, record.QualifiedName, record.DataType); err != nil {
+`, nodeID, record.Name, record.QualifiedName, record.DataType); err != nil {
 				return catalog.PublishedSnapshot{}, fmt.Errorf("insert current node search record: %w", err)
 			}
 		}
@@ -570,9 +565,9 @@ func verifyRunningSchemaScan(
 SELECT EXISTS(
     SELECT 1
     FROM schema_scan_runs
-    WHERE id = ? AND project_id = ? AND data_source_id = ? AND status = ?
+    WHERE id = ?  AND data_source_id = ? AND status = ?
 )
-`, publication.ScanRunID, publication.ProjectID, publication.DataSourceID, scanStatusRunning).Scan(&found); err != nil {
+`, publication.ScanRunID, publication.DataSourceID, scanStatusRunning).Scan(&found); err != nil {
 		return fmt.Errorf("verify running schema scan: %w", err)
 	}
 	if found != 1 {
@@ -583,7 +578,6 @@ SELECT EXISTS(
 
 func (r *CatalogRepository) FindCurrentNode(
 	ctx context.Context,
-	projectID int64,
 	dataSourceID int64,
 	qualifiedName string,
 ) (catalog.Node, error) {
@@ -593,20 +587,19 @@ func (r *CatalogRepository) FindCurrentNode(
 	var versionCreated string
 	err := r.store.db.QueryRowContext(ctx, `
 SELECT
-    n.id, nv.id, n.project_id, n.data_source_id, nv.scan_run_id,
+    n.id, nv.id, n.n.data_source_id, nv.scan_run_id,
     nv.parent_node_id, n.kind, nv.status, n.stable_key, nv.name,
     nv.qualified_name, nv.data_type, nv.nullable, nv.ordinal_position,
     nv.created_at
 FROM nodes n
 JOIN node_current nc ON nc.node_id = n.id
 JOIN node_versions nv ON nv.id = nc.version_id
-WHERE n.project_id = ? AND n.data_source_id = ? AND nv.qualified_name = ?
+WHERE n.n.data_source_id = ? AND nv.qualified_name = ?
 ORDER BY n.id
 LIMIT 1
-`, projectID, dataSourceID, qualifiedName).Scan(
+`, dataSourceID, qualifiedName).Scan(
 		&node.ID,
 		&node.VersionID,
-		&node.ProjectID,
 		&node.DataSourceID,
 		&node.ScanRunID,
 		&parentNodeID,
@@ -639,14 +632,13 @@ LIMIT 1
 
 func (r *CatalogRepository) SearchCurrentNodes(
 	ctx context.Context,
-	projectID int64,
 	dataSourceID int64,
 	query string,
 	limit int,
 ) (nodes []catalog.Node, returnError error) {
 	searchQuery := ftsPrefixQuery(query)
 	sourceClause := ""
-	arguments := []any{searchQuery, projectID, searchQuery, projectID, catalog.NodeActive}
+	arguments := []any{searchQuery, searchQuery, catalog.NodeActive}
 	if dataSourceID > 0 {
 		sourceClause = "\n  AND n.data_source_id = ?"
 		arguments = append(arguments, dataSourceID)
@@ -656,14 +648,14 @@ func (r *CatalogRepository) SearchCurrentNodes(
 WITH matched_nodes(node_id) AS (
     SELECT node_id
     FROM node_search
-    WHERE node_search MATCH ? AND project_id = ?
+    WHERE node_search MATCH ? 
     UNION
     SELECT node_id
     FROM relation_evidence_search
-    WHERE relation_evidence_search MATCH ? AND project_id = ?
+    WHERE relation_evidence_search MATCH ? 
 )
 SELECT
-    n.id, nv.id, n.project_id, n.data_source_id, nv.scan_run_id,
+    n.id, nv.id, n.n.data_source_id, nv.scan_run_id,
     nv.parent_node_id, n.kind, nv.status, n.stable_key, nv.name,
     nv.qualified_name, nv.data_type, nv.nullable, nv.ordinal_position,
     nv.created_at
@@ -696,20 +688,19 @@ LIMIT ?
 
 func (r *CatalogRepository) GetCurrentNode(
 	ctx context.Context,
-	projectID int64,
 	nodeID int64,
 ) (catalog.Node, error) {
 	node, err := scanCurrentNode(r.store.db.QueryRowContext(ctx, `
 SELECT
-    n.id, nv.id, n.project_id, n.data_source_id, nv.scan_run_id,
+    n.id, nv.id, n.n.data_source_id, nv.scan_run_id,
     nv.parent_node_id, n.kind, nv.status, n.stable_key, nv.name,
     nv.qualified_name, nv.data_type, nv.nullable, nv.ordinal_position,
     nv.created_at
 FROM nodes n
 JOIN node_current nc ON nc.node_id = n.id
 JOIN node_versions nv ON nv.id = nc.version_id
-WHERE n.project_id = ? AND n.id = ?
-`, projectID, nodeID))
+WHERE n.n.id = ?
+`, nodeID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return catalog.Node{}, catalog.ErrNodeNotFound
 	}
@@ -737,7 +728,6 @@ func scanCurrentNode(scanner auditScanner) (catalog.Node, error) {
 	if err := scanner.Scan(
 		&node.ID,
 		&node.VersionID,
-		&node.ProjectID,
 		&node.DataSourceID,
 		&node.ScanRunID,
 		&parentNodeID,
@@ -765,13 +755,13 @@ func scanCurrentNode(scanner auditScanner) (catalog.Node, error) {
 	return node, nil
 }
 
-func verifyDataSource(ctx context.Context, tx *sql.Tx, projectID int64, dataSourceID int64) error {
+func verifyDataSource(ctx context.Context, tx *sql.Tx int64, dataSourceID int64) error {
 	var found int
 	if err := tx.QueryRowContext(ctx, `
 SELECT EXISTS(
-    SELECT 1 FROM project_data_sources WHERE data_source_id = ? AND project_id = ?
+    SELECT 1 FROM project_data_sources WHERE data_source_id = ? 
 )
-`, dataSourceID, projectID).Scan(&found); err != nil {
+`, dataSourceID).Scan(&found); err != nil {
 		return fmt.Errorf("verify data source: %w", err)
 	}
 	if found != 1 {
@@ -816,12 +806,11 @@ WHERE data_source_id = ?
 			return nil, fmt.Errorf("generate node ID: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO nodes(id, project_id, data_source_id, stable_key, kind, created_at)
+INSERT INTO nodes(id, data_source_id, stable_key, kind, created_at)
 VALUES (?, ?, ?, ?, ?, ?)
 `,
 			nodeID,
-			publication.ProjectID,
-			publication.DataSourceID,
+				publication.DataSourceID,
 			input.StableKey,
 			input.Kind,
 			publication.StartedAt.Format(time.RFC3339Nano),
@@ -980,7 +969,6 @@ func nodeWithinTableScope(kind catalog.NodeKind, qualifiedName string, scopeTabl
 
 func (r *CatalogRepository) ListDataSources(
 	ctx context.Context,
-	projectID int64,
 	limit int,
 ) (sources []catalog.DataSource, returnError error) {
 	rows, err := r.store.db.QueryContext(ctx, `
@@ -991,7 +979,7 @@ JOIN project_data_sources link ON link.data_source_id = s.id
 WHERE link.project_id = ?
 ORDER BY s.name, s.id
 LIMIT ?
-`, projectID, limit)
+`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("select data sources: %w", err)
 	}

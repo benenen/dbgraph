@@ -121,7 +121,6 @@ type DataSource struct {
 }
 
 type CreateDataSource struct {
-	ProjectID      int64
 	Name           string
 	Kind           DataSourceKind
 	DSNEnvironment string
@@ -130,9 +129,8 @@ type CreateDataSource struct {
 }
 
 type AdminCreateDataSource struct {
-	ProjectID int64
-	Name      string
-	Kind      DataSourceKind
+	Name string
+	Kind DataSourceKind
 	// DSNEnvironment names the environment variable holding the DSN. Required.
 	DSNEnvironment string
 	// DSN is the connection string itself. When set it is sealed and stored,
@@ -239,7 +237,6 @@ type ScannedSnapshot struct {
 type Node struct {
 	ID             int64
 	VersionID      int64
-	ProjectID      int64
 	DataSourceID   int64
 	ScanRunID      int64
 	ParentNodeID   int64
@@ -256,7 +253,6 @@ type Node struct {
 }
 
 type PublishSnapshot struct {
-	ProjectID    int64
 	DataSourceID int64
 	Nodes        []NodeInput
 	ForeignKeys  []DeclaredForeignKey
@@ -265,7 +261,6 @@ type PublishSnapshot struct {
 
 type SnapshotPublication struct {
 	ScanRunID    int64
-	ProjectID    int64
 	DataSourceID int64
 	Nodes        []NodeInput
 	ForeignKeys  []DeclaredForeignKey
@@ -276,7 +271,6 @@ type SnapshotPublication struct {
 
 type SchemaScanRun struct {
 	ID           int64
-	ProjectID    int64
 	DataSourceID int64
 	StartedAt    time.Time
 }
@@ -293,6 +287,11 @@ type PublishedSnapshot struct {
 	NodeCount   int
 	StaleCount  int
 	PublishedAt time.Time
+}
+
+// IDGenerator hands out the snowflake ids every record is keyed by.
+type IDGenerator interface {
+	Next(context.Context) (int64, error)
 }
 
 // TableSummary identifies one table for browsing. It is deliberately thin: a
@@ -324,74 +323,43 @@ type TableDetail struct {
 
 // TableReader is optional on a repository, like TableLister.
 type TableReader interface {
-	LoadTableDetail(ctx context.Context, projectID int64, tableID int64) (TableDetail, error)
+	LoadTableDetail(ctx context.Context, tableID int64) (TableDetail, error)
 }
 
 // TableDetail reads one table's columns and indexes.
 func (s *Service) TableDetail(
 	ctx context.Context,
-	projectID int64,
 	tableID int64,
 ) (TableDetail, error) {
-	if projectID <= 0 || tableID <= 0 {
+	if tableID <= 0 {
 		return TableDetail{}, ErrInvalidDataSource
 	}
 	reader, ok := s.repository.(TableReader)
 	if !ok {
 		return TableDetail{}, ErrInvalidDataSource
 	}
-	return reader.LoadTableDetail(ctx, projectID, tableID)
+	return reader.LoadTableDetail(ctx, tableID)
 }
 
 // TableLister is optional on a repository, in the same way the recursive graph
 // reader is: a Service without it cannot browse tables.
 type TableLister interface {
-	ListTables(ctx context.Context, projectID int64, dataSourceID int64, filter string, limit int) ([]TableSummary, error)
+	ListTables(ctx context.Context, dataSourceID int64, filter string, limit int) ([]TableSummary, error)
 }
 
 type CatalogRepository interface {
-	CreateDataSource(context.Context, DataSource, int64) error
-	CreateDataSourceWithAudit(context.Context, DataSource, int64, audit.Event) error
+	CreateDataSource(context.Context, DataSource) error
+	CreateDataSourceWithAudit(context.Context, DataSource, audit.Event) error
 	GetDataSource(context.Context, int64) (DataSource, error)
-	GetProjectDataSource(context.Context, int64, int64) (DataSource, error)
-	ListDataSources(context.Context, int64, int) ([]DataSource, error)
 	ListAllDataSources(context.Context, int) ([]DataSource, error)
-	LinkDataSource(context.Context, int64, int64, time.Time) error
-	UnlinkDataSource(context.Context, int64, int64) error
 	UpdateDataSourceWithAudit(context.Context, DataSource, bool, audit.Event) error
 	DeleteDataSource(context.Context, int64) error
 	BeginSchemaScan(context.Context, SchemaScanRun) error
 	FailSchemaScan(context.Context, SchemaScanFailure) error
 	PublishSnapshot(context.Context, SnapshotPublication) (PublishedSnapshot, error)
-	FindCurrentNode(context.Context, int64, int64, string) (Node, error)
-	GetCurrentNode(context.Context, int64, int64) (Node, error)
-	SearchCurrentNodes(context.Context, int64, int64, string, int) ([]Node, error)
-}
-
-// GetProjectDataSource resolves a data source through the project that links
-// it. Anything scanning or publishing goes through this rather than a bare id.
-// ListAllDataSources returns the shared registry so a project can adopt an
-// existing source rather than registering the same database twice.
-func (s *Service) ListAllDataSources(ctx context.Context, limit int) ([]DataSource, error) {
-	return s.repository.ListAllDataSources(ctx, clampListLimit(limit))
-}
-
-// LinkDataSource adopts a source into a project. Linking twice is harmless.
-func (s *Service) LinkDataSource(ctx context.Context, projectID int64, dataSourceID int64) error {
-	if projectID <= 0 || dataSourceID <= 0 {
-		return ErrInvalidDataSource
-	}
-	return s.repository.LinkDataSource(ctx, projectID, dataSourceID, s.now().UTC())
-}
-
-// UnlinkDataSource removes the adoption. Nodes the project already scanned stay
-// where they are; only the association goes, so nothing silently disappears
-// from a catalog a relation may reference.
-func (s *Service) UnlinkDataSource(ctx context.Context, projectID int64, dataSourceID int64) error {
-	if projectID <= 0 || dataSourceID <= 0 {
-		return ErrInvalidDataSource
-	}
-	return s.repository.UnlinkDataSource(ctx, projectID, dataSourceID)
+	FindCurrentNode(context.Context, int64, string) (Node, error)
+	GetCurrentNode(context.Context, int64) (Node, error)
+	SearchCurrentNodes(context.Context, int64, string, int) ([]Node, error)
 }
 
 // AdminUpdateDataSource renames a source and may rotate its stored DSN. An
@@ -473,12 +441,11 @@ func (s *Service) UpdateDataSourceAsAdmin(
 // between its first scan and its first approved relation.
 func (s *Service) ListTables(
 	ctx context.Context,
-	projectID int64,
 	dataSourceID int64,
 	filter string,
 	limit int,
 ) ([]TableSummary, error) {
-	if projectID <= 0 || dataSourceID <= 0 {
+	if dataSourceID <= 0 {
 		return nil, ErrInvalidDataSource
 	}
 	if len(filter) > 200 {
@@ -491,7 +458,7 @@ func (s *Service) ListTables(
 	if limit < MinimumListLimit || limit > MaximumTableListLimit {
 		limit = MaximumTableListLimit
 	}
-	return lister.ListTables(ctx, projectID, dataSourceID, filter, limit)
+	return lister.ListTables(ctx, dataSourceID, filter, limit)
 }
 
 // DeleteDataSource removes a source that has imported nothing yet.
@@ -504,13 +471,12 @@ func (s *Service) DeleteDataSource(ctx context.Context, dataSourceID int64) erro
 
 func (s *Service) GetProjectDataSource(
 	ctx context.Context,
-	projectID int64,
 	dataSourceID int64,
 ) (DataSource, error) {
-	if projectID <= 0 || dataSourceID <= 0 {
+	if dataSourceID <= 0 {
 		return DataSource{}, ErrInvalidDataSource
 	}
-	return s.repository.GetProjectDataSource(ctx, projectID, dataSourceID)
+	return s.repository.GetDataSource(ctx, dataSourceID)
 }
 
 func (s *Service) GetDataSource(ctx context.Context, dataSourceID int64) (DataSource, error) {
@@ -520,16 +486,9 @@ func (s *Service) GetDataSource(ctx context.Context, dataSourceID int64) (DataSo
 	return s.repository.GetDataSource(ctx, dataSourceID)
 }
 
-func (s *Service) ListDataSources(ctx context.Context, projectID int64, limit int) ([]DataSource, error) {
-	if projectID <= 0 {
-		return nil, ErrInvalidDataSource
-	}
-	return s.repository.ListDataSources(ctx, projectID, clampListLimit(limit))
-}
-
 type Service struct {
 	repository  CatalogRepository
-	ids         ProjectIDGenerator
+	ids         IDGenerator
 	now         func() time.Time
 	sealer      DSNSealer
 	validateDSN DSNValidator
@@ -563,7 +522,7 @@ func WithDSNValidator(validate DSNValidator) ServiceOption {
 
 func NewService(
 	repository CatalogRepository,
-	ids ProjectIDGenerator,
+	ids IDGenerator,
 	now func() time.Time,
 	options ...ServiceOption,
 ) *Service {
@@ -598,7 +557,7 @@ func (s *Service) CreateDataSourceAsAdmin(
 	}
 	reason = auditReason(reason, "Registered from the console")
 	return s.createDataSource(ctx, CreateDataSource{
-		ProjectID: command.ProjectID, Name: command.Name, Kind: command.Kind,
+		Name: command.Name, Kind: command.Kind,
 		DSNEnvironment: command.DSNEnvironment, DSN: command.DSN,
 	}, func(source DataSource, eventID int64, occurredAt time.Time) audit.Event {
 		// The audit record names how the DSN resolves, never the DSN itself:
@@ -608,7 +567,7 @@ func (s *Service) CreateDataSourceAsAdmin(
 			"dsnStored": storedLabel(source),
 		})
 		return audit.Event{
-			ID: eventID, ProjectID: command.ProjectID, Actor: actor, Origin: command.Principal.Origin,
+			ID: eventID, Actor: actor, Origin: command.Principal.Origin,
 			Action: "DATA_SOURCE_CREATED", SubjectType: "DATA_SOURCE", SubjectID: source.ID,
 			Reason: reason, RequestID: requestID, Details: details, OccurredAt: occurredAt,
 		}
@@ -624,7 +583,7 @@ func (s *Service) createDataSource(
 ) (DataSource, error) {
 	name := strings.TrimSpace(command.Name)
 	dsnEnvironment := strings.TrimSpace(command.DSNEnvironment)
-	if command.ProjectID <= 0 || command.Kind != DataSourceMySQL {
+	if command.Kind != DataSourceMySQL {
 		return DataSource{}, ErrInvalidDataSource
 	}
 	if name == "" || len(name) > 200 || !validEnvironmentName(dsnEnvironment) {
@@ -655,12 +614,12 @@ func (s *Service) createDataSource(
 		if err != nil {
 			return DataSource{}, fmt.Errorf("generate data source audit ID: %w", err)
 		}
-		if err := s.repository.CreateDataSourceWithAudit(ctx, dataSource, command.ProjectID, auditBuilder(dataSource, auditID, now)); err != nil {
+		if err := s.repository.CreateDataSourceWithAudit(ctx, dataSource, auditBuilder(dataSource, auditID, now)); err != nil {
 			return DataSource{}, err
 		}
 		return dataSource, nil
 	}
-	if err := s.repository.CreateDataSource(ctx, dataSource, command.ProjectID); err != nil {
+	if err := s.repository.CreateDataSource(ctx, dataSource); err != nil {
 		return DataSource{}, err
 	}
 	return dataSource, nil
@@ -683,7 +642,6 @@ func (s *Service) PublishSnapshot(ctx context.Context, command PublishSnapshot) 
 	foreignKeys := append([]DeclaredForeignKey(nil), command.ForeignKeys...)
 	return s.repository.PublishSnapshot(ctx, SnapshotPublication{
 		ScanRunID:    scanRunID,
-		ProjectID:    command.ProjectID,
 		DataSourceID: command.DataSourceID,
 		Nodes:        nodes,
 		ForeignKeys:  foreignKeys,
@@ -694,10 +652,9 @@ func (s *Service) PublishSnapshot(ctx context.Context, command PublishSnapshot) 
 
 func (s *Service) BeginSchemaScan(
 	ctx context.Context,
-	projectID int64,
 	dataSourceID int64,
 ) (SchemaScanRun, error) {
-	if projectID <= 0 || dataSourceID <= 0 {
+	if dataSourceID <= 0 {
 		return SchemaScanRun{}, ErrInvalidSnapshot
 	}
 	scanRunID, err := s.ids.Next(ctx)
@@ -705,7 +662,7 @@ func (s *Service) BeginSchemaScan(
 		return SchemaScanRun{}, fmt.Errorf("generate scan run ID: %w", err)
 	}
 	run := SchemaScanRun{
-		ID: scanRunID, ProjectID: projectID, DataSourceID: dataSourceID, StartedAt: s.now().UTC(),
+		ID: scanRunID, DataSourceID: dataSourceID, StartedAt: s.now().UTC(),
 	}
 	if err := s.repository.BeginSchemaScan(ctx, run); err != nil {
 		return SchemaScanRun{}, err
@@ -715,7 +672,7 @@ func (s *Service) BeginSchemaScan(
 
 func (s *Service) FailSchemaScan(ctx context.Context, run SchemaScanRun, errorCode string) error {
 	errorCode = strings.TrimSpace(errorCode)
-	if run.ID <= 0 || run.ProjectID <= 0 || run.DataSourceID <= 0 || run.StartedAt.IsZero() ||
+	if run.ID <= 0 || run.DataSourceID <= 0 || run.StartedAt.IsZero() ||
 		errorCode == "" || len(errorCode) > 100 {
 		return ErrInvalidSnapshot
 	}
@@ -734,7 +691,7 @@ func (s *Service) PublishStartedSnapshot(
 		return PublishedSnapshot{}, err
 	}
 	command.ScopeTables = scopeTables
-	if run.ID <= 0 || run.ProjectID != command.ProjectID || run.DataSourceID != command.DataSourceID ||
+	if run.ID <= 0 || run.DataSourceID != command.DataSourceID ||
 		run.StartedAt.IsZero() {
 		return PublishedSnapshot{}, ErrInvalidSnapshot
 	}
@@ -742,7 +699,7 @@ func (s *Service) PublishStartedSnapshot(
 		return PublishedSnapshot{}, err
 	}
 	return s.repository.PublishSnapshot(ctx, SnapshotPublication{
-		ScanRunID: run.ID, ProjectID: command.ProjectID, DataSourceID: command.DataSourceID,
+		ScanRunID: run.ID, DataSourceID: command.DataSourceID,
 		Nodes:       append([]NodeInput(nil), command.Nodes...),
 		ForeignKeys: append([]DeclaredForeignKey(nil), command.ForeignKeys...),
 		ScopeTables: append([]string(nil), scopeTables...),
@@ -775,40 +732,38 @@ func normalizeScopeTables(scopeTables []string) ([]string, error) {
 
 func (s *Service) FindCurrentNode(
 	ctx context.Context,
-	projectID int64,
 	dataSourceID int64,
 	qualifiedName string,
 ) (Node, error) {
 	qualifiedName = strings.TrimSpace(qualifiedName)
-	if projectID <= 0 || dataSourceID <= 0 || qualifiedName == "" || len(qualifiedName) > 1000 {
+	if dataSourceID <= 0 || qualifiedName == "" || len(qualifiedName) > 1000 {
 		return Node{}, ErrInvalidSnapshot
 	}
-	return s.repository.FindCurrentNode(ctx, projectID, dataSourceID, qualifiedName)
+	return s.repository.FindCurrentNode(ctx, dataSourceID, qualifiedName)
 }
 
-func (s *Service) GetCurrentNode(ctx context.Context, projectID int64, nodeID int64) (Node, error) {
-	if projectID <= 0 || nodeID <= 0 {
+func (s *Service) GetCurrentNode(ctx context.Context, nodeID int64) (Node, error) {
+	if nodeID <= 0 {
 		return Node{}, ErrInvalidSnapshot
 	}
-	return s.repository.GetCurrentNode(ctx, projectID, nodeID)
+	return s.repository.GetCurrentNode(ctx, nodeID)
 }
 
 func (s *Service) SearchCurrentNodes(
 	ctx context.Context,
-	projectID int64,
 	dataSourceID int64,
 	query string,
 	limit int,
 ) ([]Node, error) {
 	query = strings.TrimSpace(query)
-	if projectID <= 0 || dataSourceID < 0 || query == "" || len(query) > 500 || limit <= 0 || limit > 100 {
+	if dataSourceID < 0 || query == "" || len(query) > 500 || limit <= 0 || limit > 100 {
 		return nil, ErrInvalidSnapshot
 	}
-	return s.repository.SearchCurrentNodes(ctx, projectID, dataSourceID, query, limit)
+	return s.repository.SearchCurrentNodes(ctx, dataSourceID, query, limit)
 }
 
 func validateSnapshot(command PublishSnapshot) error {
-	if command.ProjectID <= 0 || command.DataSourceID <= 0 || len(command.Nodes) == 0 ||
+	if command.DataSourceID <= 0 || len(command.Nodes) == 0 ||
 		len(command.Nodes) > MaximumSnapshotNodes || len(command.ForeignKeys) > MaximumSnapshotForeignKeys {
 		return ErrInvalidSnapshot
 	}

@@ -32,7 +32,7 @@ func (r *AuditRepository) AppendAuditEvent(ctx context.Context, event audit.Even
 func insertAuditEvent(ctx context.Context, tx *sql.Tx, event audit.Event) error {
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO audit_events(
-    id, project_id, actor, origin, action, subject_type, subject_id,
+    id, actor, origin, action, subject_type, subject_id,
     reason, request_id, expected_revision_no, details_json, occurred_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
@@ -57,18 +57,17 @@ INSERT INTO audit_events(
 
 func (r *AuditRepository) ListAuditEvents(
 	ctx context.Context,
-	projectID int64,
 	limit int,
 ) (events []audit.Event, returnError error) {
 	rows, err := r.store.db.QueryContext(ctx, `
 SELECT
-    id, project_id, actor, origin, action, subject_type, subject_id,
+    id, actor, origin, action, subject_type, subject_id,
     reason, request_id, expected_revision_no, details_json, occurred_at
 FROM audit_events
-WHERE project_id = ?
+WHERE 1=1
 ORDER BY occurred_at DESC, id DESC
 LIMIT ?
-`, projectID, limit)
+`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list audit events: %w", err)
 	}
@@ -99,7 +98,6 @@ func scanAuditEvent(scanner auditScanner) (audit.Event, error) {
 	var occurredAt string
 	if err := scanner.Scan(
 		&event.ID,
-		&event.ProjectID,
 		&event.Actor,
 		&event.Origin,
 		&event.Action,

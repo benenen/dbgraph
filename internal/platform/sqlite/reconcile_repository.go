@@ -29,7 +29,6 @@ func (r *ReconcileRepository) Begin(
 		existing, err := findInitSessionByRequest(
 			ctx,
 			tx,
-			session.ProjectID,
 			session.Principal.Actor,
 			session.Principal.Origin,
 			session.RequestID,
@@ -48,7 +47,7 @@ func (r *ReconcileRepository) Begin(
 		var repositoryExists int
 		if err := tx.QueryRowContext(ctx, `
 SELECT EXISTS(
-    SELECT 1 FROM repositories WHERE id = ? AND project_id = ?
+    SELECT 1 FROM repositories WHERE id = ? 
 )
 `, session.RepositoryID, session.ProjectID).Scan(&repositoryExists); err != nil {
 			return fmt.Errorf("verify relation init repository: %w", err)
@@ -58,12 +57,11 @@ SELECT EXISTS(
 		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO relation_init_sessions(
-    id, project_id, repository_id, mode, source_commit, scope_json,
+    id, repository_id, mode, source_commit, scope_json,
     status, actor, origin, request_id, created_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
 			session.ID,
-			session.ProjectID,
 			session.RepositoryID,
 			session.Mode,
 			session.SourceCommit,
@@ -80,7 +78,6 @@ INSERT INTO relation_init_sessions(
 			ctx,
 			tx,
 			session.ID,
-			session.ProjectID,
 			session.ID,
 			"RELATION_INIT_BEGUN",
 			session.Principal,
@@ -171,7 +168,7 @@ WHERE session_id = ?
 		for _, proposal := range record.Proposals {
 			var relationID int64
 			err := tx.QueryRowContext(ctx, `
-SELECT id FROM relations WHERE project_id = ? AND create_fingerprint = ?
+SELECT id FROM relations WHERE create_fingerprint = ?
 `, session.ProjectID, proposal.Fingerprint).Scan(&relationID)
 			status := reconcile.ItemDeduplicated
 			if errors.Is(err, sql.ErrNoRows) {
@@ -268,12 +265,11 @@ INSERT OR IGNORE INTO relation_origins(
 		for _, finding := range newUnresolved {
 			if _, err := tx.ExecContext(ctx, `
 INSERT INTO unresolved_findings(
-    id, project_id, repository_id, session_id, batch_id, fingerprint,
+    id, repository_id, session_id, batch_id, fingerprint,
     finding_type, summary, evidence_json, status, actor, origin, created_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
 				finding.ID,
-				finding.ProjectID,
 				finding.RepositoryID,
 				finding.SessionID,
 				record.BatchID,
@@ -293,7 +289,6 @@ INSERT INTO unresolved_findings(
 			ctx,
 			tx,
 			record.BatchID,
-			session.ProjectID,
 			session.ID,
 			"RELATION_INIT_BATCH_ACCEPTED",
 			session.Principal,
@@ -325,7 +320,6 @@ JOIN relations r ON r.id = ro.relation_id
 JOIN relation_current rc ON rc.relation_id = r.id
 JOIN relation_versions rv ON rv.id = rc.active_version_id
 WHERE ro.repository_id = ?
-  AND r.project_id = ?
   AND rc.active_version_id IS NOT NULL
   AND rc.proposed_version_id IS NULL
   AND rc.status IN (?, ?)
@@ -337,7 +331,6 @@ WHERE ro.repository_id = ?
 `
 	arguments := []any{
 		session.RepositoryID,
-		session.ProjectID,
 		relations.StatusApproved,
 		relations.StatusSuppressed,
 		session.ID,
@@ -488,7 +481,6 @@ WHERE id = ? AND status = ?
 			ctx,
 			tx,
 			record.AuditID,
-			session.ProjectID,
 			session.ID,
 			"RELATION_INIT_COMPLETED",
 			record.Principal,
@@ -510,18 +502,17 @@ WHERE id = ? AND status = ?
 
 func (r *ReconcileRepository) ListUnresolved(
 	ctx context.Context,
-	projectID int64,
 	limit int,
 ) (findings []reconcile.Unresolved, returnError error) {
 	rows, err := r.store.db.QueryContext(ctx, `
 SELECT
-    id, project_id, repository_id, session_id, batch_id, fingerprint,
+    id, repository_id, session_id, batch_id, fingerprint,
     finding_type, summary, evidence_json, status, actor, origin, created_at
 FROM unresolved_findings
-WHERE project_id = ? AND status = 1
+WHERE status = 1
 ORDER BY created_at DESC, id DESC
 LIMIT ?
-`, projectID, limit)
+`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list unresolved relation findings: %w", err)
 	}
@@ -533,7 +524,6 @@ LIMIT ?
 		var createdAt string
 		if err := rows.Scan(
 			&finding.ID,
-			&finding.ProjectID,
 			&finding.RepositoryID,
 			&finding.SessionID,
 			&finding.BatchID,
@@ -564,7 +554,6 @@ LIMIT ?
 func findInitSessionByRequest(
 	ctx context.Context,
 	reader relationReader,
-	projectID int64,
 	actor string,
 	origin any,
 	requestID string,
@@ -573,8 +562,8 @@ func findInitSessionByRequest(
 	err := reader.QueryRowContext(ctx, `
 SELECT id
 FROM relation_init_sessions
-WHERE project_id = ? AND actor = ? AND origin = ? AND request_id = ?
-`, projectID, actor, origin, requestID).Scan(&sessionID)
+WHERE actor = ? AND origin = ? AND request_id = ?
+`, actor, origin, requestID).Scan(&sessionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return reconcile.Session{}, reconcile.ErrInitNotFound
 	}
@@ -595,13 +584,12 @@ func getInitSession(
 	var completedAt sql.NullString
 	err := reader.QueryRowContext(ctx, `
 SELECT
-    id, project_id, repository_id, mode, source_commit, scope_json,
+    id, repository_id, mode, source_commit, scope_json,
     status, actor, origin, request_id, created_at, completed_at
 FROM relation_init_sessions
 WHERE id = ?
 `, sessionID).Scan(
 		&session.ID,
-		&session.ProjectID,
 		&session.RepositoryID,
 		&session.Mode,
 		&session.SourceCommit,
@@ -640,7 +628,6 @@ func insertInitAudit(
 	ctx context.Context,
 	tx *sql.Tx,
 	auditID int64,
-	projectID int64,
 	sessionID int64,
 	action string,
 	principal relations.Principal,
@@ -651,12 +638,12 @@ func insertInitAudit(
 ) error {
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO audit_events(
-    id, project_id, actor, origin, action, subject_type, subject_id,
+    id, actor, origin, action, subject_type, subject_id,
     reason, request_id, expected_revision_no, details_json, occurred_at
 ) VALUES (?, ?, ?, ?, ?, 'RELATION_INIT_SESSION', ?, ?, ?, ?, '{}', ?)
 `,
 		auditID,
-		projectID,
+
 		principal.Actor,
 		principal.Origin,
 		action,

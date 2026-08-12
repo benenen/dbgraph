@@ -70,12 +70,11 @@ WHERE job_type = ? AND status IN (?, ?)
 func insertJob(ctx context.Context, tx *sql.Tx, job jobs.Job) error {
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO jobs(
-    id, project_id, job_type, status, payload_json, result_json,
+    id, job_type, status, payload_json, result_json,
     error_code, error_message, created_at, started_at, completed_at, revision_no
 ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?, NULL, NULL, ?)
 `,
 		job.ID,
-		job.ProjectID,
 		job.Type,
 		job.Status,
 		string(job.Payload),
@@ -99,7 +98,7 @@ WHERE id = (
 )
 AND status = ?
 RETURNING
-    id, project_id, job_type, status, payload_json, result_json,
+    id, job_type, status, payload_json, result_json,
     error_code, error_message, created_at, started_at, completed_at, revision_no
 `,
 			jobs.StatusRunning,
@@ -174,7 +173,7 @@ SET
     error_message = NULLIF(?, ''), completed_at = ?, revision_no = revision_no + 1
 WHERE id = ? AND status = ? AND revision_no = ?
 RETURNING
-    id, project_id, job_type, status, payload_json, result_json,
+    id, job_type, status, payload_json, result_json,
     error_code, error_message, created_at, started_at, completed_at, revision_no
 `,
 			completion.Status,
@@ -209,7 +208,7 @@ func mapJobStoreError(err error) error {
 func (r *JobRepository) GetJob(ctx context.Context, jobID int64) (jobs.Job, error) {
 	job, err := scanJob(r.store.db.QueryRowContext(ctx, `
 SELECT
-    id, project_id, job_type, status, payload_json, result_json,
+    id, job_type, status, payload_json, result_json,
     error_code, error_message, created_at, started_at, completed_at, revision_no
 FROM jobs
 WHERE id = ?
@@ -235,7 +234,6 @@ func scanJob(scanner jobScanner) (jobs.Job, error) {
 	var completedAt sql.NullString
 	err := scanner.Scan(
 		&job.ID,
-		&job.ProjectID,
 		&job.Type,
 		&job.Status,
 		&payload,

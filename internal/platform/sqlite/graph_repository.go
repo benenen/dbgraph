@@ -63,7 +63,6 @@ func (r *GraphRepository) LoadRecursiveEdges(
 		query,
 		request.StartNodeID,
 		request.StartNodeID,
-		request.ProjectID,
 		request.StartNodeID,
 		request.MaxDepth,
 		request.TargetNodeID,
@@ -148,16 +147,16 @@ func recursiveGraphQuery(currentColumn string, nextColumn string) string {
 	return `
 WITH RECURSIVE walk(
     state_key, parent_state_key, depth, current_node_id, node_path, cycle,
-    relation_id, version_id, project_id, source_node_id, target_node_id
+    relation_id, version_id, source_node_id, target_node_id
 ) AS (
     SELECT
         CAST(ee.relation_id AS TEXT), '', 1, ee.` + nextColumn + `,
         printf(',%lld,%lld,', ?, ee.` + nextColumn + `),
         ee.` + nextColumn + ` = ?,
-        ee.relation_id, ee.version_id, ee.project_id,
+        ee.relation_id, ee.version_id, e
         ee.source_node_id, ee.target_node_id
     FROM effective_edges ee
-    WHERE ee.project_id = ? AND ee.` + currentColumn + ` = ?
+    WHERE ee.ee.` + currentColumn + ` = ?
 
     UNION ALL
 
@@ -166,7 +165,7 @@ WITH RECURSIVE walk(
         walk.depth + 1, ee.` + nextColumn + `,
         walk.node_path || printf('%lld,', ee.` + nextColumn + `),
         instr(walk.node_path, printf(',%lld,', ee.` + nextColumn + `)) > 0,
-        ee.relation_id, ee.version_id, ee.project_id,
+        ee.relation_id, ee.version_id, e
         ee.source_node_id, ee.target_node_id
     FROM walk
     JOIN effective_edges ee
@@ -180,7 +179,7 @@ WITH RECURSIVE walk(
 )
 SELECT
     walk.state_key, walk.parent_state_key, walk.depth, walk.current_node_id, walk.cycle,
-    walk.relation_id, walk.version_id, walk.project_id, walk.source_node_id, walk.target_node_id,
+    walk.relation_id, walk.version_id, walk.walk.source_node_id, walk.target_node_id,
     ee.relation_type, rc.status, rc.proposed_version_id IS NOT NULL,
     ee.guard_json, ee.selector_json, ee.transform_json, ee.confidence_bps
 FROM walk
@@ -194,7 +193,6 @@ JOIN relation_current rc ON rc.relation_id = walk.relation_id
 
 func (r *GraphRepository) LoadEdges(
 	ctx context.Context,
-	projectID int64,
 	nodeIDs []int64,
 	direction graph.Direction,
 	limit int,
@@ -212,29 +210,29 @@ func (r *GraphRepository) LoadEdges(
 	}
 	query := `
 SELECT
-    ee.relation_id, ee.version_id, ee.project_id, ee.source_node_id, ee.target_node_id,
+    ee.relation_id, ee.version_id, ee.ee.source_node_id, ee.target_node_id,
     ee.relation_type, rc.status, rc.proposed_version_id IS NOT NULL,
     ee.guard_json, ee.selector_json, ee.transform_json, ee.confidence_bps
 FROM effective_edges ee
 JOIN relation_current rc ON rc.relation_id = ee.relation_id
-WHERE ee.project_id = ? AND ee.source_node_id IN (SELECT CAST(value AS INTEGER) FROM json_each(?))
+WHERE ee.ee.source_node_id IN (SELECT CAST(value AS INTEGER) FROM json_each(?))
 ORDER BY ee.source_node_id, ee.target_node_id, ee.relation_id
 LIMIT ?
 `
 	if direction == graph.DirectionUpstream {
 		query = `
 SELECT
-    ee.relation_id, ee.version_id, ee.project_id, ee.source_node_id, ee.target_node_id,
+    ee.relation_id, ee.version_id, ee.ee.source_node_id, ee.target_node_id,
     ee.relation_type, rc.status, rc.proposed_version_id IS NOT NULL,
     ee.guard_json, ee.selector_json, ee.transform_json, ee.confidence_bps
 FROM effective_edges ee
 JOIN relation_current rc ON rc.relation_id = ee.relation_id
-WHERE ee.project_id = ? AND ee.target_node_id IN (SELECT CAST(value AS INTEGER) FROM json_each(?))
+WHERE ee.ee.target_node_id IN (SELECT CAST(value AS INTEGER) FROM json_each(?))
 ORDER BY ee.target_node_id, ee.target_node_id, ee.source_node_id, ee.relation_id
 LIMIT ?
 `
 	}
-	rows, err := r.store.db.QueryContext(ctx, query, projectID, string(nodeIDsJSON), limit+1)
+	rows, err := r.store.db.QueryContext(ctx, query, string(nodeIDsJSON), limit+1)
 	if err != nil {
 		return nil, false, 0, fmt.Errorf("load effective graph edges: %w", err)
 	}
@@ -253,7 +251,6 @@ LIMIT ?
 		if err := rows.Scan(
 			&edge.RelationID,
 			&edge.VersionID,
-			&edge.ProjectID,
 			&edge.SourceNodeID,
 			&edge.TargetNodeID,
 			&edge.Type,

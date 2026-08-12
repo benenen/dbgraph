@@ -52,11 +52,10 @@ func (r *CodeRepository) CreateCodeRepositoryWithAudit(
 func insertCodeRepository(ctx context.Context, tx *sql.Tx, repository catalog.CodeRepository) error {
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO repositories(
-    id, project_id, name, remote_url, default_branch, created_at, updated_at
+    id, name, remote_url, default_branch, created_at, updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?)
 `,
 		repository.ID,
-		repository.ProjectID,
 		repository.Name,
 		repository.RemoteURL,
 		repository.DefaultBranch,
@@ -74,12 +73,11 @@ func (r *CodeRepository) GetCodeRepository(
 	var createdAt string
 	var updatedAt string
 	err := r.store.db.QueryRowContext(ctx, `
-SELECT id, project_id, name, remote_url, default_branch, created_at, updated_at
+SELECT id, name, remote_url, default_branch, created_at, updated_at
 FROM repositories
 WHERE id = ?
 `, repositoryID).Scan(
 		&repository.ID,
-		&repository.ProjectID,
 		&repository.Name,
 		&repository.RemoteURL,
 		&repository.DefaultBranch,
@@ -105,16 +103,15 @@ WHERE id = ?
 
 func (r *CodeRepository) ListCodeRepositories(
 	ctx context.Context,
-	projectID int64,
 	limit int,
 ) (repositories []catalog.CodeRepository, returnError error) {
 	rows, err := r.store.db.QueryContext(ctx, `
-SELECT id, project_id, name, remote_url, default_branch, created_at, updated_at
+SELECT id, name, remote_url, default_branch, created_at, updated_at
 FROM repositories
-WHERE project_id = ?
+WHERE 1=1
 ORDER BY name, id
 LIMIT ?
-`, projectID, limit)
+`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("select code repositories: %w", err)
 	}

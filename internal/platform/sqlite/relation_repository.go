@@ -48,7 +48,7 @@ func insertCreateProposal(
 ) (relations.Relation, error) {
 	var existingID int64
 	err := tx.QueryRowContext(ctx, `
-SELECT id FROM relations WHERE project_id = ? AND create_fingerprint = ?
+SELECT id FROM relations WHERE create_fingerprint = ?
 `, record.ProjectID, record.Fingerprint).Scan(&existingID)
 	if err == nil {
 		return relations.Relation{}, relations.ErrDuplicateRelation
@@ -60,7 +60,7 @@ SELECT id FROM relations WHERE project_id = ? AND create_fingerprint = ?
 		return relations.Relation{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO relations(id, project_id, relation_type, create_fingerprint, created_at)
+INSERT INTO relations(id, relation_type, create_fingerprint, created_at)
 VALUES (?, ?, ?, ?, ?)
 `, record.RelationID, record.ProjectID, record.Type, record.Fingerprint, formatTime(record.Revision.CreatedAt)); err != nil {
 		return relations.Relation{}, fmt.Errorf("insert relation: %w", err)
@@ -72,7 +72,6 @@ VALUES (?, ?, ?, ?, ?)
 		ctx,
 		tx,
 		record.EventID,
-		record.ProjectID,
 		record.RelationID,
 		record.VersionID,
 		relations.EventProposed,
@@ -97,7 +96,6 @@ INSERT INTO relation_current(
 		ctx,
 		tx,
 		record.AuditID,
-		record.ProjectID,
 		record.RelationID,
 		"RELATION_PROPOSED",
 		record.Revision.Actor,
@@ -158,7 +156,6 @@ func insertRevisionProposal(
 		ctx,
 		tx,
 		record.EventID,
-		current.ProjectID,
 		current.ID,
 		record.VersionID,
 		relations.EventProposed,
@@ -182,7 +179,6 @@ WHERE relation_id = ?
 		ctx,
 		tx,
 		record.AuditID,
-		current.ProjectID,
 		current.ID,
 		auditActionForProposal(record.Revision.Kind),
 		record.Revision.Actor,
@@ -234,7 +230,6 @@ func (r *RelationRepository) Review(
 			ctx,
 			tx,
 			record.EventID,
-			current.ProjectID,
 			current.ID,
 			current.Proposed.ID,
 			eventType,
@@ -262,7 +257,6 @@ WHERE relation_id = ?
 					ctx,
 					tx,
 					record.SupersededEventID,
-					current.ProjectID,
 					current.ID,
 					current.Active.ID,
 					relations.EventSuperseded,
@@ -306,7 +300,6 @@ WHERE relation_id = ?
 			ctx,
 			tx,
 			record.AuditID,
-			current.ProjectID,
 			current.ID,
 			action,
 			record.Principal.Actor,
@@ -401,7 +394,6 @@ INSERT INTO suppression_rules(
 			ctx,
 			tx,
 			record.EventID,
-			current.ProjectID,
 			current.ID,
 			current.Active.ID,
 			eventType,
@@ -431,7 +423,6 @@ UPDATE relation_current SET status = ?, updated_at = ? WHERE relation_id = ?
 			ctx,
 			tx,
 			record.AuditID,
-			current.ProjectID,
 			current.ID,
 			action,
 			record.Principal.Actor,
@@ -564,7 +555,6 @@ func nullablePositiveInt64(value int64) any {
 func verifyRelationNodes(
 	ctx context.Context,
 	tx *sql.Tx,
-	projectID int64,
 	revision relations.Revision,
 	references []relations.Reference,
 ) error {
@@ -577,7 +567,7 @@ func verifyRelationNodes(
 	}
 	placeholders := make([]string, 0, len(nodeSet))
 	arguments := make([]any, 0, len(nodeSet)+3)
-	arguments = append(arguments, projectID, catalog.NodeColumn, catalog.NodeActive)
+	arguments = append(arguments, catalog.NodeColumn, catalog.NodeActive)
 	for nodeID := range nodeSet {
 		placeholders = append(placeholders, "?")
 		arguments = append(arguments, nodeID)
@@ -588,7 +578,7 @@ SELECT COUNT(*)
 FROM nodes n
 JOIN node_current nc ON nc.node_id = n.id
 JOIN node_versions nv ON nv.id = nc.version_id
-WHERE n.project_id = ? AND n.kind = ? AND nv.status = ?
+WHERE n.n.kind = ? AND nv.status = ?
   AND n.id IN (` + strings.Join(placeholders, ",") + `)
 `
 	if err := tx.QueryRowContext(ctx, query, arguments...).Scan(&count); err != nil {
@@ -621,14 +611,13 @@ func insertEffectiveEdge(
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO effective_edges(
-    relation_id, version_id, project_id, source_node_id, target_node_id,
+    relation_id, version_id, source_node_id, target_node_id,
     relation_type, guard_json, selector_json, transform_json,
     confidence_bps, published_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
 		relation.ID,
 		revision.ID,
-		relation.ProjectID,
 		revision.SourceNodeID,
 		revision.TargetNodeID,
 		relation.Type,
@@ -647,7 +636,6 @@ func insertRelationEvent(
 	ctx context.Context,
 	tx *sql.Tx,
 	eventID int64,
-	projectID int64,
 	relationID int64,
 	versionID any,
 	eventType relations.EventType,
@@ -660,12 +648,12 @@ func insertRelationEvent(
 ) error {
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO relation_events(
-    id, project_id, relation_id, version_id, event_type, actor, origin,
+    id, relation_id, version_id, event_type, actor, origin,
     reason, request_id, expected_revision_no, occurred_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
 		eventID,
-		projectID,
+
 		relationID,
 		versionID,
 		eventType,
@@ -685,7 +673,6 @@ func insertRelationAudit(
 	ctx context.Context,
 	tx *sql.Tx,
 	auditID int64,
-	projectID int64,
 	relationID int64,
 	action string,
 	actor string,
@@ -704,12 +691,12 @@ func insertRelationAudit(
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO audit_events(
-    id, project_id, actor, origin, action, subject_type, subject_id,
+    id, actor, origin, action, subject_type, subject_id,
     reason, request_id, expected_revision_no, details_json, occurred_at
 ) VALUES (?, ?, ?, ?, ?, 'RELATION', ?, ?, ?, ?, ?, ?)
 `,
 		auditID,
-		projectID,
+
 		actor,
 		origin,
 		action,

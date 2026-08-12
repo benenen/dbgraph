@@ -18,17 +18,16 @@ func (r *RelationRepository) Get(ctx context.Context, relationID int64) (relatio
 
 func (r *RelationRepository) ListProposals(
 	ctx context.Context,
-	projectID int64,
 	limit int,
 ) ([]relations.Relation, error) {
 	rows, err := r.store.db.QueryContext(ctx, `
 SELECT r.id
 FROM relations r
 JOIN relation_current rc ON rc.relation_id = r.id
-WHERE r.project_id = ? AND rc.proposed_version_id IS NOT NULL
+WHERE r.rc.proposed_version_id IS NOT NULL
 ORDER BY rc.updated_at, r.id
 LIMIT ?
-`, projectID, limit)
+`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list relation proposals: %w", err)
 	}
@@ -68,7 +67,7 @@ func getRelation(ctx context.Context, reader relationReader, relationID int64) (
 	var effective int
 	err := reader.QueryRowContext(ctx, `
 SELECT
-    r.id, r.project_id, r.relation_type, rc.latest_revision_no,
+    r.id, r.r.relation_type, rc.latest_revision_no,
     rc.status, rc.active_version_id, rc.proposed_version_id,
     r.created_at,
     EXISTS(SELECT 1 FROM effective_edges ee WHERE ee.relation_id = r.id)
@@ -77,7 +76,6 @@ JOIN relation_current rc ON rc.relation_id = r.id
 WHERE r.id = ?
 `, relationID).Scan(
 		&relation.ID,
-		&relation.ProjectID,
 		&relation.Type,
 		&relation.LatestRevisionNo,
 		&relation.Status,

@@ -200,14 +200,14 @@ func (r *CatalogRepository) insertDeclaredForeignKey(
 	revision := declaredForeignKeyRevision(
 		versionID, relationID, 1, publication, stableKey, sourceNodeID, targetNodeID, foreignKey,
 	)
-	record := declaredForeignKeyRecord(publication.ProjectID, stableKey, relationID, versionID, revision)
-	if err := verifyRelationNodes(ctx, tx, publication.ProjectID, revision, record.References); err != nil {
+	record := declaredForeignKeyRecord(stableKey, relationID, versionID, revision)
+	if err := verifyRelationNodes(ctx, tx, revision, record.References); err != nil {
 		return 0, err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO relations(id, project_id, relation_type, create_fingerprint, created_at)
+INSERT INTO relations(id, relation_type, create_fingerprint, created_at)
 VALUES (?, ?, ?, ?, ?)
-`, relationID, publication.ProjectID, relations.TypeDeclaredForeignKey, stableKey, formatTime(publication.StartedAt)); err != nil {
+`, relationID, relations.TypeDeclaredForeignKey, stableKey, formatTime(publication.StartedAt)); err != nil {
 		return 0, fmt.Errorf("insert declared foreign key relation: %w", err)
 	}
 	if err := insertRelationVersion(ctx, tx, record); err != nil {
@@ -215,7 +215,7 @@ VALUES (?, ?, ?, ?, ?)
 	}
 	requestID := declaredForeignKeyRequestID(publication.ScanRunID, stableKey, "create")
 	if err := insertRelationEvent(
-		ctx, tx, eventID, publication.ProjectID, relationID, versionID,
+		ctx, tx, eventID, relationID, versionID,
 		relations.EventApproved, declaredForeignKeyActor, audit.OriginSystem,
 		"Declared foreign key observed in schema snapshot.", requestID, nil, publication.StartedAt,
 	); err != nil {
@@ -229,12 +229,12 @@ INSERT INTO relation_current(
 `, relationID, versionID, relations.StatusApproved, formatTime(publication.StartedAt)); err != nil {
 		return 0, fmt.Errorf("publish declared foreign key current relation: %w", err)
 	}
-	relation := relations.Relation{ID: relationID, ProjectID: publication.ProjectID, Type: relations.TypeDeclaredForeignKey}
+	relation := relations.Relation{ID: relationID, ProjectID: Type: relations.TypeDeclaredForeignKey}
 	if err := insertEffectiveEdge(ctx, tx, relation, revision, publication.StartedAt); err != nil {
 		return 0, err
 	}
 	if err := insertRelationAudit(
-		ctx, tx, auditID, publication.ProjectID, relationID, "DECLARED_FOREIGN_KEY_PUBLISHED",
+		ctx, tx, auditID, relationID, "DECLARED_FOREIGN_KEY_PUBLISHED",
 		declaredForeignKeyActor, audit.OriginSystem, "Declared foreign key observed in schema snapshot.",
 		requestID, nil, 1, publication.StartedAt,
 	); err != nil {
@@ -273,17 +273,17 @@ func (r *CatalogRepository) reactivateDeclaredForeignKey(
 	)
 	expected := current.LatestRevisionNo
 	revision.ExpectedRevisionNo = &expected
-	record := declaredForeignKeyRecord(publication.ProjectID, stableKey, relationID, versionID, revision)
+	record := declaredForeignKeyRecord(stableKey, relationID, versionID, revision)
 	if err := insertRelationVersion(ctx, tx, record); err != nil {
 		return err
 	}
 	requestID := declaredForeignKeyRequestID(publication.ScanRunID, stableKey, "restore")
-	if err := insertRelationEvent(ctx, tx, approvedEventID, publication.ProjectID, relationID, versionID,
+	if err := insertRelationEvent(ctx, tx, approvedEventID, relationID, versionID,
 		relations.EventApproved, declaredForeignKeyActor, audit.OriginSystem,
 		"Declared foreign key reappeared in schema snapshot.", requestID, expected, publication.StartedAt); err != nil {
 		return err
 	}
-	if err := insertRelationEvent(ctx, tx, supersededEventID, publication.ProjectID, relationID, current.Active.ID,
+	if err := insertRelationEvent(ctx, tx, supersededEventID, relationID, current.Active.ID,
 		relations.EventSuperseded, declaredForeignKeyActor, audit.OriginSystem,
 		"Declared foreign key reappeared in schema snapshot.", requestID, expected, publication.StartedAt); err != nil {
 		return err
@@ -296,12 +296,12 @@ WHERE relation_id = ?
 `, revision.RevisionNo, versionID, relations.StatusApproved, formatTime(publication.StartedAt), relationID); err != nil {
 		return fmt.Errorf("reactivate declared foreign key relation: %w", err)
 	}
-	relation := relations.Relation{ID: relationID, ProjectID: publication.ProjectID, Type: relations.TypeDeclaredForeignKey}
+	relation := relations.Relation{ID: relationID, ProjectID: Type: relations.TypeDeclaredForeignKey}
 	if err := insertEffectiveEdge(ctx, tx, relation, revision, publication.StartedAt); err != nil {
 		return err
 	}
 	return insertRelationAudit(
-		ctx, tx, auditID, publication.ProjectID, relationID, "DECLARED_FOREIGN_KEY_RESTORED",
+		ctx, tx, auditID, relationID, "DECLARED_FOREIGN_KEY_RESTORED",
 		declaredForeignKeyActor, audit.OriginSystem, "Declared foreign key reappeared in schema snapshot.",
 		requestID, expected, revision.RevisionNo, publication.StartedAt,
 	)
@@ -339,16 +339,16 @@ func (r *CatalogRepository) removeDeclaredForeignKey(
 	revision.RequestID = declaredForeignKeyRequestID(publication.ScanRunID, stableKey, "remove")
 	revision.ExpectedRevisionNo = &expected
 	revision.CreatedAt = publication.StartedAt
-	record := declaredForeignKeyRecord(publication.ProjectID, stableKey, relationID, versionID, revision)
+	record := declaredForeignKeyRecord(stableKey, relationID, versionID, revision)
 	if err := insertRelationVersion(ctx, tx, record); err != nil {
 		return err
 	}
-	if err := insertRelationEvent(ctx, tx, tombstoneEventID, publication.ProjectID, relationID, versionID,
+	if err := insertRelationEvent(ctx, tx, tombstoneEventID, relationID, versionID,
 		relations.EventTombstoned, declaredForeignKeyActor, audit.OriginSystem,
 		revision.Reason, revision.RequestID, expected, publication.StartedAt); err != nil {
 		return err
 	}
-	if err := insertRelationEvent(ctx, tx, supersededEventID, publication.ProjectID, relationID, current.Active.ID,
+	if err := insertRelationEvent(ctx, tx, supersededEventID, relationID, current.Active.ID,
 		relations.EventSuperseded, declaredForeignKeyActor, audit.OriginSystem,
 		revision.Reason, revision.RequestID, expected, publication.StartedAt); err != nil {
 		return err
@@ -365,7 +365,7 @@ WHERE relation_id = ?
 		return fmt.Errorf("remove declared foreign key effective edge: %w", err)
 	}
 	return insertRelationAudit(
-		ctx, tx, auditID, publication.ProjectID, relationID, "DECLARED_FOREIGN_KEY_TOMBSTONED",
+		ctx, tx, auditID, relationID, "DECLARED_FOREIGN_KEY_TOMBSTONED",
 		declaredForeignKeyActor, audit.OriginSystem, revision.Reason, revision.RequestID,
 		expected, revision.RevisionNo, publication.StartedAt,
 	)
@@ -399,14 +399,13 @@ func declaredForeignKeyRevision(
 }
 
 func declaredForeignKeyRecord(
-	projectID int64,
 	stableKey string,
 	relationID int64,
 	versionID int64,
 	revision relations.Revision,
 ) relations.ProposalRecord {
 	return relations.ProposalRecord{
-		RelationID: relationID, VersionID: versionID, ProjectID: projectID,
+		RelationID: relationID, VersionID: versionID, ProjectID: 
 		Type: relations.TypeDeclaredForeignKey, Fingerprint: declaredForeignKeyContentFingerprint(revision),
 		Revision:   revision,
 		References: []relations.Reference{{NodeID: revision.SourceNodeID, Role: relations.ReferenceTransform}},

@@ -20,7 +20,6 @@ import (
 // read as a missing table rather than as a relation that leaves.
 func (r *GraphRepository) LoadDataSourceGraph(
 	ctx context.Context,
-	projectID int64,
 	dataSourceID int64,
 	maximumEdges int,
 ) (result graph.DataSourceGraph, returnError error) {
@@ -59,7 +58,7 @@ WHERE e.project_id = ?
   AND target.table_id IS NOT NULL
 ORDER BY sourceTable.qualified_name, targetTable.qualified_name, e.relation_id
 LIMIT ?
-`, catalog.NodeTable, projectID, projectID, dataSourceID, dataSourceID, maximumEdges+1)
+`, catalog.NodeTable, dataSourceID, dataSourceID, maximumEdges+1)
 	if err != nil {
 		return graph.DataSourceGraph{}, fmt.Errorf("load data source graph: %w", err)
 	}
@@ -123,7 +122,6 @@ LIMIT ?
 // list everything.
 func (r *CatalogRepository) ListTables(
 	ctx context.Context,
-	projectID int64,
 	dataSourceID int64,
 	filter string,
 	limit int,
@@ -141,7 +139,7 @@ WHERE n.project_id = ?
   AND nv.qualified_name LIKE ? ESCAPE '\'
 ORDER BY nv.qualified_name
 LIMIT ?
-`, projectID, dataSourceID, catalog.NodeTable, catalog.NodeActive, pattern, limit)
+`, dataSourceID, catalog.NodeTable, catalog.NodeActive, pattern, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
 	}
@@ -180,7 +178,6 @@ func escapeLikePattern(value string) string {
 // a node would put something in the graph that can never be an endpoint.
 func (r *CatalogRepository) LoadTableDetail(
 	ctx context.Context,
-	projectID int64,
 	tableID int64,
 ) (detail catalog.TableDetail, returnError error) {
 	var metadata string
@@ -190,7 +187,7 @@ FROM nodes n
 JOIN node_current nc ON nc.node_id = n.id
 JOIN node_versions nv ON nv.id = nc.version_id
 WHERE n.id = ? AND n.project_id = ? AND n.kind = ?
-`, tableID, projectID, catalog.NodeTable).Scan(
+`, tableID, catalog.NodeTable).Scan(
 		&detail.Table.ID, &detail.Table.Name, &detail.Table.QualifiedName, &metadata,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -211,7 +208,7 @@ WHERE n.project_id = ?
   AND nv.parent_node_id = ?
   AND nv.status = ?
 ORDER BY nv.ordinal_position, nv.name
-`, projectID, catalog.NodeColumn, tableID, catalog.NodeActive)
+`, catalog.NodeColumn, tableID, catalog.NodeActive)
 	if err != nil {
 		return catalog.TableDetail{}, fmt.Errorf("load table columns: %w", err)
 	}

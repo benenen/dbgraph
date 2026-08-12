@@ -20,7 +20,6 @@ var (
 
 type CodeRepository struct {
 	ID            int64
-	ProjectID     int64
 	Name          string
 	RemoteURL     string
 	DefaultBranch string
@@ -29,14 +28,12 @@ type CodeRepository struct {
 }
 
 type CreateCodeRepository struct {
-	ProjectID     int64
 	Name          string
 	RemoteURL     string
 	DefaultBranch string
 }
 
 type AdminCreateCodeRepository struct {
-	ProjectID     int64
 	Name          string
 	RemoteURL     string
 	DefaultBranch string
@@ -49,18 +46,40 @@ type CodeRepositoryStore interface {
 	CreateCodeRepository(context.Context, CodeRepository) error
 	CreateCodeRepositoryWithAudit(context.Context, CodeRepository, audit.Event) error
 	GetCodeRepository(context.Context, int64) (CodeRepository, error)
-	ListCodeRepositories(context.Context, int64, int) ([]CodeRepository, error)
+	ListCodeRepositories(context.Context, int) ([]CodeRepository, error)
 }
 
 type CodeRepositoryService struct {
 	repository CodeRepositoryStore
-	ids        ProjectIDGenerator
+	ids        IDGenerator
 	now        func() time.Time
+}
+
+// validateAdminMetadata checks who is acting and why, and supplies a stated
+// default when the operator leaves the reason blank.
+func validateAdminMetadata(
+	principal relations.Principal,
+	reason string,
+	requestID string,
+	fallbackReason string,
+) (string, string, string, error) {
+	if principal.Role != relations.RoleAdmin {
+		return "", "", "", ErrForbidden
+	}
+	actor := strings.TrimSpace(principal.Actor)
+	reason = strings.TrimSpace(reason)
+	requestID = strings.TrimSpace(requestID)
+	if actor == "" || len(actor) > 200 || len(reason) > 2000 ||
+		requestID == "" || len(requestID) > 200 ||
+		(principal.Origin != audit.OriginAgent && principal.Origin != audit.OriginWeb) {
+		return "", "", "", ErrInvalidRepository
+	}
+	return actor, auditReason(reason, fallbackReason), requestID, nil
 }
 
 func NewCodeRepositoryService(
 	repository CodeRepositoryStore,
-	ids ProjectIDGenerator,
+	ids IDGenerator,
 	now func() time.Time,
 ) *CodeRepositoryService {
 	if now == nil {
@@ -80,17 +99,19 @@ func (s *CodeRepositoryService) CreateAsAdmin(
 	ctx context.Context,
 	command AdminCreateCodeRepository,
 ) (CodeRepository, error) {
-	actor, reason, requestID, err := validateAdminMetadata(command.Principal, command.Reason, command.RequestID, "Registered from the console")
+	actor, reason, requestID, err := validateAdminMetadata(
+		command.Principal, command.Reason, command.RequestID, "Registered from the console",
+	)
 	if err != nil {
 		return CodeRepository{}, err
 	}
 	return s.create(ctx, CreateCodeRepository{
-		ProjectID: command.ProjectID, Name: command.Name,
+		Name:      command.Name,
 		RemoteURL: command.RemoteURL, DefaultBranch: command.DefaultBranch,
 	}, func(repository CodeRepository, auditID int64, occurredAt time.Time) audit.Event {
 		details, _ := json.Marshal(map[string]string{"name": repository.Name, "defaultBranch": repository.DefaultBranch})
 		return audit.Event{
-			ID: auditID, ProjectID: repository.ProjectID, Actor: actor, Origin: command.Principal.Origin,
+			ID: auditID, Actor: actor, Origin: command.Principal.Origin,
 			Action: "CODE_REPOSITORY_CREATED", SubjectType: "CODE_REPOSITORY", SubjectID: repository.ID,
 			Reason: reason, RequestID: requestID, Details: details, OccurredAt: occurredAt,
 		}
@@ -113,7 +134,7 @@ func (s *CodeRepositoryService) create(
 			return CodeRepository{}, ErrInvalidRepository
 		}
 	}
-	if command.ProjectID <= 0 || name == "" || len(name) > 200 ||
+	if name == "" || len(name) > 200 ||
 		len(remoteURL) > 2000 || len(defaultBranch) > 500 {
 		return CodeRepository{}, ErrInvalidRepository
 	}
@@ -124,7 +145,6 @@ func (s *CodeRepositoryService) create(
 	now := s.now().UTC()
 	repository := CodeRepository{
 		ID:            repositoryID,
-		ProjectID:     command.ProjectID,
 		Name:          name,
 		RemoteURL:     remoteURL,
 		DefaultBranch: defaultBranch,
@@ -154,9 +174,6 @@ func (s *CodeRepositoryService) Get(ctx context.Context, repositoryID int64) (Co
 	return s.repository.GetCodeRepository(ctx, repositoryID)
 }
 
-func (s *CodeRepositoryService) List(ctx context.Context, projectID int64, limit int) ([]CodeRepository, error) {
-	if projectID <= 0 {
-		return nil, ErrInvalidRepository
-	}
-	return s.repository.ListCodeRepositories(ctx, projectID, clampListLimit(limit))
+func (s *CodeRepositoryService) List(ctx context.Context, limit int) ([]CodeRepository, error) {
+	return s.repository.ListCodeRepositories(ctx, clampListLimit(limit))
 }
