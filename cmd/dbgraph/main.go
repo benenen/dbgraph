@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net"
@@ -98,6 +99,17 @@ func runMCP(arguments []string, errorOutput *os.File) int {
 	return 0
 }
 
+// mysqlOpener builds the source-database dialer for schema scans. The default
+// policy requires verified TLS on TCP; allowInsecure relaxes that for local
+// development against a MySQL that has no certificate.
+func mysqlOpener(allowInsecure bool) mysqlingestion.OpenDatabase {
+	return func(ctx context.Context, dsn string) (*sql.DB, error) {
+		return mysqlingestion.OpenWithPolicy(ctx, dsn, mysqlingestion.ConnectionPolicy{
+			AllowInsecureTLS: allowInsecure,
+		})
+	}
+}
+
 func writeUsage(output *os.File) {
 	writeDiagnostic(output, "usage: dbgraph serve --database <path> [--listen <address>]\n")
 	writeDiagnostic(output, "       dbgraph mcp [--server-url <url>]\n")
@@ -130,7 +142,14 @@ func serve(serveConfig config.ServeConfig) (returnError error) {
 		dbsqlite.NewReconcileRepository(store), relationCommands, allocator, time.Now,
 	)
 	jobRepository := dbsqlite.NewJobRepository(store)
-	schemaRunner := mysqlingestion.NewRunner(catalogService, mysqlingestion.NewScanner(), nil, os.LookupEnv)
+	if serveConfig.AllowInsecureMySQLTLS {
+		writeDiagnostic(os.Stderr,
+			"warning: --insecure-mysql-tls is enabled; schema scans may reach MySQL without verified TLS\n")
+	}
+	schemaRunner := mysqlingestion.NewRunner(
+		catalogService, mysqlingestion.NewScanner(),
+		mysqlOpener(serveConfig.AllowInsecureMySQLTLS), os.LookupEnv,
+	)
 	schemaScans := jobs.NewSchemaScanCoordinator(jobRepository, catalogService, schemaRunner, allocator, time.Now)
 	auditService := audit.NewService(dbsqlite.NewAuditRepository(store), allocator, time.Now)
 	authenticator, err := appauth.LoadMCPAuthenticator(os.LookupEnv)

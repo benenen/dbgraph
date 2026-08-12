@@ -87,6 +87,7 @@ The backup command refuses to overwrite an existing file. The database, lock, WA
 | `LISTEN` | `127.0.0.1:8080` | Listen address |
 | `DATABASE` | `./dbgraph.sqlite` | SQLite path |
 | `LOCAL_DIR` | `.dbgraph-local` | Directory holding `dev.env`, `cert.pem`, and `key.pem` |
+| `MYSQL_TLS` | `1` | `0` adds `--insecure-mysql-tls` so scans can reach a source MySQL without a certificate |
 | `WATCH_INTERVAL` | `1` | Seconds between `make watch` change checks |
 | `CERT_DAYS` | `30` | Validity of the generated development certificate |
 
@@ -102,6 +103,7 @@ Flags override environment variables.
 | `DBGRAPH_LISTEN_ADDRESS` | HTTP address; defaults to `127.0.0.1:8080` |
 | `DBGRAPH_TLS_CERT_FILE` / `DBGRAPH_TLS_KEY_FILE` | TLS certificate and key; both are required together |
 | `DBGRAPH_INSECURE_CLEARTEXT_WEB` | Development only: allow Web sign-in without TLS on a loopback listener |
+| `DBGRAPH_INSECURE_MYSQL_TLS` | Development only: allow schema scans to reach MySQL over TCP without verified TLS |
 | `DBGRAPH_BACKUP_PATH` | Default `backup --output` path |
 | `DBGRAPH_MCP_SERVER_URL` | Server URL used by the stdio proxy |
 | `DBGRAPH_MCP_TOKEN` | Bearer token used by the stdio proxy |
@@ -113,7 +115,7 @@ Flags override environment variables.
 | `DBGRAPH_WEB_REVIEWER_TOKEN` | Web review/revision/suppress/restore credential |
 | `DBGRAPH_WEB_ADMIN_TOKEN` | Web data-source and schema-scan credential |
 
-Every configured access token must be 32 random bytes encoded as exactly 64 hexadecimal characters; generate one with `openssl rand -hex 32`. Web credentials require TLS unless `--insecure-cleartext-web` is set, which is loopback-only and refuses to run alongside TLS. A non-loopback listener requires both `--tls-cert`/`--tls-key` and at least one `DBGRAPH_MCP_*_TOKEN`; anonymous MCP Viewer access is loopback-only. MySQL DSNs are never stored in SQLite: a data source stores only an environment-variable name, such as `ORDERS_MYSQL_DSN`, and the serving process reads that variable when a scan runs. Use a read-only MySQL account with verified TLS.
+Every configured access token must be 32 random bytes encoded as exactly 64 hexadecimal characters; generate one with `openssl rand -hex 32`. Web credentials require TLS unless `--insecure-cleartext-web` is set, which is loopback-only and refuses to run alongside TLS. A non-loopback listener requires both `--tls-cert`/`--tls-key` and at least one `DBGRAPH_MCP_*_TOKEN`; anonymous MCP Viewer access is loopback-only. MySQL DSNs are never stored in SQLite: a data source stores only an environment-variable name, such as `ORDERS_MYSQL_DSN`, and the serving process reads that variable when a scan runs. Use a read-only MySQL account with verified TLS; `--insecure-mysql-tls` waives the verified-TLS requirement for local development and, like the cleartext Web option, is refused unless the listener is loopback.
 
 ## Roles and review model
 

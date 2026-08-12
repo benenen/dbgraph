@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/benenen/dbgraph/internal/config"
+	mysqlingestion "github.com/benenen/dbgraph/internal/ingestion/mysql"
 	dbsqlite "github.com/benenen/dbgraph/internal/platform/sqlite"
 )
 
@@ -173,4 +175,24 @@ func runWithCapturedStderr(t *testing.T, arguments []string) (int, string) {
 		t.Fatalf("read stderr capture: %v", err)
 	}
 	return exitCode, string(contents)
+}
+
+func TestMySQLOpenerAppliesTheConfiguredTLSPolicy(t *testing.T) {
+	t.Parallel()
+
+	const cleartextDSN = "readonly:secret@tcp(127.0.0.1:1)/catalog"
+
+	strict := mysqlOpener(false)
+	if _, err := strict(context.Background(), cleartextDSN); !errors.Is(err, mysqlingestion.ErrTLSRequired) {
+		t.Fatalf("strict opener error = %v, want ErrTLSRequired", err)
+	}
+
+	relaxed := mysqlOpener(true)
+	_, err := relaxed(context.Background(), cleartextDSN)
+	if err == nil {
+		t.Fatal("relaxed opener unexpectedly connected to 127.0.0.1:1")
+	}
+	if errors.Is(err, mysqlingestion.ErrTLSRequired) || errors.Is(err, mysqlingestion.ErrVerifiedTLSRequired) {
+		t.Fatalf("relaxed opener still enforces TLS: %v", err)
+	}
 }

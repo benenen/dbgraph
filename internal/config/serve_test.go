@@ -138,3 +138,63 @@ func TestLoadServeAcceptsCleartextWebOnLoopbackOnly(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadServeAcceptsInsecureMySQLTLSOnLoopbackOnly(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		arguments   []string
+		environment map[string]string
+		wantAllowed bool
+		wantError   bool
+	}{
+		{
+			name:        "flag on loopback",
+			arguments:   []string{"--database", "/tmp/dbgraph.sqlite", "--insecure-mysql-tls"},
+			wantAllowed: true,
+		},
+		{
+			name:        "environment variable on loopback",
+			arguments:   []string{"--database", "/tmp/dbgraph.sqlite"},
+			environment: map[string]string{"DBGRAPH_INSECURE_MYSQL_TLS": "1"},
+			wantAllowed: true,
+		},
+		{
+			name:      "disabled by default",
+			arguments: []string{"--database", "/tmp/dbgraph.sqlite"},
+		},
+		{
+			name: "rejected on a non-loopback listener",
+			arguments: []string{
+				"--database", "/tmp/dbgraph.sqlite", "--listen", "0.0.0.0:8080",
+				"--tls-cert", "/tmp/cert.pem", "--tls-key", "/tmp/key.pem",
+				"--insecure-mysql-tls",
+			},
+			wantError: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			lookupEnvironment := func(key string) (string, bool) {
+				value, ok := test.environment[key]
+				return value, ok
+			}
+			serveConfig, err := config.LoadServe(test.arguments, lookupEnvironment)
+			if test.wantError {
+				if !errors.Is(err, config.ErrInvalidServeConfig) {
+					t.Fatalf("LoadServe error = %v, want ErrInvalidServeConfig", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadServe: %v", err)
+			}
+			if serveConfig.AllowInsecureMySQLTLS != test.wantAllowed {
+				t.Fatalf("AllowInsecureMySQLTLS = %t, want %t", serveConfig.AllowInsecureMySQLTLS, test.wantAllowed)
+			}
+		})
+	}
+}

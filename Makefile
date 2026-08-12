@@ -1,12 +1,10 @@
 # dbgraph developer Makefile.
 #
-# `make run` and `make watch` serve plain HTTP on a loopback address, which
-# keeps health checks and the MCP endpoint reachable without certificates.
-# Web sign-in is unavailable in that mode: dbgraph refuses to start with
-# DBGRAPH_WEB_* tokens over cleartext, and the __Host- session cookie requires
-# HTTPS. Add TLS=1 to serve the Web UI with a generated self-signed
-# certificate. Generated development credentials live under $(LOCAL_DIR) and
-# stay out of git.
+# `make run` and `make watch` serve plain HTTP on a loopback address and pass
+# --insecure-cleartext-web, so the Web UI, health, and MCP all work without a
+# certificate. Add TLS=1 for HTTPS with a generated self-signed certificate,
+# and MYSQL_TLS=0 to scan a source MySQL that has no certificate. Generated
+# development credentials live under $(LOCAL_DIR) and stay out of git.
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -35,6 +33,13 @@ WATCH_INTERVAL ?= 1
 
 # TLS=0 (default) serves cleartext HTTP; TLS=1 serves HTTPS with $(TLS_CERT).
 TLS ?= 0
+# MYSQL_TLS=0 lets schema scans reach a source MySQL that has no certificate.
+MYSQL_TLS ?= 1
+ifeq ($(MYSQL_TLS),0)
+MYSQL_FLAGS := --insecure-mysql-tls
+else
+MYSQL_FLAGS :=
+endif
 
 # Read from the file rather than the environment, and group by endpoint, so the
 # banner always says which token belongs in which place.
@@ -71,7 +76,7 @@ BANNER = printf 'Tokens (%s)\n' '$(ENV_FILE)'; \
 endif
 
 SERVER_URL ?= $(SCHEME)://$(LISTEN)
-SERVE_FLAGS := serve --database $(DATABASE) --listen $(LISTEN) $(TLS_FLAGS)
+SERVE_FLAGS := serve --database $(DATABASE) --listen $(LISTEN) $(TLS_FLAGS) $(MYSQL_FLAGS)
 
 .PHONY: help build run watch dev-env certs tokens rotate-tokens rotate-certs \
 	test test-race vet fmt lint verify cover tidy mcp clean

@@ -23,6 +23,10 @@ type ServeConfig struct {
 	// on a loopback listener without TLS. Development convenience only: the
 	// session cookie and every token then travel in the clear.
 	AllowCleartextWeb bool
+	// AllowInsecureMySQLTLS lets schema scans reach a source MySQL over TCP
+	// without verified TLS. Development convenience only: MySQL credentials and
+	// catalog metadata then cross the network unprotected.
+	AllowInsecureMySQLTLS bool
 }
 
 type EnvironmentLookup func(string) (string, bool)
@@ -47,16 +51,25 @@ func LoadServe(arguments []string, lookupEnvironment EnvironmentLookup) (ServeCo
 		"insecure-cleartext-web", cleartextWebDefault,
 		"serve the Web UI without TLS on a loopback listener (development only)",
 	)
+	insecureMySQLDefault, err := booleanEnvironmentValue(lookupEnvironment, "DBGRAPH_INSECURE_MYSQL_TLS")
+	if err != nil {
+		return ServeConfig{}, err
+	}
+	allowInsecureMySQLTLS := flags.Bool(
+		"insecure-mysql-tls", insecureMySQLDefault,
+		"allow schema scans to reach MySQL over TCP without verified TLS (development only)",
+	)
 	if err := flags.Parse(arguments); err != nil {
 		return ServeConfig{}, fmt.Errorf("%w: %v", ErrInvalidServeConfig, err)
 	}
 
 	config := ServeConfig{
-		DatabasePath:      strings.TrimSpace(*databasePath),
-		ListenAddress:     strings.TrimSpace(*listenAddress),
-		TLSCertFile:       strings.TrimSpace(*tlsCertFile),
-		TLSKeyFile:        strings.TrimSpace(*tlsKeyFile),
-		AllowCleartextWeb: *allowCleartextWeb,
+		DatabasePath:          strings.TrimSpace(*databasePath),
+		ListenAddress:         strings.TrimSpace(*listenAddress),
+		TLSCertFile:           strings.TrimSpace(*tlsCertFile),
+		TLSKeyFile:            strings.TrimSpace(*tlsKeyFile),
+		AllowCleartextWeb:     *allowCleartextWeb,
+		AllowInsecureMySQLTLS: *allowInsecureMySQLTLS,
 	}
 	if config.DatabasePath == "" {
 		return ServeConfig{}, fmt.Errorf("%w: database path is required", ErrInvalidServeConfig)
@@ -74,6 +87,10 @@ func LoadServe(arguments []string, lookupEnvironment EnvironmentLookup) (ServeCo
 	if config.AllowCleartextWeb && !isLoopbackHost(host) {
 		return ServeConfig{}, fmt.Errorf(
 			"%w: insecure cleartext Web access requires a loopback listener", ErrInvalidServeConfig)
+	}
+	if config.AllowInsecureMySQLTLS && !isLoopbackHost(host) {
+		return ServeConfig{}, fmt.Errorf(
+			"%w: insecure MySQL TLS requires a loopback listener", ErrInvalidServeConfig)
 	}
 	if config.AllowCleartextWeb && config.TLSCertFile != "" {
 		return ServeConfig{}, fmt.Errorf(
