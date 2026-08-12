@@ -41,3 +41,6 @@ dbgraph.sqlite*
 
 # Makefile build output
 /bin/
+
+
+docs/superpowers
