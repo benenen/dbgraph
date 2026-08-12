@@ -3,6 +3,7 @@
 const state = {
   csrf: "", role: "", actor: "", relation: null, graph: null, graphRelation: null, traceResult: null,
   editors: { guard: undefined, selector: undefined, transform: undefined }, evidence: [],
+  dataSourceNames: new Map(),
 };
 
 function byId(id) { return document.getElementById(id); }
@@ -127,7 +128,30 @@ function initializeProjectPicker() {
   select.addEventListener("change", () => {
     if (select.value) localStorage.setItem(PROJECT_STORAGE_KEY, select.value);
     else localStorage.removeItem(PROJECT_STORAGE_KEY);
+    loadNodeDataSources();
   });
+}
+
+function dataSourceLabel(id) {
+  return state.dataSourceNames.get(id) || id;
+}
+
+async function loadNodeDataSources() {
+  const select = byId("node-data-source");
+  if (!select) return;
+  state.dataSourceNames = new Map();
+  select.replaceChildren(new Option("All data sources", ""));
+  let project;
+  try { project = requireProject(); } catch { return; }
+  try {
+    const sources = await api(`/api/v1/projects/${project}/data-sources?limit=200`);
+    state.dataSourceNames = new Map(sources.map(source => [source.id, source.name]));
+    for (const source of sources) select.append(new Option(source.name, source.id));
+  } catch { /* the picker stays on "All data sources" */ }
+}
+
+function showNodeDetails(node) {
+  byId("node-details").textContent = JSON.stringify({ ...node, dataSourceName: dataSourceLabel(node.dataSourceId) }, null, 2);
 }
 
 function resultCard(title, detail, meta = "", state = "") {
@@ -150,14 +174,17 @@ function initializeNodeSearch() {
     event.preventDefault();
     try {
       const project = requireProject();
-      const data = await api(`/api/v1/projects/${project}/nodes?q=${encodeURIComponent(byId("node-query").value)}&limit=50`);
+      const query = byId("node-query").value;
+      const source = byId("node-data-source").value;
+      const suffix = source ? `&dataSourceId=${encodeURIComponent(source)}` : "";
+      const data = await api(`/api/v1/projects/${project}/nodes?q=${encodeURIComponent(query)}&limit=50${suffix}`);
       replaceCards(byId("node-results"), data.nodes.map(node => {
-        const card = resultCard(node.qualifiedName, `${node.kind} · ${node.dataType || "no type"}`, `ID ${node.id}`);
+        const card = resultCard(node.qualifiedName, `${node.kind} · ${node.dataType || "no type"}`, `ID ${node.id} · ${dataSourceLabel(node.dataSourceId)}`);
         card.addEventListener("click", () => {
           byId("trace-start").value = node.id;
           byId("proposal-source").value = node.id;
           if (state.editors.transform?.kind === "column_copy") updateEditor("transform", { kind: "column_copy", nodeId: node.id }, true);
-          byId("node-details").textContent = JSON.stringify(node, null, 2);
+          showNodeDetails(node);
           location.hash = "node-details";
           activatePanel("node-details");
         });
@@ -257,7 +284,7 @@ function renderGraph(data) {
     byId("trace-start").value = nodeID;
     try {
       const node = await api(`/api/v1/projects/${requireProject()}/nodes/${nodeID}`);
-      byId("node-details").textContent = JSON.stringify(node, null, 2);
+      showNodeDetails(node);
       location.hash = "node-details";
       activatePanel("node-details");
     } catch (error) { showMessage(error.message); }
