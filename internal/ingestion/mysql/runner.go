@@ -48,11 +48,24 @@ type OpenDatabase func(context.Context, string) (*sql.DB, error)
 
 type EnvironmentLookup func(string) (string, bool)
 
+// SecretOpener decrypts a sealed DSN. The runner never holds the key itself.
+type SecretOpener func(keyID string, ciphertext []byte) (string, error)
+
+// RunnerOption adjusts an optional runner dependency.
+type RunnerOption func(*Runner)
+
+// WithSecretOpener lets the runner use a DSN stored with the data source.
+// Without it, only the environment-variable path resolves.
+func WithSecretOpener(open SecretOpener) RunnerOption {
+	return func(r *Runner) { r.openSecret = open }
+}
+
 type Runner struct {
 	catalog           catalogService
 	scanner           schemaScanner
 	openDatabase      OpenDatabase
 	lookupEnvironment EnvironmentLookup
+	openSecret        SecretOpener
 }
 
 func NewRunner(
@@ -60,16 +73,49 @@ func NewRunner(
 	scanner schemaScanner,
 	openDatabase OpenDatabase,
 	lookupEnvironment EnvironmentLookup,
+	options ...RunnerOption,
 ) *Runner {
 	if openDatabase == nil {
 		openDatabase = Open
 	}
-	return &Runner{
+	runner := &Runner{
 		catalog:           catalog,
 		scanner:           scanner,
 		openDatabase:      openDatabase,
 		lookupEnvironment: lookupEnvironment,
 	}
+	for _, option := range options {
+		option(runner)
+	}
+	return runner
+}
+
+// resolveDSN prefers a DSN stored with the data source and falls back to the
+// environment variable it names. A stored DSN that cannot be opened is an
+// error rather than a silent fallback: the environment may hold a stale
+// credential, and quietly connecting with the wrong one hides a key problem.
+func (r *Runner) resolveDSN(dataSource catalog.DataSource) (string, error) {
+	if len(dataSource.DSNCiphertext) > 0 {
+		if r.openSecret == nil {
+			return "", ErrMissingDSN
+		}
+		dsn, err := r.openSecret(dataSource.DSNKeyID, dataSource.DSNCiphertext)
+		if err != nil {
+			return "", fmt.Errorf("%w: stored DSN could not be opened", ErrMissingDSN)
+		}
+		if strings.TrimSpace(dsn) == "" {
+			return "", ErrMissingDSN
+		}
+		return dsn, nil
+	}
+	if r.lookupEnvironment == nil {
+		return "", ErrMissingDSN
+	}
+	dsn, ok := r.lookupEnvironment(dataSource.DSNEnvironment)
+	if !ok || strings.TrimSpace(dsn) == "" {
+		return "", ErrMissingDSN
+	}
+	return dsn, nil
 }
 
 func (r *Runner) Run(ctx context.Context, dataSourceID int64) (catalog.PublishedSnapshot, error) {
@@ -102,9 +148,9 @@ func (r *Runner) run(
 	if dataSource.Kind != catalog.DataSourceMySQL {
 		return catalog.PublishedSnapshot{}, ErrUnsupportedSource
 	}
-	dsn, ok := r.lookupEnvironment(dataSource.DSNEnvironment)
-	if !ok || strings.TrimSpace(dsn) == "" {
-		return catalog.PublishedSnapshot{}, ErrMissingDSN
+	dsn, err := r.resolveDSN(dataSource)
+	if err != nil {
+		return catalog.PublishedSnapshot{}, err
 	}
 	dsnConfig, err := mysqldriver.ParseDSN(dsn)
 	if err != nil || strings.TrimSpace(dsnConfig.DBName) == "" {

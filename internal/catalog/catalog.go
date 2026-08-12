@@ -69,13 +69,21 @@ const (
 )
 
 type DataSource struct {
-	ID             int64
-	ProjectID      int64
-	Name           string
-	Kind           DataSourceKind
+	ID        int64
+	ProjectID int64
+	Name      string
+	Kind      DataSourceKind
+	// DSNEnvironment names the environment variable holding the DSN. It is the
+	// fallback used when no sealed DSN is stored for this source.
 	DSNEnvironment string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// DSNKeyID identifies the key that sealed DSNCiphertext; both are empty for
+	// a source that resolves through the environment.
+	DSNKeyID string
+	// DSNCiphertext is the sealed DSN. It never leaves the process in a Web,
+	// REST, or MCP response.
+	DSNCiphertext []byte
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type CreateDataSource struct {
@@ -83,16 +91,23 @@ type CreateDataSource struct {
 	Name           string
 	Kind           DataSourceKind
 	DSNEnvironment string
+	// DSN is the connection string itself; when set it is sealed before storage.
+	DSN string
 }
 
 type AdminCreateDataSource struct {
-	ProjectID      int64
-	Name           string
-	Kind           DataSourceKind
+	ProjectID int64
+	Name      string
+	Kind      DataSourceKind
+	// DSNEnvironment names the environment variable holding the DSN. Required.
 	DSNEnvironment string
-	Principal      relations.Principal
-	Reason         string
-	RequestID      string
+	// DSN is the connection string itself. When set it is sealed and stored,
+	// and it takes precedence over DSNEnvironment at scan time. It is never
+	// returned by any adapter.
+	DSN       string
+	Principal relations.Principal
+	Reason    string
+	RequestID string
 }
 
 type NodeInput struct {
@@ -208,13 +223,38 @@ type Service struct {
 	repository CatalogRepository
 	ids        ProjectIDGenerator
 	now        func() time.Time
+	sealer     DSNSealer
 }
 
-func NewService(repository CatalogRepository, ids ProjectIDGenerator, now func() time.Time) *Service {
+// DSNSealer encrypts a source-database DSN before it reaches storage. The
+// service owns this invariant: a DSN never reaches the repository unsealed.
+type DSNSealer interface {
+	Seal(plaintext string) (keyID string, ciphertext []byte, err error)
+}
+
+// ServiceOption adjusts an optional service dependency.
+type ServiceOption func(*Service)
+
+// WithDSNSealer lets the service accept a plaintext DSN and store it sealed.
+// Without it, a data source can only reference an environment variable.
+func WithDSNSealer(sealer DSNSealer) ServiceOption {
+	return func(s *Service) { s.sealer = sealer }
+}
+
+func NewService(
+	repository CatalogRepository,
+	ids ProjectIDGenerator,
+	now func() time.Time,
+	options ...ServiceOption,
+) *Service {
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{repository: repository, ids: ids, now: now}
+	service := &Service{repository: repository, ids: ids, now: now}
+	for _, option := range options {
+		option(service)
+	}
+	return service
 }
 
 func (s *Service) CreateDataSource(ctx context.Context, command CreateDataSource) (DataSource, error) {
@@ -238,10 +278,13 @@ func (s *Service) CreateDataSourceAsAdmin(
 	}
 	return s.createDataSource(ctx, CreateDataSource{
 		ProjectID: command.ProjectID, Name: command.Name, Kind: command.Kind,
-		DSNEnvironment: command.DSNEnvironment,
+		DSNEnvironment: command.DSNEnvironment, DSN: command.DSN,
 	}, func(source DataSource, eventID int64, occurredAt time.Time) audit.Event {
+		// The audit record names how the DSN resolves, never the DSN itself:
+		// audit events are append-only, so a leak here could never be removed.
 		details, _ := json.Marshal(map[string]string{
 			"kind": "MYSQL", "dsnEnvironment": source.DSNEnvironment,
+			"dsnStored": storedLabel(source),
 		})
 		return audit.Event{
 			ID: eventID, ProjectID: source.ProjectID, Actor: actor, Origin: command.Principal.Origin,
@@ -272,12 +315,18 @@ func (s *Service) createDataSource(
 		return DataSource{}, fmt.Errorf("generate data source ID: %w", err)
 	}
 	now := s.now().UTC()
+	keyID, ciphertext, err := s.sealDSN(command.DSN)
+	if err != nil {
+		return DataSource{}, err
+	}
 	dataSource := DataSource{
 		ID:             dataSourceID,
 		ProjectID:      command.ProjectID,
 		Name:           name,
 		Kind:           command.Kind,
 		DSNEnvironment: dsnEnvironment,
+		DSNKeyID:       keyID,
+		DSNCiphertext:  ciphertext,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -504,4 +553,36 @@ func validateSnapshot(command PublishSnapshot) error {
 		foreignKeyKeys[key] = struct{}{}
 	}
 	return nil
+}
+
+// MaximumDSNLength bounds a stored connection string. A DSN is untrusted input
+// arriving from a Web form.
+const MaximumDSNLength = 2000
+
+// ErrSealerUnavailable reports a stored DSN requested without a configured key.
+var ErrSealerUnavailable = errors.New("no secret key is configured for stored DSNs")
+
+func (s *Service) sealDSN(dsn string) (string, []byte, error) {
+	trimmed := strings.TrimSpace(dsn)
+	if trimmed == "" {
+		return "", nil, nil
+	}
+	if len(trimmed) > MaximumDSNLength {
+		return "", nil, ErrInvalidDataSource
+	}
+	if s.sealer == nil {
+		return "", nil, ErrSealerUnavailable
+	}
+	keyID, ciphertext, err := s.sealer.Seal(trimmed)
+	if err != nil {
+		return "", nil, fmt.Errorf("seal data source DSN: %w", err)
+	}
+	return keyID, ciphertext, nil
+}
+
+func storedLabel(source DataSource) string {
+	if len(source.DSNCiphertext) > 0 {
+		return "true"
+	}
+	return "false"
 }

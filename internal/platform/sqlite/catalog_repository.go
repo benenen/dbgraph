@@ -65,14 +65,16 @@ func (r *CatalogRepository) CreateDataSourceWithAudit(
 func insertDataSource(ctx context.Context, tx *sql.Tx, source catalog.DataSource) error {
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO data_sources(
-    id, project_id, name, source_kind, dsn_environment, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?)
+    id, project_id, name, source_kind, dsn_environment, dsn_key_id, dsn_ciphertext, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
 		source.ID,
 		source.ProjectID,
 		source.Name,
 		source.Kind,
 		source.DSNEnvironment,
+		optionalText(source.DSNKeyID),
+		optionalBlob(source.DSNCiphertext),
 		source.CreatedAt.Format(time.RFC3339Nano),
 		source.UpdatedAt.Format(time.RFC3339Nano),
 	)
@@ -83,8 +85,10 @@ func (r *CatalogRepository) GetDataSource(ctx context.Context, dataSourceID int6
 	var source catalog.DataSource
 	var createdAt string
 	var updatedAt string
+	var keyID sql.NullString
+	var ciphertext []byte
 	err := r.store.db.QueryRowContext(ctx, `
-SELECT id, project_id, name, source_kind, dsn_environment, created_at, updated_at
+SELECT id, project_id, name, source_kind, dsn_environment, dsn_key_id, dsn_ciphertext, created_at, updated_at
 FROM data_sources
 WHERE id = ?
 `, dataSourceID).Scan(
@@ -93,6 +97,8 @@ WHERE id = ?
 		&source.Name,
 		&source.Kind,
 		&source.DSNEnvironment,
+		&keyID,
+		&ciphertext,
 		&createdAt,
 		&updatedAt,
 	)
@@ -102,6 +108,8 @@ WHERE id = ?
 	if err != nil {
 		return catalog.DataSource{}, fmt.Errorf("select data source: %w", err)
 	}
+	source.DSNKeyID = keyID.String
+	source.DSNCiphertext = ciphertext
 	source.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
 	if err != nil {
 		return catalog.DataSource{}, fmt.Errorf("parse data source creation time: %w", err)
@@ -744,7 +752,7 @@ func (r *CatalogRepository) ListDataSources(
 	limit int,
 ) (sources []catalog.DataSource, returnError error) {
 	rows, err := r.store.db.QueryContext(ctx, `
-SELECT id, project_id, name, source_kind, dsn_environment, created_at, updated_at
+SELECT id, project_id, name, source_kind, dsn_environment, dsn_key_id, dsn_ciphertext, created_at, updated_at
 FROM data_sources
 WHERE project_id = ?
 ORDER BY name, id
@@ -759,12 +767,16 @@ LIMIT ?
 		var source catalog.DataSource
 		var createdAt string
 		var updatedAt string
+		var keyID sql.NullString
+		var ciphertext []byte
 		if err := rows.Scan(
 			&source.ID, &source.ProjectID, &source.Name, &source.Kind,
-			&source.DSNEnvironment, &createdAt, &updatedAt,
+			&source.DSNEnvironment, &keyID, &ciphertext, &createdAt, &updatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan data source: %w", err)
 		}
+		source.DSNKeyID = keyID.String
+		source.DSNCiphertext = ciphertext
 		source.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
 		if err != nil {
 			return nil, fmt.Errorf("parse data source creation time: %w", err)
@@ -779,4 +791,18 @@ LIMIT ?
 		return nil, fmt.Errorf("iterate data sources: %w", err)
 	}
 	return sources, nil
+}
+
+func optionalText(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func optionalBlob(value []byte) any {
+	if len(value) == 0 {
+		return nil
+	}
+	return value
 }

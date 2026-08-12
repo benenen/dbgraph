@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -219,7 +220,7 @@ func TestServicePublishesCurrentSchemaSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get data source: %v", err)
 	}
-	if retrievedSource != dataSource {
+	if !reflect.DeepEqual(retrievedSource, dataSource) {
 		t.Fatalf("retrieved data source = %#v, want %#v", retrievedSource, dataSource)
 	}
 
