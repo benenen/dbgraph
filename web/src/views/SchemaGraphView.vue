@@ -13,8 +13,10 @@ import {
   type DataSource,
   type RelationEdge,
   type RelationGraph,
+  type TableDetail,
   type TableSummary,
 } from "@/api/client";
+import { conditionNodeIds, describeCondition } from "@/lib/conditions";
 
 const workspaceId = ref("");
 const dataSources = ref<DataSource[]>([]);
@@ -32,6 +34,17 @@ const loading = ref(true);
 const loadingTables = ref(false);
 const failure = ref("");
 const focusedTableId = ref("");
+const detail = ref<TableDetail | null>(null);
+const loadingDetail = ref(false);
+
+// Hover is a preview and click is a selection: pointing at something says what
+// it is, clicking keeps it on screen while you read the panel below.
+const hoveredTableId = ref("");
+const hoveredEdgeId = ref("");
+const selectedEdge = ref<RelationEdge | null>(null);
+// Guards name columns by id. Resolved on demand when an edge is opened, and
+// kept, because the same columns recur across a source's relations.
+const columnNames = ref<Record<string, string>>({});
 
 /** Tables that actually take part in a relation, which is what the graph draws. */
 const connected = computed(() => new Set(graph.value.tables.map((table) => table.id)));
@@ -267,9 +280,92 @@ function edgeFocused(edge: RelationEdge): boolean {
   );
 }
 
-function focusTable(table: TableSummary): void {
-  focusedTableId.value = focusedTableId.value === table.id ? "" : table.id;
+function columnName(nodeId: string): string {
+  return columnNames.value[nodeId] ?? nodeId;
 }
+
+const selectedGuard = computed(() =>
+  selectedEdge.value?.guard ? describeCondition(selectedEdge.value.guard, columnName) : "",
+);
+
+async function openEdge(edge: RelationEdge): Promise<void> {
+  if (selectedEdge.value?.relationId === edge.relationId) {
+    selectedEdge.value = null;
+    return;
+  }
+  selectedEdge.value = edge;
+  focusedTableId.value = "";
+  detail.value = null;
+  const wanted = [...conditionNodeIds(edge.guard)].filter((id) => !(id in columnNames.value));
+  if (!wanted.length) return;
+  const resolved = await Promise.all(
+    wanted.map(async (id) => {
+      try {
+        const node = await api.node(workspaceId.value, id);
+        return [id, node.qualifiedName] as const;
+      } catch {
+        // A name is a convenience; the guard is still readable without it.
+        return [id, id] as const;
+      }
+    }),
+  );
+  columnNames.value = { ...columnNames.value, ...Object.fromEntries(resolved) };
+}
+
+/** True while an edge should be drawn lit: hovered, selected, or on a hovered table. */
+function edgeLit(edge: RelationEdge): boolean {
+  if (hoveredEdgeId.value === edge.relationId) return true;
+  if (selectedEdge.value?.relationId === edge.relationId) return true;
+  if (!hoveredTableId.value) return false;
+  return edge.sourceTableId === hoveredTableId.value || edge.targetTableId === hoveredTableId.value;
+}
+
+/**
+ * True while a table is lit: the one being pointed at, a table it reaches, or
+ * an endpoint of the edge being pointed at. Pointing at a table should answer
+ * "what does this connect to", which means lighting the far end too.
+ */
+function tableLit(tableId: string): boolean {
+  if (hoveredTableId.value === tableId) return true;
+  const edge = graph.value.edges.find((candidate) => candidate.relationId === hoveredEdgeId.value);
+  if (edge && (edge.sourceTableId === tableId || edge.targetTableId === tableId)) return true;
+  if (!hoveredTableId.value) return false;
+  return graph.value.edges.some(
+    (candidate) =>
+      (candidate.sourceTableId === hoveredTableId.value && candidate.targetTableId === tableId) ||
+      (candidate.targetTableId === hoveredTableId.value && candidate.sourceTableId === tableId),
+  );
+}
+
+async function focusTable(table: TableSummary): Promise<void> {
+  selectedEdge.value = null;
+  if (focusedTableId.value === table.id) {
+    focusedTableId.value = "";
+    detail.value = null;
+    return;
+  }
+  focusedTableId.value = table.id;
+  detail.value = null;
+  loadingDetail.value = true;
+  try {
+    detail.value = await api.tableDetail(workspaceId.value, table.id);
+  } catch (error) {
+    if (error instanceof UnauthenticatedError) return;
+    failure.value = error instanceof Error ? error.message : "Could not read that table.";
+  } finally {
+    loadingDetail.value = false;
+  }
+}
+
+/** Marks the columns a relation joins on, so they stand out in the column list. */
+const joinedColumns = computed(() => {
+  const names = new Set<string>();
+  for (const edge of graph.value.edges) {
+    if (edge.sourceTableId === focusedTableId.value) names.add(edge.sourceColumn);
+    if (edge.targetTableId === focusedTableId.value) names.add(edge.targetColumn);
+  }
+  return names;
+});
 
 const focusedEdges = computed(() =>
   graph.value.edges.filter((edge) => edgeFocused(edge) && focusedTableId.value),
@@ -277,6 +373,21 @@ const focusedEdges = computed(() =>
 
 function tableName(tableId: string): string {
   return graph.value.tables.find((table) => table.id === tableId)?.name ?? tableId;
+}
+
+/** The midpoint of an edge's curve, where its hover label sits. */
+function edgeLabelPoint(edge: RelationEdge): { x: number; y: number } {
+  const from = positions.value[edge.sourceTableId];
+  const to = positions.value[edge.targetTableId];
+  if (!from || !to) return { x: 0, y: 0 };
+  const controlX = (from.x + to.x) / 2 + (to.y - from.y) * 0.12;
+  const controlY = (from.y + to.y) / 2 - (to.x - from.x) * 0.12;
+  // A quadratic curve at t=0.5 sits midway between its control point and the
+  // straight chord, not on either.
+  return {
+    x: 0.25 * from.x + 0.5 * controlX + 0.25 * to.x,
+    y: 0.25 * from.y + 0.5 * controlY + 0.25 * to.y,
+  };
 }
 
 onMounted(async () => {
@@ -365,9 +476,10 @@ watch(selectedSourceId, loadSource);
       <div v-if="!graph.edges.length" class="empty-graph">
         <p class="empty-title">No relations yet</p>
         <p class="muted">
-          This source has {{ tables.length }} tables and no approved relations. dbgraph does not
-          infer them: an agent reads the application source and proposes them over MCP, and a
-          reviewer approves. Declared foreign keys, where a database has them, arrive with a scan.
+          This source has {{ sourceTableCount }} table{{ sourceTableCount === 1 ? "" : "s" }} and no
+          approved relations. dbgraph does not infer them: an agent reads the application source and
+          proposes them over MCP, and a reviewer approves. Declared foreign keys, where a database
+          has them, arrive with a scan.
         </p>
       </div>
 
@@ -397,39 +509,157 @@ watch(selectedSourceId, loadSource);
           </marker>
         </defs>
 
-        <path
-          v-for="edge in graph.edges"
-          :key="edge.relationId"
-          :d="edgePath(edge)"
-          class="edge"
-          :class="{ conditional: edge.conditional, dimmed: !edgeFocused(edge) }"
-          marker-end="url(#arrow)"
-        />
+        <g v-for="edge in graph.edges" :key="edge.relationId" class="edge-group">
+          <path
+            :d="edgePath(edge)"
+            class="edge"
+            :class="{
+              conditional: edge.conditional,
+              dimmed: !edgeFocused(edge),
+              lit: edgeLit(edge),
+              selected: selectedEdge?.relationId === edge.relationId,
+            }"
+            marker-end="url(#arrow)"
+          />
+          <!-- A 2px line is nearly impossible to point at, so the pointer
+               target is a wide invisible stroke following the same curve. -->
+          <path
+            :d="edgePath(edge)"
+            class="edge-hit"
+            @pointerenter="hoveredEdgeId = edge.relationId"
+            @pointerleave="hoveredEdgeId = ''"
+            @pointerdown.stop
+            @click.stop="openEdge(edge)"
+          >
+            <title>
+              {{ tableName(edge.sourceTableId) }}.{{ edge.sourceColumn }} →
+              {{ tableName(edge.targetTableId) }}.{{ edge.targetColumn }}
+            </title>
+          </path>
+          <text
+            v-if="edgeLit(edge)"
+            class="edge-label"
+            :x="edgeLabelPoint(edge).x"
+            :y="edgeLabelPoint(edge).y"
+          >
+            {{ edge.sourceColumn }} → {{ edge.targetColumn }}
+          </text>
+        </g>
 
         <g
           v-for="table in graph.tables"
           :key="table.id"
           class="node"
-          :class="{ dimmed: focusedTableId && !isFocused(table.id) }"
-          @click="focusTable(table)"
+          :class="{ dimmed: focusedTableId && !isFocused(table.id), lit: tableLit(table.id) }"
+          @pointerenter="hoveredTableId = table.id"
+          @pointerleave="hoveredTableId = ''"
+          @pointerdown.stop
+          @click.stop="focusTable(table)"
         >
-          <circle :cx="positions[table.id]?.x" :cy="positions[table.id]?.y" r="11" />
+          <circle
+            class="node-hit"
+            :cx="positions[table.id]?.x"
+            :cy="positions[table.id]?.y"
+            r="22"
+          />
+          <circle
+            class="node-dot"
+            :cx="positions[table.id]?.x"
+            :cy="positions[table.id]?.y"
+            r="11"
+          />
           <text :x="positions[table.id]?.x" :y="(positions[table.id]?.y ?? 0) - 20">
             {{ table.name }}
           </text>
+          <title>{{ table.qualifiedName }}</title>
         </g>
       </svg>
 
-      <div v-if="focusedTableId && focusedEdges.length" class="detail">
-        <p class="detail-title">{{ tableName(focusedTableId) }}</p>
-        <ul>
-          <li v-for="edge in focusedEdges" :key="edge.relationId">
-            <code>{{ tableName(edge.sourceTableId) }}.{{ edge.sourceColumn }}</code>
-            <span class="arrow">→</span>
-            <code>{{ tableName(edge.targetTableId) }}.{{ edge.targetColumn }}</code>
-            <Tag v-if="edge.conditional" value="conditional" severity="secondary" />
-          </li>
-        </ul>
+      <div v-if="selectedEdge" class="detail">
+        <p class="detail-title">
+          <code>{{ tableName(selectedEdge.sourceTableId) }}.{{ selectedEdge.sourceColumn }}</code>
+          <span class="arrow">→</span>
+          <code>{{ tableName(selectedEdge.targetTableId) }}.{{ selectedEdge.targetColumn }}</code>
+          <span class="detail-count">
+            {{ Math.round(selectedEdge.confidence * 100) }}% confident
+          </span>
+        </p>
+        <dl class="edge-clauses">
+          <template v-if="selectedGuard">
+            <dt>Applies when</dt>
+            <dd><code>{{ selectedGuard }}</code></dd>
+          </template>
+          <template v-else>
+            <dt>Applies</dt>
+            <dd>always — this relation carries no guard</dd>
+          </template>
+          <dt>Relation</dt>
+          <dd><code>{{ selectedEdge.relationId }}</code></dd>
+        </dl>
+      </div>
+
+      <div v-else-if="focusedTableId" class="detail">
+        <p class="detail-title">
+          {{ detail?.qualifiedName ?? tableName(focusedTableId) }}
+          <span v-if="detail" class="detail-count">
+            {{ detail.columns.length }} column{{ detail.columns.length === 1 ? "" : "s" }} ·
+            {{ detail.indexes.length }} index{{ detail.indexes.length === 1 ? "" : "es" }}
+          </span>
+        </p>
+
+        <div v-if="loadingDetail" class="loading small">
+          <ProgressSpinner style="width: 1.5rem; height: 1.5rem" />
+        </div>
+
+        <div v-else class="detail-grid">
+          <section>
+            <h3>Columns</h3>
+            <table class="fields">
+              <tbody>
+                <tr
+                  v-for="column in detail?.columns ?? []"
+                  :key="column.id"
+                  :class="{ joined: joinedColumns.has(column.name) }"
+                >
+                  <td class="field-name">{{ column.name }}</td>
+                  <td class="field-type">{{ column.dataType }}</td>
+                  <td class="field-flag">
+                    <span v-if="!column.nullable" class="not-null">NOT NULL</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p v-if="!detail?.columns.length" class="muted small-note">No columns recorded.</p>
+          </section>
+
+          <section>
+            <h3>Indexes</h3>
+            <ul class="indexes">
+              <li v-for="index in detail?.indexes ?? []" :key="index.name">
+                <span class="index-name">{{ index.name }}</span>
+                <Tag v-if="index.primary" value="primary" severity="success" />
+                <Tag v-else-if="index.unique" value="unique" severity="info" />
+                <code>{{ index.columns.join(", ") }}</code>
+              </li>
+            </ul>
+            <p v-if="!detail?.indexes.length" class="muted small-note">
+              No indexes recorded. They arrive with a scan — re-scan this source if it was imported
+              before dbgraph read them.
+            </p>
+          </section>
+
+          <section v-if="focusedEdges.length">
+            <h3>Relations</h3>
+            <ul class="relations">
+              <li v-for="edge in focusedEdges" :key="edge.relationId">
+                <code>{{ tableName(edge.sourceTableId) }}.{{ edge.sourceColumn }}</code>
+                <span class="arrow">→</span>
+                <code>{{ tableName(edge.targetTableId) }}.{{ edge.targetColumn }}</code>
+                <Tag v-if="edge.conditional" value="conditional" severity="secondary" />
+              </li>
+            </ul>
+          </section>
+        </div>
       </div>
     </section>
   </div>
@@ -629,6 +859,43 @@ h1 {
   stroke: var(--p-text-muted-color);
   stroke-width: 2.5;
   opacity: 0.75;
+  transition:
+    stroke 120ms ease,
+    stroke-width 120ms ease,
+    opacity 120ms ease;
+  pointer-events: none;
+}
+
+/* The pointer target: invisible, wide, and on the same curve. Without it a
+   2.5px line is a pixel-hunt. */
+.edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 22;
+  cursor: pointer;
+  pointer-events: stroke;
+}
+
+.edge.lit {
+  stroke: var(--p-primary-color);
+  stroke-width: 3.5;
+  opacity: 1;
+}
+
+.edge.selected {
+  stroke-width: 4.5;
+}
+
+.edge-label {
+  fill: var(--p-text-color);
+  font-size: 18px;
+  font-weight: 500;
+  text-anchor: middle;
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: var(--p-content-background);
+  stroke-width: 6px;
+  stroke-linejoin: round;
 }
 
 .edge.conditional {
@@ -647,13 +914,33 @@ h1 {
   cursor: pointer;
 }
 
-.node circle {
+.node-dot {
   fill: var(--p-primary-color);
   stroke: var(--p-content-background);
   stroke-width: 2;
+  transition:
+    r 120ms ease,
+    stroke-width 120ms ease;
+}
+
+/* Same reason as the edge hit path: the circle a person aims at is bigger
+   than the dot they see. */
+.node-hit {
+  fill: transparent;
+  pointer-events: fill;
+}
+
+.node.lit .node-dot {
+  r: 15;
+  stroke-width: 3;
+}
+
+.node.lit text {
+  font-weight: 700;
 }
 
 .node text {
+  pointer-events: none;
   fill: var(--p-text-color);
   font-size: 22px;
   font-weight: 500;
@@ -681,7 +968,85 @@ h1 {
   font-weight: 600;
 }
 
-.detail ul {
+.edge-clauses {
+  display: grid;
+  grid-template-columns: 8rem 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.edge-clauses dt {
+  color: var(--p-text-muted-color);
+}
+
+.edge-clauses dd {
+  margin: 0;
+}
+
+.detail-title .arrow {
+  margin: 0 0.4rem;
+}
+
+.detail-count {
+  margin-left: 0.5rem;
+  font-weight: 400;
+  color: var(--p-text-muted-color);
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.detail h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--p-text-muted-color);
+}
+
+.fields {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.fields td {
+  padding: 0.15rem 0.5rem 0.15rem 0;
+  vertical-align: top;
+}
+
+.field-name {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.field-type {
+  color: var(--p-text-muted-color);
+}
+
+.field-flag {
+  width: 5rem;
+}
+
+.not-null {
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  color: var(--p-text-muted-color);
+}
+
+/* A column a relation joins on is the reason this table is in the graph. */
+.fields tr.joined .field-name {
+  font-weight: 700;
+  color: var(--p-primary-color);
+}
+
+.indexes,
+.relations {
   display: grid;
   gap: 0.3rem;
   margin: 0;
@@ -689,11 +1054,23 @@ h1 {
   list-style: none;
 }
 
-.detail li {
+.indexes li,
+.relations li {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  flex-wrap: wrap;
+  gap: 0.4rem;
   font-size: 0.8rem;
+}
+
+.index-name {
+  font-weight: 600;
+}
+
+.small-note {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
 }
 
 .arrow {

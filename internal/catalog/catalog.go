@@ -153,6 +153,74 @@ type NodeInput struct {
 	DataType        string
 	Nullable        bool
 	Ordinal         int
+	// Indexes belong to a table node. An index is an attribute of the table
+	// rather than a node of its own: the graph is about relations, and an index
+	// participates in none of them.
+	Indexes []Index
+}
+
+// Index is one index the source database declares on a table. Ordered columns
+// matter: a composite index serves a prefix of its columns and no other, so the
+// order is the useful part of knowing it exists.
+type Index struct {
+	Name    string   `json:"name"`
+	Unique  bool     `json:"unique"`
+	Primary bool     `json:"primary"`
+	Columns []string `json:"columns"`
+}
+
+// MaximumIndexesPerTable and MaximumIndexColumns bound untrusted scan output.
+// They are generous against real schemas and still keep one table's metadata
+// small enough to store beside it.
+const (
+	MaximumIndexesPerTable = 128
+	MaximumIndexColumns    = 64
+)
+
+// nodeMetadata is the shape stored in node_versions.metadata_json. It is a
+// struct rather than a free JSON blob so what a scan may record stays a closed
+// set, and reading it back cannot surface something nothing wrote.
+type nodeMetadata struct {
+	Indexes []Index `json:"indexes,omitempty"`
+}
+
+// EncodeNodeMetadata renders a node's metadata for storage. An empty result is
+// the empty object, which is what every node had before indexes were captured.
+func EncodeNodeMetadata(indexes []Index) ([]byte, error) {
+	if len(indexes) == 0 {
+		return []byte("{}"), nil
+	}
+	if len(indexes) > MaximumIndexesPerTable {
+		return nil, ErrInvalidSnapshot
+	}
+	for _, index := range indexes {
+		if strings.TrimSpace(index.Name) == "" || len(index.Name) > 500 {
+			return nil, ErrInvalidSnapshot
+		}
+		if len(index.Columns) == 0 || len(index.Columns) > MaximumIndexColumns {
+			return nil, ErrInvalidSnapshot
+		}
+		for _, column := range index.Columns {
+			if strings.TrimSpace(column) == "" || len(column) > 500 {
+				return nil, ErrInvalidSnapshot
+			}
+		}
+	}
+	return json.Marshal(nodeMetadata{Indexes: indexes})
+}
+
+// DecodeNodeMetadata reads indexes back. Metadata written before this existed
+// is the empty object, and unreadable metadata yields no indexes rather than an
+// error: a catalog is still worth showing when one table's extras are garbled.
+func DecodeNodeMetadata(raw string) []Index {
+	if raw == "" || raw == "{}" {
+		return nil
+	}
+	var metadata nodeMetadata
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		return nil
+	}
+	return metadata.Indexes
 }
 
 type DeclaredForeignKey struct {
@@ -183,6 +251,7 @@ type Node struct {
 	DataType       string
 	Nullable       bool
 	Ordinal        int
+	Indexes        []Index
 	VersionCreated time.Time
 }
 
@@ -233,6 +302,45 @@ type TableSummary struct {
 	ID            int64
 	Name          string
 	QualifiedName string
+}
+
+// Column is one column of a table, as the last scan saw it.
+type Column struct {
+	ID       int64
+	Name     string
+	DataType string
+	Nullable bool
+	Ordinal  int
+}
+
+// TableDetail is everything the catalog holds about one table. It is read on
+// demand rather than with the table list: a database here has 459 tables, and
+// carrying every column of every one of them would be most of the catalog.
+type TableDetail struct {
+	Table   TableSummary
+	Columns []Column
+	Indexes []Index
+}
+
+// TableReader is optional on a repository, like TableLister.
+type TableReader interface {
+	LoadTableDetail(ctx context.Context, projectID int64, tableID int64) (TableDetail, error)
+}
+
+// TableDetail reads one table's columns and indexes.
+func (s *Service) TableDetail(
+	ctx context.Context,
+	projectID int64,
+	tableID int64,
+) (TableDetail, error) {
+	if projectID <= 0 || tableID <= 0 {
+		return TableDetail{}, ErrInvalidDataSource
+	}
+	reader, ok := s.repository.(TableReader)
+	if !ok {
+		return TableDetail{}, ErrInvalidDataSource
+	}
+	return reader.LoadTableDetail(ctx, projectID, tableID)
 }
 
 // TableLister is optional on a repository, in the same way the recursive graph

@@ -34,6 +34,18 @@ WHERE TABLE_SCHEMA = ?
 ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
 `
 
+// indexesQuery reads every index a table declares, in column order. An index is
+// recorded on the table it belongs to rather than as a node of its own: the
+// graph is about relations, and an index takes part in none of them. NON_UNIQUE
+// and SEQ_IN_INDEX come back as the source declared them, so a composite index
+// keeps the order that decides which prefixes it can serve.
+const indexesQuery = `
+SELECT TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME
+FROM information_schema.STATISTICS
+WHERE TABLE_SCHEMA = ?
+ORDER BY TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
+`
+
 const foreignKeysQuery = `
 SELECT
     CONSTRAINT_SCHEMA, CONSTRAINT_NAME, TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME,
@@ -129,6 +141,11 @@ func (s *Scanner) Scan(
 	if err != nil {
 		return catalog.ScannedSnapshot{}, err
 	}
+	indexes, err := readIndexes(ctx, tx, indexesQuery, []any{databaseName})
+	if err != nil {
+		return catalog.ScannedSnapshot{}, err
+	}
+	attachIndexes(tableNodes, indexes)
 	nodes = append(nodes, tableNodes...)
 	columnNodes, err := readColumns(ctx, tx, databaseName, budget)
 	if err != nil {
@@ -201,6 +218,17 @@ func (s *Scanner) ScanTables(
 	if err != nil {
 		return catalog.ScannedSnapshot{}, err
 	}
+	scopedIndexes, err := readIndexes(ctx, tx, strings.Replace(
+		indexesQuery,
+		"ORDER BY TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX",
+		"AND TABLE_NAME IN ("+sqlPlaceholders(len(expandedTables))+
+			") ORDER BY TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX",
+		1,
+	), schemaTableArguments(databaseName, expandedTables))
+	if err != nil {
+		return catalog.ScannedSnapshot{}, err
+	}
+	attachIndexes(tableNodes, scopedIndexes)
 	nodes = append(nodes, tableNodes...)
 	columnNodes, err := readColumnsForTables(ctx, tx, databaseName, expandedTables, budget)
 	if err != nil {
@@ -326,6 +354,82 @@ func readTablesQuery(
 		return nil, fmt.Errorf("iterate MySQL tables: %w", err)
 	}
 	return nodes, nil
+}
+
+// attachIndexes moves each table's indexes onto its node. Tables are matched by
+// qualified name, the same key the rest of the snapshot is keyed on.
+func attachIndexes(tables []catalog.NodeInput, indexes map[string][]catalog.Index) {
+	for position := range tables {
+		found, ok := indexes[tables[position].QualifiedName]
+		if !ok {
+			continue
+		}
+		if len(found) > catalog.MaximumIndexesPerTable {
+			found = found[:catalog.MaximumIndexesPerTable]
+		}
+		tables[position].Indexes = found
+	}
+}
+
+// readIndexes groups STATISTICS rows, which arrive one row per indexed column,
+// into one entry per index with its columns in declared order.
+func readIndexes(
+	ctx context.Context,
+	tx *sql.Tx,
+	query string,
+	arguments []any,
+) (grouped map[string][]catalog.Index, returnError error) {
+	rows, err := tx.QueryContext(ctx, query, arguments...)
+	if err != nil {
+		return nil, fmt.Errorf("query MySQL indexes: %w", err)
+	}
+	defer func() { returnError = errors.Join(returnError, rows.Close()) }()
+
+	grouped = map[string][]catalog.Index{}
+	// position remembers where an index already sits, so its later columns
+	// append to it rather than starting a second entry with the same name.
+	position := map[string]int{}
+	for rows.Next() {
+		var schemaName, tableName, indexName string
+		var nonUnique int
+		var sequence int
+		var columnName sql.NullString
+		if err := rows.Scan(
+			&schemaName, &tableName, &indexName, &nonUnique, &sequence, &columnName,
+		); err != nil {
+			return nil, fmt.Errorf("scan MySQL index: %w", err)
+		}
+		// A functional index has an expression instead of a column. Recording
+		// the index without its columns would misdescribe what it covers.
+		if !columnName.Valid {
+			continue
+		}
+		qualifiedName := schemaName + "." + tableName
+		key := qualifiedName + "\x00" + indexName
+		at, seen := position[key]
+		if !seen {
+			if len(grouped[qualifiedName]) >= catalog.MaximumIndexesPerTable {
+				continue
+			}
+			grouped[qualifiedName] = append(grouped[qualifiedName], catalog.Index{
+				Name:    indexName,
+				Unique:  nonUnique == 0,
+				Primary: indexName == "PRIMARY",
+			})
+			at = len(grouped[qualifiedName]) - 1
+			position[key] = at
+		}
+		index := grouped[qualifiedName][at]
+		if len(index.Columns) >= catalog.MaximumIndexColumns {
+			continue
+		}
+		index.Columns = append(index.Columns, columnName.String)
+		grouped[qualifiedName][at] = index
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate MySQL indexes: %w", err)
+	}
+	return grouped, nil
 }
 
 func readColumns(ctx context.Context, tx *sql.Tx, databaseName string, budget *scanBudget) ([]catalog.NodeInput, error) {

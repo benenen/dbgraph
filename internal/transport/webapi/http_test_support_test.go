@@ -102,22 +102,24 @@ func webErrorCode(t *testing.T, response *httptest.ResponseRecorder) string {
 }
 
 type catalogHTTPStub struct {
-	tables        []catalog.TableSummary
-	tablesFilter  string
-	tablesErr     error
-	createCommand catalog.AdminCreateDataSource
-	createResult  catalog.DataSource
-	createErr     error
-	nodes         []catalog.Node
-	node          catalog.Node
-	searchErr     error
-	getNodeErr    error
-	sources       []catalog.DataSource
-	listSrcErr    error
-	linked        [][2]int64
-	unlinked      [][2]int64
-	linkErr       error
-	deleted       []int64
+	tables         []catalog.TableSummary
+	tableDetail    catalog.TableDetail
+	tableDetailErr error
+	tablesFilter   string
+	tablesErr      error
+	createCommand  catalog.AdminCreateDataSource
+	createResult   catalog.DataSource
+	createErr      error
+	nodes          []catalog.Node
+	node           catalog.Node
+	searchErr      error
+	getNodeErr     error
+	sources        []catalog.DataSource
+	listSrcErr     error
+	linked         [][2]int64
+	unlinked       [][2]int64
+	linkErr        error
+	deleted        []int64
 }
 
 func (s *catalogHTTPStub) CreateDataSourceAsAdmin(_ context.Context, command catalog.AdminCreateDataSource) (catalog.DataSource, error) {
@@ -245,6 +247,14 @@ func (s *graphHTTPStub) DataSourceGraph(
 	s.dataSourceCalls++
 	s.dataSourceSource = dataSourceID
 	return s.dataSourceGraph, s.dataSourceErr
+}
+
+func (s *catalogHTTPStub) TableDetail(
+	_ context.Context,
+	_ int64,
+	_ int64,
+) (catalog.TableDetail, error) {
+	return s.tableDetail, s.tableDetailErr
 }
 
 func (s *catalogHTTPStub) ListTables(

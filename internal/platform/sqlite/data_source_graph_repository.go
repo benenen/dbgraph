@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -42,7 +44,7 @@ SELECT e.relation_id, e.relation_type, e.confidence_bps,
        source.name, target.name,
        sourceTable.name, sourceTable.qualified_name,
        targetTable.name, targetTable.qualified_name,
-       e.guard_json IS NOT NULL
+       e.guard_json IS NOT NULL, e.guard_json
 FROM effective_edges e
 JOIN resolved source ON source.node_id = e.source_node_id
 JOIN resolved target ON target.node_id = e.target_node_id
@@ -75,6 +77,7 @@ LIMIT ?
 		var confidenceBasisPoints int
 		var sourceName, sourceQualified string
 		var targetName, targetQualified string
+		var guard sql.NullString
 		if err := rows.Scan(
 			&edge.RelationID, &relationType, &confidenceBasisPoints,
 			&edge.SourceNodeID, &edge.TargetNodeID,
@@ -83,8 +86,12 @@ LIMIT ?
 			&sourceName, &sourceQualified,
 			&targetName, &targetQualified,
 			&edge.Conditional,
+			&guard,
 		); err != nil {
 			return graph.DataSourceGraph{}, fmt.Errorf("scan data source graph: %w", err)
+		}
+		if guard.Valid {
+			edge.Guard = json.RawMessage(guard.String)
 		}
 		edge.Type = relations.Type(relationType)
 		edge.Confidence = float64(confidenceBasisPoints) / 10_000
@@ -165,4 +172,63 @@ func escapeLikePattern(value string) string {
 		escaped = append(escaped, symbol)
 	}
 	return string(escaped)
+}
+
+// LoadTableDetail reads one table's columns and the indexes the last scan saw
+// on it. Indexes live in the table version's metadata rather than as nodes: an
+// index is an attribute of a table and takes part in no relation, so making it
+// a node would put something in the graph that can never be an endpoint.
+func (r *CatalogRepository) LoadTableDetail(
+	ctx context.Context,
+	projectID int64,
+	tableID int64,
+) (detail catalog.TableDetail, returnError error) {
+	var metadata string
+	err := r.store.db.QueryRowContext(ctx, `
+SELECT n.id, nv.name, nv.qualified_name, nv.metadata_json
+FROM nodes n
+JOIN node_current nc ON nc.node_id = n.id
+JOIN node_versions nv ON nv.id = nc.version_id
+WHERE n.id = ? AND n.project_id = ? AND n.kind = ?
+`, tableID, projectID, catalog.NodeTable).Scan(
+		&detail.Table.ID, &detail.Table.Name, &detail.Table.QualifiedName, &metadata,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return catalog.TableDetail{}, catalog.ErrNodeNotFound
+	}
+	if err != nil {
+		return catalog.TableDetail{}, fmt.Errorf("load table: %w", err)
+	}
+	detail.Indexes = catalog.DecodeNodeMetadata(metadata)
+
+	rows, err := r.store.db.QueryContext(ctx, `
+SELECT n.id, nv.name, nv.data_type, nv.nullable, nv.ordinal_position
+FROM nodes n
+JOIN node_current nc ON nc.node_id = n.id
+JOIN node_versions nv ON nv.id = nc.version_id
+WHERE n.project_id = ?
+  AND n.kind = ?
+  AND nv.parent_node_id = ?
+  AND nv.status = ?
+ORDER BY nv.ordinal_position, nv.name
+`, projectID, catalog.NodeColumn, tableID, catalog.NodeActive)
+	if err != nil {
+		return catalog.TableDetail{}, fmt.Errorf("load table columns: %w", err)
+	}
+	defer func() { returnError = errors.Join(returnError, rows.Close()) }()
+
+	detail.Columns = make([]catalog.Column, 0)
+	for rows.Next() {
+		var column catalog.Column
+		var nullable int
+		if err := rows.Scan(&column.ID, &column.Name, &column.DataType, &nullable, &column.Ordinal); err != nil {
+			return catalog.TableDetail{}, fmt.Errorf("scan table column: %w", err)
+		}
+		column.Nullable = nullable == 1
+		detail.Columns = append(detail.Columns, column)
+	}
+	if err := rows.Err(); err != nil {
+		return catalog.TableDetail{}, fmt.Errorf("iterate table columns: %w", err)
+	}
+	return detail, nil
 }

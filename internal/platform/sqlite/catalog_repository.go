@@ -444,6 +444,10 @@ INSERT INTO schema_scan_runs(
 			return catalog.PublishedSnapshot{}, fmt.Errorf("generate node version ID: %w", err)
 		}
 		parentNodeID := nullableNodeID(nodeIDs, input.ParentStableKey)
+		metadata, err := catalog.EncodeNodeMetadata(input.Indexes)
+		if err != nil {
+			return catalog.PublishedSnapshot{}, fmt.Errorf("encode node metadata: %w", err)
+		}
 		if err := insertNodeVersion(
 			ctx,
 			tx,
@@ -457,6 +461,7 @@ INSERT INTO schema_scan_runs(
 			input.DataType,
 			input.Nullable,
 			input.Ordinal,
+			string(metadata),
 			startedAt,
 		); err != nil {
 			return catalog.PublishedSnapshot{}, err
@@ -499,6 +504,7 @@ INSERT INTO schema_scan_runs(
 			staleNode.DataType,
 			staleNode.Nullable,
 			staleNode.Ordinal,
+			staleNodeMetadata(staleNode.Metadata),
 			startedAt,
 		); err != nil {
 			return catalog.PublishedSnapshot{}, err
@@ -847,13 +853,14 @@ func insertNodeVersion(
 	dataType string,
 	nullable bool,
 	ordinal int,
+	metadata string,
 	createdAt string,
 ) error {
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO node_versions(
     id, node_id, scan_run_id, parent_node_id, status, name,
     qualified_name, data_type, nullable, ordinal_position, metadata_json, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
 		versionID,
 		nodeID,
@@ -865,6 +872,7 @@ INSERT INTO node_versions(
 		dataType,
 		nullable,
 		ordinal,
+		metadata,
 		createdAt,
 	)
 	if err != nil {
@@ -882,6 +890,18 @@ type currentNodeRecord struct {
 	DataType      string
 	Nullable      bool
 	Ordinal       int
+	// Metadata carries forward on a stale version. Marking a node gone is not a
+	// reason to forget what the last scan saw on it.
+	Metadata string
+}
+
+// staleNodeMetadata keeps a stale version storable: the column is NOT NULL and
+// must hold valid JSON, and a row written before metadata existed may be empty.
+func staleNodeMetadata(stored string) string {
+	if stored == "" {
+		return "{}"
+	}
+	return stored
 }
 
 func loadMissingCurrentNodes(
@@ -894,7 +914,7 @@ func loadMissingCurrentNodes(
 	rows, err := tx.QueryContext(ctx, `
 SELECT
     n.id, n.stable_key, n.kind, nv.parent_node_id, nv.name,
-    nv.qualified_name, nv.data_type, nv.nullable, nv.ordinal_position
+    nv.qualified_name, nv.data_type, nv.nullable, nv.ordinal_position, nv.metadata_json
 FROM nodes n
 JOIN node_current nc ON nc.node_id = n.id
 JOIN node_versions nv ON nv.id = nc.version_id
@@ -921,6 +941,7 @@ WHERE n.data_source_id = ? AND nv.status = ?
 			&record.DataType,
 			&nullable,
 			&record.Ordinal,
+			&record.Metadata,
 		); err != nil {
 			return nil, fmt.Errorf("scan current node: %w", err)
 		}

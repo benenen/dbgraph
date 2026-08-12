@@ -2,6 +2,7 @@ package graph
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/benenen/dbgraph/internal/relations"
 )
@@ -33,6 +34,9 @@ type TableEdge struct {
 	TargetColumn  string         `json:"targetColumn"`
 	Conditional   bool           `json:"conditional"`
 	Confidence    float64        `json:"confidence"`
+	// Guard is the stored condition AST. A reader clicking an edge wants to
+	// know when the relation applies, and "conditional" alone does not say.
+	Guard json.RawMessage `json:"guard,omitempty"`
 }
 
 // DataSourceGraph is every approved relation inside one data source, with the

@@ -26,6 +26,94 @@ export interface TableSummary {
   qualifiedName: string;
 }
 
+export interface TableColumn {
+  id: string;
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  ordinal: number;
+}
+
+export interface TableIndex {
+  name: string;
+  unique: boolean;
+  primary: boolean;
+  columns: string[];
+}
+
+export interface TableDetail {
+  id: string;
+  name: string;
+  qualifiedName: string;
+  columns: TableColumn[];
+  indexes: TableIndex[];
+}
+
+export interface Evidence {
+  kind: string;
+  repository: string;
+  commit: string;
+  file: string;
+  symbol: string;
+  startLine: number;
+  endLine: number;
+}
+
+/** A condition AST node. Shape is validated server-side; the console only reads it. */
+export interface ConditionNode {
+  kind: string;
+  operator?: string;
+  nodeId?: string;
+  literal?: { type: string; value: unknown };
+  valueType?: string;
+  value?: unknown;
+  parameter?: string;
+  left?: ConditionNode;
+  right?: ConditionNode;
+  operand?: ConditionNode;
+  children?: ConditionNode[];
+  values?: ConditionNode[];
+  cases?: { when: ConditionNode; then: ConditionNode }[];
+  else?: ConditionNode;
+}
+
+export interface Revision {
+  id: string;
+  relationId: string;
+  revisionNo: number;
+  kind: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  guard: ConditionNode | null;
+  selector: ConditionNode | null;
+  transform: ConditionNode;
+  confidence: number;
+  evidence: Evidence[];
+  actor: string;
+  reason: string;
+  requestId: string;
+  createdAt: string;
+}
+
+export interface Relation {
+  id: string;
+  type: string;
+  latestRevisionNo: number;
+  status: string;
+  effective: boolean;
+  active: Revision | null;
+  proposed: Revision | null;
+  createdAt: string;
+}
+
+export interface CatalogNode {
+  id: string;
+  name: string;
+  qualifiedName: string;
+  kind: string;
+  dataType: string;
+}
+
 export interface RelationEdge {
   relationId: string;
   sourceTableId: string;
@@ -34,6 +122,7 @@ export interface RelationEdge {
   targetColumn: string;
   conditional: boolean;
   confidence: number;
+  guard?: ConditionNode;
 }
 
 export interface RelationGraph {
@@ -220,6 +309,31 @@ export const api = {
     request<{ tables: TableSummary[]; truncated: boolean }>(
       `/api/v1/projects/${projectId}/data-sources/${dataSourceId}/tables?q=${encodeURIComponent(filter)}`,
     ),
+
+  tableDetail: (projectId: string, tableId: string) =>
+    request<TableDetail>(`/api/v1/projects/${projectId}/tables/${tableId}`),
+
+  listProposals: (projectId: string) =>
+    request<{ relations: Relation[]; truncated: boolean }>(
+      `/api/v1/projects/${projectId}/relation-proposals`,
+    ),
+
+  node: (projectId: string, nodeId: string) =>
+    request<CatalogNode>(`/api/v1/projects/${projectId}/nodes/${nodeId}`),
+
+  reviewRelation: (
+    projectId: string,
+    relationId: string,
+    input: { expectedRevisionNo: number; decision: "APPROVE" | "REJECT"; reason: string },
+  ) =>
+    request<Relation>(`/api/v1/projects/${projectId}/relations/${relationId}/reviews`, {
+      method: "POST",
+      body: JSON.stringify({
+        expectedRevisionNo: input.expectedRevisionNo,
+        decision: input.decision,
+        reason: input.reason,
+      }),
+    }),
 
   relationGraph: (projectId: string, dataSourceId: string) =>
     request<RelationGraph>(

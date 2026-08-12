@@ -71,6 +71,13 @@ func TestRunnerLoadsDSNFromEnvironmentAndPublishesSnapshot(t *testing.T) {
 	mock.ExpectQuery("FROM information_schema[.]TABLES").
 		WithArgs("learn").
 		WillReturnRows(sqlmock.NewRows([]string{"TABLE_SCHEMA", "TABLE_NAME"}))
+	mock.ExpectQuery("FROM information_schema[.]STATISTICS").
+		WithArgs("learn").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"TABLE_SCHEMA", "TABLE_NAME", "INDEX_NAME", "NON_UNIQUE", "SEQ_IN_INDEX", "COLUMN_NAME",
+		}).
+			AddRow("learn", "students", "PRIMARY", 0, 1, "id").
+			AddRow("learn", "classes", "idx_student", 1, 1, "student_id"))
 	mock.ExpectQuery("FROM information_schema[.]COLUMNS").
 		WithArgs("learn").
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -161,6 +168,13 @@ func TestRunnerIgnoresCrossSchemaForeignKeysThatCatalogCannotRepresent(t *testin
 		WithArgs("learn").
 		WillReturnRows(sqlmock.NewRows([]string{"TABLE_SCHEMA", "TABLE_NAME"}).
 			AddRow("learn", "classes"))
+	mock.ExpectQuery("FROM information_schema[.]STATISTICS").
+		WithArgs("learn").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"TABLE_SCHEMA", "TABLE_NAME", "INDEX_NAME", "NON_UNIQUE", "SEQ_IN_INDEX", "COLUMN_NAME",
+		}).
+			AddRow("learn", "students", "PRIMARY", 0, 1, "id").
+			AddRow("learn", "classes", "idx_student", 1, 1, "student_id"))
 	mock.ExpectQuery("FROM information_schema[.]COLUMNS").
 		WithArgs("learn").
 		WillReturnRows(sqlmock.NewRows([]string{

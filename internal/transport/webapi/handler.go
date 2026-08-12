@@ -42,6 +42,7 @@ type CatalogService interface {
 	DeleteDataSource(context.Context, int64) error
 	UpdateDataSourceAsAdmin(context.Context, catalog.AdminUpdateDataSource) (catalog.DataSource, error)
 	ListTables(context.Context, int64, int64, string, int) ([]catalog.TableSummary, error)
+	TableDetail(context.Context, int64, int64) (catalog.TableDetail, error)
 }
 
 type ProjectService interface {
@@ -168,6 +169,7 @@ func NewHandler(services Services, sessions *appauth.SessionManager, options ...
 	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/data-sources/{dataSourceID}/unlink", h.unlinkDataSource)
 	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/data-sources/{dataSourceID}/tables", h.listTables)
 	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/data-sources/{dataSourceID}/relation-graph", h.dataSourceGraph)
+	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/tables/{tableID}", h.tableDetail)
 	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/repositories", h.listRepositories)
 	h.mux.HandleFunc("GET /api/v1/session", h.getSession)
 	h.mux.HandleFunc("POST /logout", h.logout)

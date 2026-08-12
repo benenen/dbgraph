@@ -1,6 +1,7 @@
 package webapi
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -74,6 +75,55 @@ func (h *handler) dataSourceGraph(response http.ResponseWriter, request *http.Re
 	})
 }
 
+// tableDetail reads one table's columns and indexes. It is a separate call from
+// the table list because a database here holds 459 tables: carrying every
+// column of every one of them would be most of the catalog, fetched to show one.
+func (h *handler) tableDetail(response http.ResponseWriter, request *http.Request) {
+	projectID, tableID, ok := pathProjectSubjectIDs(response, request, "tableID")
+	if !ok {
+		return
+	}
+	if h.services.Catalog == nil {
+		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
+		return
+	}
+	detail, err := h.services.Catalog.TableDetail(request.Context(), projectID, tableID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrNodeNotFound) {
+			writeError(response, http.StatusNotFound, "NOT_FOUND", "table not found", nil)
+			return
+		}
+		writeAdminError(response, err)
+		return
+	}
+	columns := make([]map[string]any, len(detail.Columns))
+	for index, column := range detail.Columns {
+		columns[index] = map[string]any{
+			"id":       strconv.FormatInt(column.ID, 10),
+			"name":     column.Name,
+			"dataType": column.DataType,
+			"nullable": column.Nullable,
+			"ordinal":  column.Ordinal,
+		}
+	}
+	indexes := make([]map[string]any, len(detail.Indexes))
+	for position, index := range detail.Indexes {
+		indexes[position] = map[string]any{
+			"name":    index.Name,
+			"unique":  index.Unique,
+			"primary": index.Primary,
+			"columns": index.Columns,
+		}
+	}
+	writeJSON(response, http.StatusOK, map[string]any{
+		"id":            strconv.FormatInt(detail.Table.ID, 10),
+		"name":          detail.Table.Name,
+		"qualifiedName": detail.Table.QualifiedName,
+		"columns":       columns,
+		"indexes":       indexes,
+	})
+}
+
 func mapGraphTables(tables []graph.Table) []map[string]any {
 	output := make([]map[string]any, len(tables))
 	for index, table := range tables {
@@ -97,6 +147,9 @@ func mapGraphEdges(edges []graph.TableEdge) []map[string]any {
 			"targetColumn":  edge.TargetColumn,
 			"conditional":   edge.Conditional,
 			"confidence":    edge.Confidence,
+		}
+		if len(edge.Guard) > 0 {
+			output[index]["guard"] = edge.Guard
 		}
 	}
 	return output

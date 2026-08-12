@@ -29,6 +29,13 @@ func TestScannerReadsSchemaNodesAndDeclaredForeignKeys(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"TABLE_SCHEMA", "TABLE_NAME"}).
 			AddRow("learn", "classes").
 			AddRow("learn", "students"))
+	mock.ExpectQuery("FROM information_schema[.]STATISTICS").
+		WithArgs("learn").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"TABLE_SCHEMA", "TABLE_NAME", "INDEX_NAME", "NON_UNIQUE", "SEQ_IN_INDEX", "COLUMN_NAME",
+		}).
+			AddRow("learn", "students", "PRIMARY", 0, 1, "id").
+			AddRow("learn", "classes", "idx_student", 1, 1, "student_id"))
 	mock.ExpectQuery("FROM information_schema[.]COLUMNS").
 		WithArgs("learn").
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -113,6 +120,11 @@ func TestIncrementalScannerQueriesOnlyScopedAndReferencedTables(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"TABLE_SCHEMA", "TABLE_NAME"}).
 			AddRow("learn", "classes").
 			AddRow("learn", "students"))
+	mock.ExpectQuery("FROM information_schema[.]STATISTICS.*TABLE_NAME IN").
+		WithArgs("learn", "classes", "students").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"TABLE_SCHEMA", "TABLE_NAME", "INDEX_NAME", "NON_UNIQUE", "SEQ_IN_INDEX", "COLUMN_NAME",
+		}).AddRow("learn", "students", "PRIMARY", 0, 1, "id"))
 	mock.ExpectQuery("FROM information_schema[.]COLUMNS.*TABLE_NAME IN").
 		WithArgs("learn", "classes", "students").
 		WillReturnRows(sqlmock.NewRows([]string{

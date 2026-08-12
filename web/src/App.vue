@@ -16,6 +16,7 @@ const ready = ref(false);
 const navigation = [
   { label: "Data sources", icon: "pi pi-database", route: "data-sources" },
   { label: "Relation graph", icon: "pi pi-share-alt", route: "relation-graph" },
+  { label: "Review", icon: "pi pi-check-square", route: "review" },
 ];
 
 function isActive(name: string): boolean {

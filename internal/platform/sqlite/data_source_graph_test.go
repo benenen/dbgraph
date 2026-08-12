@@ -164,3 +164,77 @@ func newGraphFixture(t *testing.T, name string) (
 	}
 	return ctx, store, project.ID, source.ID, catalogService
 }
+
+// Columns were always scanned and never readable; indexes were never scanned at
+// all. Both belong to a table, and both have to survive a round trip through
+// storage for the console to show them.
+func TestTableDetailReturnsColumnsAndIndexes(t *testing.T) {
+	t.Parallel()
+
+	ctx, store, project, source, catalogService := newGraphFixture(t, "detail")
+	nodes := sampleTables()
+	for position := range nodes {
+		if nodes[position].StableKey != "table:shop.orders" {
+			continue
+		}
+		nodes[position].Indexes = []catalog.Index{
+			{Name: "PRIMARY", Unique: true, Primary: true, Columns: []string{"id"}},
+			{Name: "idx_user_buyer", Columns: []string{"user_id", "buyer_id"}},
+		}
+	}
+	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		ProjectID: project, DataSourceID: source, Nodes: nodes,
+	}); err != nil {
+		t.Fatalf("PublishSnapshot: %v", err)
+	}
+	repository := dbsqlite.NewCatalogRepository(store, nil)
+	listed, err := repository.ListTables(ctx, project, source, "orders", 50)
+	if err != nil || len(listed) != 1 {
+		t.Fatalf("ListTables = %#v err = %v", listed, err)
+	}
+
+	detail, err := repository.LoadTableDetail(ctx, project, listed[0].ID)
+	if err != nil {
+		t.Fatalf("LoadTableDetail: %v", err)
+	}
+	if len(detail.Columns) != 2 {
+		t.Fatalf("columns = %#v, want user_id and buyer_id", detail.Columns)
+	}
+	// Ordinal order is the table's own order, which is how a reader expects to
+	// read a table rather than alphabetically.
+	if detail.Columns[0].Name != "user_id" || detail.Columns[1].Name != "buyer_id" {
+		t.Fatalf("column order = %#v, want user_id then buyer_id", detail.Columns)
+	}
+	if detail.Columns[0].DataType != "bigint" {
+		t.Fatalf("first column = %#v", detail.Columns[0])
+	}
+	if len(detail.Indexes) != 2 {
+		t.Fatalf("indexes = %#v, want two", detail.Indexes)
+	}
+	if !detail.Indexes[0].Primary || !detail.Indexes[0].Unique {
+		t.Fatalf("PRIMARY = %#v, want primary and unique", detail.Indexes[0])
+	}
+	// A composite index serves a prefix of its columns and no other, so the
+	// declared order is the useful part of recording it.
+	composite := detail.Indexes[1]
+	if len(composite.Columns) != 2 || composite.Columns[0] != "user_id" || composite.Columns[1] != "buyer_id" {
+		t.Fatalf("composite index = %#v, want user_id then buyer_id", composite)
+	}
+	if composite.Unique {
+		t.Fatalf("index %q reported unique", composite.Name)
+	}
+
+	// A table with no recorded indexes reads back empty, not as an error: every
+	// row scanned before indexes were captured holds the empty object.
+	users, err := repository.ListTables(ctx, project, source, "users", 50)
+	if err != nil || len(users) != 1 {
+		t.Fatalf("ListTables users = %#v err = %v", users, err)
+	}
+	plain, err := repository.LoadTableDetail(ctx, project, users[0].ID)
+	if err != nil {
+		t.Fatalf("LoadTableDetail without indexes: %v", err)
+	}
+	if len(plain.Indexes) != 0 || len(plain.Columns) != 1 {
+		t.Fatalf("plain table = %#v", plain)
+	}
+}
