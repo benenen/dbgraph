@@ -92,3 +92,38 @@ WHERE id = ?
 	}
 	return project, nil
 }
+
+func (r *ProjectRepository) ListProjects(ctx context.Context, limit int) (projects []catalog.Project, returnError error) {
+	rows, err := r.store.db.QueryContext(ctx, `
+SELECT id, name, description, created_at, updated_at
+FROM projects
+ORDER BY name, id
+LIMIT ?
+`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("select projects: %w", err)
+	}
+	defer func() { returnError = errors.Join(returnError, rows.Close()) }()
+
+	for rows.Next() {
+		var project catalog.Project
+		var createdAt string
+		var updatedAt string
+		if err := rows.Scan(&project.ID, &project.Name, &project.Description, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan project: %w", err)
+		}
+		project.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse project creation time: %w", err)
+		}
+		project.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse project update time: %w", err)
+		}
+		projects = append(projects, project)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate projects: %w", err)
+	}
+	return projects, nil
+}

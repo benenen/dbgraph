@@ -102,3 +102,46 @@ WHERE id = ?
 	}
 	return repository, nil
 }
+
+func (r *CodeRepository) ListCodeRepositories(
+	ctx context.Context,
+	projectID int64,
+	limit int,
+) (repositories []catalog.CodeRepository, returnError error) {
+	rows, err := r.store.db.QueryContext(ctx, `
+SELECT id, project_id, name, remote_url, default_branch, created_at, updated_at
+FROM repositories
+WHERE project_id = ?
+ORDER BY name, id
+LIMIT ?
+`, projectID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("select code repositories: %w", err)
+	}
+	defer func() { returnError = errors.Join(returnError, rows.Close()) }()
+
+	for rows.Next() {
+		var repository catalog.CodeRepository
+		var createdAt string
+		var updatedAt string
+		if err := rows.Scan(
+			&repository.ID, &repository.ProjectID, &repository.Name,
+			&repository.RemoteURL, &repository.DefaultBranch, &createdAt, &updatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan code repository: %w", err)
+		}
+		repository.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse code repository creation time: %w", err)
+		}
+		repository.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse code repository update time: %w", err)
+		}
+		repositories = append(repositories, repository)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate code repositories: %w", err)
+	}
+	return repositories, nil
+}

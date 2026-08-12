@@ -729,3 +729,46 @@ func nodeWithinTableScope(kind catalog.NodeKind, qualifiedName string, scopeTabl
 	}
 	return false
 }
+
+func (r *CatalogRepository) ListDataSources(
+	ctx context.Context,
+	projectID int64,
+	limit int,
+) (sources []catalog.DataSource, returnError error) {
+	rows, err := r.store.db.QueryContext(ctx, `
+SELECT id, project_id, name, source_kind, dsn_environment, created_at, updated_at
+FROM data_sources
+WHERE project_id = ?
+ORDER BY name, id
+LIMIT ?
+`, projectID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("select data sources: %w", err)
+	}
+	defer func() { returnError = errors.Join(returnError, rows.Close()) }()
+
+	for rows.Next() {
+		var source catalog.DataSource
+		var createdAt string
+		var updatedAt string
+		if err := rows.Scan(
+			&source.ID, &source.ProjectID, &source.Name, &source.Kind,
+			&source.DSNEnvironment, &createdAt, &updatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan data source: %w", err)
+		}
+		source.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse data source creation time: %w", err)
+		}
+		source.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse data source update time: %w", err)
+		}
+		sources = append(sources, source)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate data sources: %w", err)
+	}
+	return sources, nil
+}
