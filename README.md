@@ -119,13 +119,15 @@ Every configured access token must be 32 random bytes encoded as exactly 64 hexa
 
 ## Roles and review model
 
-- Viewer: read catalog, relations, traversal, jobs, sessions, unresolved findings, and audit history.
+- Viewer: read catalog, relations, traversal, jobs, sessions, unresolved findings, and audit history, plus the project and data source lists.
 - Agent: Viewer access plus individual relation create/revision/tombstone proposals and relation-init sessions.
 - Editor: Web relation create/revision/tombstone proposals.
 - Reviewer: revision proposals plus approve/reject/suppress/restore. Reviewer edits create a new proposed revision; they do not overwrite approved content.
-- Admin: project, evidence-repository, data-source, and full/incremental schema-scan administration.
+- Admin: project, evidence-repository, data-source, and full/incremental schema-scan administration; only Admin can list evidence repositories.
 
 An approved revision remains effective while its replacement is pending. Rejection leaves the effective graph unchanged. Tombstone, suppression, restoration, and stale candidates are explicit reviewed state transitions. Historical relation versions, endpoints, references, evidence, events, scan facts, init batches, and audit events are append-only.
+
+`GET /api/v1/projects` lists every project (Viewer and above) and backs the header project picker: a `<select id="project-id">` that replaces typing a project ID by hand and persists the chosen project in the browser's `localStorage` under the `dbgraph.projectId` key. The side menu's `Projects` panel, visible to every role, lists the same projects. Its `Data sources` panel is Admin-only in the menu, but the underlying `GET /api/v1/projects/{projectID}/data-sources` route is Viewer-readable; only Admin responses include the `dsnEnvironment` and `createdAt` fields, so a source database's environment-variable name never reaches a non-Admin role. That panel's evidence-repository list comes from the Admin-only `GET /api/v1/projects/{projectID}/repositories`. Schema Explorer's node search, `GET /api/v1/projects/{projectID}/nodes`, accepts an optional `dataSourceId` filter to scope results to one data source.
 
 ## Agent-driven relation initialization
 

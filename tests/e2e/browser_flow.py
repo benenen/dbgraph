@@ -23,6 +23,13 @@ def run_flow(page):
     page.wait_for_url(f"{BASE_URL}/")
     expect(page.locator("#session-role")).to_have_text("ADMIN")
     page.locator("#project-id").select_option(PROJECT_ID)
+
+    page.get_by_role("link", name="Projects").click()
+    expect(page.locator("#project-list .result-card").first).to_contain_text("Browser E2E")
+    page.get_by_role("link", name="Data sources").click()
+    expect(page.locator("#data-source-list .result-card").first).to_contain_text("browser-fixture")
+    expect(page.locator("#data-source-list .result-card").first).to_contain_text("BROWSER_E2E_MYSQL_DSN")
+
     assert_literal_guard_roundtrip(page)
 
     page.get_by_role("link", name="Schema Explorer").click()
