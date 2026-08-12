@@ -136,15 +136,19 @@ function dataSourceLabel(id) {
   return state.dataSourceNames.get(id) || id;
 }
 
+let nodeDataSourcesRequestToken = 0;
+
 async function loadNodeDataSources() {
   const select = byId("node-data-source");
   if (!select) return;
+  const requestToken = ++nodeDataSourcesRequestToken;
   state.dataSourceNames = new Map();
   select.replaceChildren(new Option("All data sources", ""));
   let project;
   try { project = requireProject(); } catch { return; }
   try {
     const sources = await api(`/api/v1/projects/${project}/data-sources?limit=200`);
+    if (requestToken !== nodeDataSourcesRequestToken) return; // a newer call already superseded this one
     state.dataSourceNames = new Map(sources.map(source => [source.id, source.name]));
     for (const source of sources) select.append(new Option(source.name, source.id));
   } catch { /* the picker stays on "All data sources" */ }
@@ -192,6 +196,7 @@ function initializeNodeSearch() {
       }), "No nodes found");
     } catch (error) { showMessage(error.message); }
   });
+  document.querySelectorAll('[data-panel-link="schema"]').forEach(link => link.addEventListener("click", loadNodeDataSources));
 }
 
 function initializeGraphNodeSearch() {
