@@ -105,6 +105,11 @@
   核心表：
 
   projects
+  （`projects` scopes the catalog, relations, and audit in the schema, but the
+  console does not expose it: `dbgraph serve` guarantees exactly one project and
+  links every data source to it. The column stays so multi-workspace isolation
+  remains available without a migration; nothing in the UI asks an operator to
+  choose or manage one.）
   data_sources
   repositories
   schema_scan_runs

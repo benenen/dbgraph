@@ -86,7 +86,7 @@ The backup command refuses to overwrite an existing file. The database, lock, WA
 | `LISTEN` | `127.0.0.1:8080` | Listen address |
 | `DATABASE` | `./dbgraph.sqlite` | SQLite path |
 | `LOCAL_DIR` | `.dbgraph-local` | Directory holding `dev.env`, `cert.pem`, and `key.pem` |
-| `MYSQL_TLS` | `1` | `0` adds `--insecure-mysql-tls` so scans can reach a source MySQL without a certificate |
+| `MYSQL_TLS` | `0` | `0` adds `--insecure-mysql-tls` so scans can reach a source MySQL without a certificate |
 | `WATCH_INTERVAL` | `1` | Seconds between `make watch` change checks |
 | `CERT_DAYS` | `30` | Validity of the generated development certificate |
 

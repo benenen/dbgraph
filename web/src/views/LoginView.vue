@@ -23,7 +23,7 @@ async function submit(): Promise<void> {
     setCsrfToken(session.csrfToken);
     token.value = "";
     emit("signed-in", session);
-    await router.push({ name: "projects" });
+    await router.push({ name: "data-sources" });
   } catch (error) {
     failure.value = error instanceof Error ? error.message : "Sign-in failed.";
   } finally {

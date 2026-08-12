@@ -111,6 +111,54 @@ func mysqlOpener(allowInsecure bool) mysqlingestion.OpenDatabase {
 	}
 }
 
+// ensureDefaultWorkspace keeps the console's single-workspace model true. A
+// project still scopes the catalog, relations, and audit in the schema, but the
+// console does not ask an operator to manage one: there is exactly one, and
+// every data source belongs to it. Both steps are idempotent.
+func ensureDefaultWorkspace(
+	ctx context.Context,
+	projects *catalog.ProjectService,
+	sources *catalog.Service,
+) error {
+	existing, err := projects.List(ctx, catalog.MaximumListLimit)
+	if err != nil {
+		return fmt.Errorf("read projects: %w", err)
+	}
+	workspace := catalog.Project{}
+	if len(existing) > 0 {
+		workspace = existing[0]
+	} else {
+		workspace, err = projects.Create(ctx, catalog.CreateProject{
+			Name:        "dbgraph",
+			Description: "The catalog and relations this server holds.",
+		})
+		if err != nil {
+			return fmt.Errorf("create the default project: %w", err)
+		}
+	}
+	registered, err := sources.ListAllDataSources(ctx, catalog.MaximumListLimit)
+	if err != nil {
+		return fmt.Errorf("read data sources: %w", err)
+	}
+	linked, err := sources.ListDataSources(ctx, workspace.ID, catalog.MaximumListLimit)
+	if err != nil {
+		return fmt.Errorf("read linked data sources: %w", err)
+	}
+	alreadyLinked := make(map[int64]struct{}, len(linked))
+	for _, source := range linked {
+		alreadyLinked[source.ID] = struct{}{}
+	}
+	for _, source := range registered {
+		if _, done := alreadyLinked[source.ID]; done {
+			continue
+		}
+		if err := sources.LinkDataSource(ctx, workspace.ID, source.ID); err != nil {
+			return fmt.Errorf("link data source %d: %w", source.ID, err)
+		}
+	}
+	return nil
+}
+
 // loadSealer builds the DSN sealer from the environment. The key is a
 // credential, so it is never read from a flag or stored in SQLite. Its absence
 // is not an error: a deployment that only uses DSN environment variables needs
@@ -167,14 +215,12 @@ func serve(serveConfig config.ServeConfig) (returnError error) {
 	if err != nil {
 		return err
 	}
-	// The same policy the scanner will connect under, applied when the
-	// connection string is saved rather than when a scan finally runs.
+	// Catch a connection string the scanner could never parse while the
+	// operator is still looking at the field. The TLS policy stays with the
+	// connection, so a DSN can be stored before the server that will use it
+	// is started with the right flags.
 	catalogOptions := []catalog.ServiceOption{
-		catalog.WithDSNValidator(func(dsn string) error {
-			return mysqlingestion.ValidateDSN(dsn, mysqlingestion.ConnectionPolicy{
-				AllowInsecureTLS: serveConfig.AllowInsecureMySQLTLS,
-			})
-		}),
+		catalog.WithDSNValidator(mysqlingestion.ValidateDSNShape),
 	}
 	runnerOptions := []mysqlingestion.RunnerOption{}
 	if sealer != nil {
@@ -189,6 +235,9 @@ func serve(serveConfig config.ServeConfig) (returnError error) {
 		dbsqlite.NewCatalogRepository(store, allocator), allocator, time.Now, catalogOptions...,
 	)
 	projectService := catalog.NewProjectService(dbsqlite.NewProjectRepository(store), allocator, time.Now)
+	if err := ensureDefaultWorkspace(ctx, projectService, catalogService); err != nil {
+		return err
+	}
 	codeRepositoryService := catalog.NewCodeRepositoryService(dbsqlite.NewCodeRepository(store), allocator, time.Now)
 	relationCommands := relations.NewCommands(dbsqlite.NewRelationRepository(store), allocator, time.Now)
 	graphService := graph.NewService(dbsqlite.NewGraphRepository(store))

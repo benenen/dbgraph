@@ -16,6 +16,20 @@ import (
 	"github.com/benenen/dbgraph/internal/relations"
 )
 
+// codedFailure is an error that names why it happened. A runner implements it
+// so the reason reaches the operator instead of being flattened to "failed".
+type codedFailure interface {
+	FailureCode() string
+}
+
+func failureCode(err error) string {
+	var coded codedFailure
+	if errors.As(err, &coded) {
+		return coded.FailureCode()
+	}
+	return ""
+}
+
 var (
 	ErrForbidden    = errors.New("schema scan command is forbidden")
 	ErrNoPendingJob = errors.New("no pending schema scan job")
@@ -251,7 +265,13 @@ func (c *SchemaScanCoordinator) processNext(ctx context.Context) (bool, error) {
 			defer cancel()
 			return true, c.finishFailure(cleanupContext, job, StatusCancelled, "SCAN_CANCELLED")
 		}
-		return true, c.finishFailure(ctx, job, StatusFailed, "SCHEMA_SCAN_FAILED")
+		// The runner knows why it stopped; carry that through instead of
+		// telling the operator only that a scan failed.
+		code := "SCHEMA_SCAN_FAILED"
+		if specific := failureCode(runErr); specific != "" {
+			code = specific
+		}
+		return true, c.finishFailure(ctx, job, StatusFailed, code)
 	}
 	result, err := json.Marshal(map[string]any{
 		"scanRunId": strconv.FormatInt(published.ScanRunID, 10),

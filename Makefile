@@ -1,10 +1,15 @@
 # dbgraph developer Makefile.
 #
 # `make run` and `make watch` serve plain HTTP on a loopback address and pass
-# --insecure-cleartext-web, so the Web UI, health, and MCP all work without a
-# certificate. Add TLS=1 for HTTPS with a generated self-signed certificate,
-# and MYSQL_TLS=0 to scan a source MySQL that has no certificate. Generated
-# development credentials live under $(LOCAL_DIR) and stay out of git.
+# --insecure-cleartext-web and --insecure-mysql-tls, so the Web UI, health, MCP,
+# and schema scans against a local MySQL all work without a certificate. Add
+# TLS=1 for HTTPS with a generated self-signed certificate, and MYSQL_TLS=1 to
+# require verified TLS from a source MySQL. Generated development credentials
+# live under $(LOCAL_DIR) and stay out of git.
+#
+# Both insecure flags are development defaults of this Makefile, not of the
+# binary: `dbgraph serve` on its own still requires HTTPS and verified MySQL
+# TLS, and both flags are refused unless the listener is loopback.
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -36,8 +41,10 @@ WATCH_INTERVAL ?= 1
 
 # TLS=0 (default) serves cleartext HTTP; TLS=1 serves HTTPS with $(TLS_CERT).
 TLS ?= 0
-# MYSQL_TLS=0 lets schema scans reach a source MySQL that has no certificate.
-MYSQL_TLS ?= 1
+# MYSQL_TLS=0 (default) lets schema scans reach a source MySQL that has no
+# certificate, which is the ordinary case for a development database. Set
+# MYSQL_TLS=1 to require verified TLS, as the binary does on its own.
+MYSQL_TLS ?= 0
 ifeq ($(MYSQL_TLS),0)
 MYSQL_FLAGS := --insecure-mysql-tls
 else

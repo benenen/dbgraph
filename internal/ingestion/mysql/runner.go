@@ -170,7 +170,13 @@ func (r *Runner) run(
 
 	database, err := r.openDatabase(ctx, dsn)
 	if err != nil {
-		return catalog.PublishedSnapshot{}, r.failSchemaScan(ctx, scanRun, "SOURCE_CONNECTION_FAILED", err)
+		// A refused connection and a refused policy need different fixes: one
+		// is the database, the other is how this server was started.
+		code := "SOURCE_CONNECTION_FAILED"
+		if errors.Is(err, ErrTLSRequired) || errors.Is(err, ErrVerifiedTLSRequired) {
+			code = "SOURCE_TLS_REQUIRED"
+		}
+		return catalog.PublishedSnapshot{}, r.failSchemaScan(ctx, scanRun, code, err)
 	}
 	var snapshot catalog.ScannedSnapshot
 	var scanErr error
@@ -204,6 +210,31 @@ func (r *Runner) run(
 	return published, nil
 }
 
+// ScanFailure carries the reason a scan stopped out to the job that ran it,
+// so the operator reads why it failed rather than that it failed.
+type ScanFailure struct {
+	Code  string
+	Cause error
+}
+
+func (f ScanFailure) Error() string { return f.Code + ": " + f.Cause.Error() }
+
+func (f ScanFailure) Unwrap() error { return f.Cause }
+
+// FailureCode satisfies the contract the job coordinator reads, without the
+// coordinator having to know this package exists.
+func (f ScanFailure) FailureCode() string { return f.Code }
+
+// ScanFailureCode reports the specific reason a scan stopped, or an empty
+// string when the error did not come from a scan.
+func ScanFailureCode(err error) string {
+	var failure ScanFailure
+	if errors.As(err, &failure) {
+		return failure.Code
+	}
+	return ""
+}
+
 func (r *Runner) failSchemaScan(
 	ctx context.Context,
 	run catalog.SchemaScanRun,
@@ -215,7 +246,7 @@ func (r *Runner) failSchemaScan(
 	if err := r.catalog.FailSchemaScan(recordContext, run, errorCode); err != nil {
 		return errors.Join(cause, fmt.Errorf("record failed schema scan: %w", err))
 	}
-	return cause
+	return ScanFailure{Code: errorCode, Cause: cause}
 }
 
 func Open(ctx context.Context, dsn string) (*sql.DB, error) {
@@ -303,6 +334,17 @@ func UnsupportedParameters(dsn string) []string {
 func ValidateDSN(dsn string, policy ConnectionPolicy) error {
 	if _, err := validatedConfiguration(dsn, policy); err != nil {
 		return err
+	}
+	return ValidateDSNShape(dsn)
+}
+
+// ValidateDSNShape checks what is wrong with the connection string itself,
+// leaving the TLS policy to the connection that will use it. A DSN is stored
+// once and connected with under whatever policy the server runs; refusing to
+// save one because this process happens to require TLS would conflate the two.
+func ValidateDSNShape(dsn string) error {
+	if _, err := mysqldriver.ParseDSN(dsn); err != nil {
+		return ErrInvalidDSN
 	}
 	if unsupported := UnsupportedParameters(dsn); len(unsupported) > 0 {
 		return fmt.Errorf("%w: %s", ErrJDBCParameters, strings.Join(unsupported, ", "))

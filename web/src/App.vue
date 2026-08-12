@@ -12,17 +12,10 @@ const router = useRouter();
 const session = ref<Session | null>(null);
 const ready = ref(false);
 
-// Both destinations stand on their own: data sources are shared across
-// projects, so the registry is reachable whether or not a project is open.
-const navigation = [
-  { label: "Projects", icon: "pi pi-folder", route: "projects" },
-  { label: "Data sources", icon: "pi pi-database", route: "data-sources" },
-];
+// One workspace, so the sidebar names the one thing an operator manages.
+const navigation = [{ label: "Data sources", icon: "pi pi-database", route: "data-sources" }];
 
 function isActive(name: string): boolean {
-  // A project's linked sources belong under Projects, which is where the
-  // navigation started.
-  if (name === "projects") return route.name === "projects" || route.name === "project-sources";
   return route.name === name;
 }
 

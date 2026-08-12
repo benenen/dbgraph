@@ -1,55 +1,37 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { onMounted, onUnmounted, ref } from "vue";
 import Button from "primevue/button";
 import Column from "primevue/column";
 import DataTable from "primevue/datatable";
 import Dialog from "primevue/dialog";
 import InputText from "primevue/inputtext";
 import Message from "primevue/message";
-import MultiSelect from "primevue/multiselect";
 import Password from "primevue/password";
 import ProgressSpinner from "primevue/progressspinner";
 import Tag from "primevue/tag";
 import Textarea from "primevue/textarea";
 import { useToast } from "primevue/usetoast";
 
-import { api, UnauthenticatedError, type DataSource, type Project } from "@/api/client";
+import { api, UnauthenticatedError, type DataSource } from "@/api/client";
 
-// One page serves both routes. Without a project it is the registry of every
-// source; with one it shows that project's sources and can scan them, because
-// a scan writes into a project's catalog and has nowhere to go without one.
-const props = defineProps<{ projectId?: string }>();
-
-const router = useRouter();
 const toast = useToast();
 
-const scoped = computed(() => Boolean(props.projectId));
+// The server guarantees one workspace and links every source to it, so the
+// console never names a project. It reads the id once and uses it for the
+// calls that still take one.
+const workspaceId = ref("");
 
 const sources = ref<DataSource[]>([]);
-const projects = ref<Project[]>([]);
 const loading = ref(true);
 const failure = ref("");
-
-const project = computed(
-  () => projects.value.find((candidate) => candidate.id === props.projectId) ?? null,
-);
-
-/** Registered sources this project has not adopted yet. */
-const available = ref<DataSource[]>([]);
 
 const dialogOpen = ref(false);
 const saving = ref(false);
 // Empty means the dialog is registering; an id means it is editing that source.
 const editingId = ref("");
-// Registering records which projects introduced the source, and each becomes a
-// link. On a project's own page that project is implied.
-const draft = ref({ name: "", dsnEnvironment: "", dsn: "", reason: "", projectIds: [] as string[] });
+const draft = ref({ name: "", dsnEnvironment: "", dsn: "", reason: "" });
 
-const linkDialogOpen = ref(false);
-const linking = ref("");
 const removing = ref("");
-
 const scanStatus = ref<Record<string, string>>({});
 const scanning = ref<Record<string, boolean>>({});
 let timers: number[] = [];
@@ -62,19 +44,14 @@ async function load(): Promise<void> {
   loading.value = true;
   failure.value = "";
   try {
-    const [allProjects, allSources, linked] = await Promise.all([
+    const [projects, registered] = await Promise.all([
       api.listProjects(),
       api.listAllDataSources(),
-      props.projectId ? api.listDataSources(props.projectId) : Promise.resolve([] as DataSource[]),
     ]);
-    projects.value = allProjects;
-    if (props.projectId) {
-      const linkedIds = new Set(linked.map((source) => source.id));
-      sources.value = linked;
-      available.value = allSources.filter((source) => !linkedIds.has(source.id));
-    } else {
-      sources.value = allSources;
-      available.value = [];
+    workspaceId.value = projects[0]?.id ?? "";
+    sources.value = registered;
+    if (!workspaceId.value) {
+      failure.value = "The server has no workspace yet. Restart it to create one.";
     }
   } catch (error) {
     if (error instanceof UnauthenticatedError) return;
@@ -86,13 +63,7 @@ async function load(): Promise<void> {
 
 function openDialog(): void {
   editingId.value = "";
-  draft.value = {
-    name: "",
-    dsnEnvironment: "",
-    dsn: "",
-    reason: "",
-    projectIds: props.projectId ? [props.projectId] : [],
-  };
+  draft.value = { name: "", dsnEnvironment: "", dsn: "", reason: "" };
   dialogOpen.value = true;
 }
 
@@ -105,7 +76,6 @@ function openEdit(source: DataSource): void {
     dsnEnvironment: source.dsnEnvironment ?? "",
     dsn: "",
     reason: "",
-    projectIds: [],
   };
   dialogOpen.value = true;
 }
@@ -124,15 +94,9 @@ async function save(): Promise<void> {
       await load();
       return;
     }
-    // The source is registered through the first project chosen; the rest adopt
-    // it immediately, which is the same thing the Link action does later.
-    const [owner, ...adopters] = submitted.projectIds;
-    const source = await api.createDataSource(owner, submitted);
-    for (const projectId of adopters) {
-      await api.linkDataSource(projectId, source.id);
-    }
+    const source = await api.createDataSource(workspaceId.value, submitted);
     dialogOpen.value = false;
-    toast.add({ severity: "success", summary: `Data source ${source.name} registered`, life: 4000 });
+    toast.add({ severity: "success", summary: `${source.name} registered`, life: 4000 });
     await load();
   } catch (error) {
     toast.add({
@@ -166,48 +130,11 @@ async function remove(source: DataSource): Promise<void> {
   }
 }
 
-async function link(source: DataSource): Promise<void> {
-  if (!props.projectId) return;
-  linking.value = source.id;
-  try {
-    await api.linkDataSource(props.projectId, source.id);
-    toast.add({ severity: "success", summary: `${source.name} linked`, life: 3000 });
-    linkDialogOpen.value = false;
-    await load();
-  } catch (error) {
-    toast.add({
-      severity: "error",
-      summary: "Could not link the data source",
-      detail: error instanceof Error ? error.message : "",
-      life: 6000,
-    });
-  } finally {
-    linking.value = "";
-  }
-}
-
-async function unlink(source: DataSource): Promise<void> {
-  if (!props.projectId) return;
-  try {
-    await api.unlinkDataSource(props.projectId, source.id);
-    toast.add({ severity: "success", summary: `${source.name} unlinked`, life: 3000 });
-    await load();
-  } catch (error) {
-    toast.add({
-      severity: "error",
-      summary: "Could not unlink the data source",
-      detail: error instanceof Error ? error.message : "",
-      life: 6000,
-    });
-  }
-}
-
 async function runScan(source: DataSource): Promise<void> {
-  if (!props.projectId) return;
   scanning.value = { ...scanning.value, [source.id]: true };
   scanStatus.value = { ...scanStatus.value, [source.id]: "Queueing…" };
   try {
-    const job = await api.startScan(props.projectId, source.id, "Full inventory from the console");
+    const job = await api.startScan(workspaceId.value, source.id, "Full inventory from the console");
     await poll(source.id, job.id);
   } catch (error) {
     scanStatus.value = {
@@ -226,10 +153,10 @@ function wait(ms: number): Promise<void> {
 }
 
 async function poll(sourceId: string, jobId: string): Promise<void> {
-  if (!props.projectId) return;
   for (let attempt = 0; attempt < SCAN_POLL_LIMIT; attempt += 1) {
     try {
-      const job = await api.job(props.projectId, jobId);
+      const job = await api.job(workspaceId.value, jobId);
+      // The job carries why it stopped, which is the only part worth reading.
       const detail = job.errorCode ? ` · ${job.errorCode}` : "";
       scanStatus.value = { ...scanStatus.value, [sourceId]: `${job.status}${detail}` };
       if (TERMINAL.has(job.status)) return;
@@ -251,12 +178,7 @@ function statusSeverity(status: string): "success" | "danger" | "warn" | "info" 
   return "info";
 }
 
-function openProjects(): void {
-  void router.push({ name: "projects" });
-}
-
 onMounted(load);
-watch(() => props.projectId, load);
 onUnmounted(() => {
   timers.forEach((timer) => window.clearTimeout(timer));
   timers = [];
@@ -266,53 +188,27 @@ onUnmounted(() => {
 <template>
   <header class="page-head">
     <div>
-      <nav v-if="scoped" class="crumbs">
-        <a href="#" @click.prevent="openProjects">Projects</a>
-        <span>/</span>
-        <span>{{ project?.name ?? projectId }}</span>
-      </nav>
       <h1>Data sources</h1>
-      <p v-if="scoped">
-        The databases this project reads schema metadata from. Scanning one imports its catalog into
-        this project; other projects linking the same source keep their own.
-      </p>
-      <p v-else>
-        Databases dbgraph reads schema metadata from. A source is registered once and any number of
-        projects can use it; each project scans it separately and keeps its own catalog.
+      <p>
+        The databases dbgraph reads schema metadata from. Scanning one imports its tables and
+        columns into the catalog, where relations are proposed and reviewed against them.
       </p>
     </div>
-    <div class="head-actions">
-      <Button
-        v-if="scoped"
-        label="Link existing"
-        icon="pi pi-link"
-        severity="secondary"
-        outlined
-        :disabled="!available.length"
-        @click="linkDialogOpen = true"
-      />
-      <Button
-        label="Register data source"
-        icon="pi pi-plus"
-        :disabled="!projects.length"
-        @click="openDialog"
-      />
-    </div>
+    <Button
+      label="Register data source"
+      icon="pi pi-plus"
+      :disabled="!workspaceId"
+      @click="openDialog"
+    />
   </header>
 
   <Message v-if="failure" severity="error" :closable="false">{{ failure }}</Message>
-  <Message v-else-if="!loading && !projects.length" severity="warn" :closable="false">
-    Create a project first — registering a source records which project introduced it.
-  </Message>
 
   <div v-if="loading" class="loading"><ProgressSpinner style="width: 2rem; height: 2rem" /></div>
 
   <DataTable v-else :value="sources" data-key="id">
     <template #empty>
-      <p v-if="scoped" class="muted">
-        No data sources linked yet. Link one that already exists, or register a new one.
-      </p>
-      <p v-else class="muted">No data sources yet. Register one to start importing catalogs.</p>
+      <p class="muted">No data sources yet. Register one to start importing a catalog.</p>
     </template>
     <Column field="name" header="Name" />
     <Column header="DSN">
@@ -325,7 +221,7 @@ onUnmounted(() => {
     <Column field="id" header="ID">
       <template #body="{ data }"><code>{{ data.id }}</code></template>
     </Column>
-    <Column v-if="scoped" header="Last scan">
+    <Column header="Last scan">
       <template #body="{ data }">
         <Tag
           v-if="scanStatus[data.id]"
@@ -335,11 +231,10 @@ onUnmounted(() => {
         <span v-else class="muted">—</span>
       </template>
     </Column>
-    <Column header="" :style="scoped ? 'width: 24rem' : 'width: 12rem'">
+    <Column header="" style="width: 18rem">
       <template #body="{ data }">
         <div class="row-actions">
           <Button
-            v-if="scoped"
             label="Run scan"
             icon="pi pi-play"
             size="small"
@@ -356,15 +251,6 @@ onUnmounted(() => {
             @click="openEdit(data as DataSource)"
           />
           <Button
-            v-if="scoped"
-            label="Unlink"
-            size="small"
-            severity="danger"
-            text
-            @click="unlink(data as DataSource)"
-          />
-          <Button
-            v-else
             label="Delete"
             size="small"
             severity="danger"
@@ -384,23 +270,6 @@ onUnmounted(() => {
     :style="{ width: '34rem' }"
   >
     <form v-if="dialogOpen" class="form" @submit.prevent="save">
-      <template v-if="!editingId && !scoped">
-        <label for="project">
-          Linked projects <span class="muted">each keeps its own catalog</span>
-        </label>
-        <MultiSelect
-          id="project"
-          v-model="draft.projectIds"
-          :options="projects"
-          option-label="name"
-          option-value="id"
-          display="chip"
-          filter
-          placeholder="Choose one or more projects"
-          fluid
-        />
-      </template>
-
       <label for="name">Name <span class="muted">unique across dbgraph</span></label>
       <InputText id="name" v-model="draft.name" maxlength="200" required autofocus fluid />
 
@@ -440,35 +309,10 @@ onUnmounted(() => {
           type="submit"
           :label="editingId ? 'Save changes' : 'Register'"
           :loading="saving"
-          :disabled="!draft.name.trim() || (!editingId && !draft.projectIds.length)"
+          :disabled="!draft.name.trim()"
         />
       </div>
     </form>
-  </Dialog>
-
-  <Dialog
-    v-model:visible="linkDialogOpen"
-    modal
-    header="Link a data source"
-    :style="{ width: '30rem' }"
-  >
-    <p class="muted dialog-lead">
-      Sources already registered in dbgraph that this project has not adopted.
-    </p>
-    <ul class="candidates">
-      <li v-for="source in available" :key="source.id">
-        <span>
-          <strong>{{ source.name }}</strong>
-          <code v-if="source.dsnEnvironment">{{ source.dsnEnvironment }}</code>
-        </span>
-        <Button
-          label="Link"
-          size="small"
-          :loading="linking === source.id"
-          @click="link(source as DataSource)"
-        />
-      </li>
-    </ul>
   </Dialog>
 </template>
 
@@ -479,24 +323,6 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 1.25rem;
-}
-
-.head-actions {
-  display: flex;
-  flex-shrink: 0;
-  gap: 0.5rem;
-}
-
-.crumbs {
-  display: flex;
-  gap: 0.4rem;
-  margin-bottom: 0.35rem;
-  font-size: 0.8rem;
-  color: var(--p-text-muted-color);
-}
-
-.crumbs a {
-  color: inherit;
 }
 
 h1 {
@@ -533,35 +359,6 @@ h1 {
 
 label {
   font-size: 0.8rem;
-  color: var(--p-text-muted-color);
-}
-
-.dialog-lead {
-  margin: 0 0 0.75rem;
-  font-size: 0.85rem;
-}
-
-.candidates {
-  display: grid;
-  gap: 0.4rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.candidates li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.5rem 0.7rem;
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 6px;
-}
-
-.candidates code {
-  margin-left: 0.5rem;
-  font-size: 0.75rem;
   color: var(--p-text-muted-color);
 }
 
