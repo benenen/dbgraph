@@ -34,7 +34,7 @@ type CatalogService interface {
 	CreateDataSourceAsAdmin(context.Context, catalog.AdminCreateDataSource) (catalog.DataSource, error)
 	FindCurrentNode(context.Context, int64, int64, string) (catalog.Node, error)
 	GetCurrentNode(context.Context, int64, int64) (catalog.Node, error)
-	SearchCurrentNodes(context.Context, int64, string, int) ([]catalog.Node, error)
+	SearchCurrentNodes(context.Context, int64, int64, string, int) ([]catalog.Node, error)
 	ListDataSources(context.Context, int64, int) ([]catalog.DataSource, error)
 }
 

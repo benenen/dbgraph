@@ -36,8 +36,11 @@ func TestProjectAndDataSourceGetBoundaries(t *testing.T) {
 	if _, err := catalogService.FindCurrentNode(ctx, 0, 1, "schema.table.column"); !errors.Is(err, catalog.ErrInvalidSnapshot) {
 		t.Fatalf("FindCurrentNode invalid project error = %v", err)
 	}
-	if _, err := catalogService.SearchCurrentNodes(ctx, 1, "node", 0); !errors.Is(err, catalog.ErrInvalidSnapshot) {
+	if _, err := catalogService.SearchCurrentNodes(ctx, 1, 0, "node", 0); !errors.Is(err, catalog.ErrInvalidSnapshot) {
 		t.Fatalf("SearchCurrentNodes invalid limit error = %v", err)
+	}
+	if _, err := catalogService.SearchCurrentNodes(ctx, 1, -1, "node", 10); !errors.Is(err, catalog.ErrInvalidSnapshot) {
+		t.Fatalf("SearchCurrentNodes negative data source error = %v", err)
 	}
 }
 

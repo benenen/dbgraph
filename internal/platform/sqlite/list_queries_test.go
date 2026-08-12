@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/benenen/dbgraph/internal/catalog"
+	"github.com/benenen/dbgraph/internal/id"
 	dbsqlite "github.com/benenen/dbgraph/internal/platform/sqlite"
 )
 
@@ -93,5 +94,68 @@ func TestListQueriesOrderByNameAndScopeToTheirProject(t *testing.T) {
 	}
 	if len(empty) != 0 {
 		t.Fatalf("data sources for an unknown project = %#v, want none", empty)
+	}
+}
+
+func TestSearchCurrentNodesFiltersByDataSource(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := dbsqlite.Open(ctx, dbsqlite.Config{Path: filepath.Join(t.TempDir(), "dbgraph.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	createdAt := time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC)
+	ids, err := id.NewGenerator(11, func() time.Time { return createdAt })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dbsqlite.NewProjectRepository(store).CreateProject(ctx, catalog.Project{
+		ID: 10, Name: "orders", CreatedAt: createdAt, UpdatedAt: createdAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	catalogRepository := dbsqlite.NewCatalogRepository(store, ids)
+	for _, source := range []catalog.DataSource{
+		{ID: 30, ProjectID: 10, Name: "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "PRIMARY_DSN", CreatedAt: createdAt, UpdatedAt: createdAt},
+		{ID: 31, ProjectID: 10, Name: "replica", Kind: catalog.DataSourceMySQL, DSNEnvironment: "REPLICA_DSN", CreatedAt: createdAt, UpdatedAt: createdAt},
+	} {
+		if err := catalogRepository.CreateDataSource(ctx, source); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	service := catalog.NewService(catalogRepository, ids, func() time.Time { return createdAt })
+	for _, dataSourceID := range []int64{30, 31} {
+		if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
+			ProjectID: 10, DataSourceID: dataSourceID,
+			Nodes: []catalog.NodeInput{
+				{StableKey: "database:app", Kind: catalog.NodeDatabase, Name: "app", QualifiedName: "mysql://app"},
+				{StableKey: "schema:app", ParentStableKey: "database:app", Kind: catalog.NodeSchema, Name: "app", QualifiedName: "app"},
+				{StableKey: "table:app.orders", ParentStableKey: "schema:app", Kind: catalog.NodeTable, Name: "orders", QualifiedName: "app.orders"},
+				{StableKey: "column:app.orders.tenant_id", ParentStableKey: "table:app.orders", Kind: catalog.NodeColumn,
+					Name: "tenant_id", QualifiedName: "app.orders.tenant_id", DataType: "bigint", Ordinal: 1},
+			},
+		}); err != nil {
+			t.Fatalf("publish snapshot for data source %d: %v", dataSourceID, err)
+		}
+	}
+
+	all, err := catalogRepository.SearchCurrentNodes(ctx, 10, 0, "tenant_id", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("unfiltered search returned %d nodes, want one per data source", len(all))
+	}
+
+	scoped, err := catalogRepository.SearchCurrentNodes(ctx, 10, 30, "tenant_id", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scoped) != 1 || scoped[0].DataSourceID != 30 {
+		t.Fatalf("scoped search = %#v, want only data source 30", scoped)
 	}
 }

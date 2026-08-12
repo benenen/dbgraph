@@ -46,7 +46,15 @@ func (h *handler) searchNodes(response http.ResponseWriter, request *http.Reques
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid node search", nil)
 		return
 	}
-	nodes, err := h.services.Catalog.SearchCurrentNodes(request.Context(), projectID, request.URL.Query().Get("q"), limit)
+	dataSourceID := int64(0)
+	if raw := strings.TrimSpace(request.URL.Query().Get("dataSourceId")); raw != "" {
+		dataSourceID, err = parseID(raw)
+		if err != nil {
+			writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid data source ID", nil)
+			return
+		}
+	}
+	nodes, err := h.services.Catalog.SearchCurrentNodes(request.Context(), projectID, dataSourceID, request.URL.Query().Get("q"), limit)
 	if err != nil {
 		if errors.Is(err, catalog.ErrInvalidSnapshot) {
 			writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "node search was rejected", nil)

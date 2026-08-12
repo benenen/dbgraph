@@ -30,13 +30,14 @@ const (
 var testMCPTime = time.Date(2026, time.August, 11, 18, 30, 0, 123, time.UTC)
 
 type toolBehaviorStub struct {
-	searchProjectID int64
-	searchQuery     string
-	searchLimit     int
-	searchCalls     int
-	findProjectID   int64
-	findDataSource  int64
-	findQualified   string
+	searchProjectID    int64
+	searchDataSourceID int64
+	searchQuery        string
+	searchLimit        int
+	searchCalls        int
+	findProjectID      int64
+	findDataSource     int64
+	findQualified      string
 
 	createCommand    relations.ProposeCreate
 	revisionCommand  relations.ProposeRevision
@@ -66,8 +67,8 @@ func (s *toolBehaviorStub) Status(context.Context) (appstatus.Snapshot, error) {
 	}, nil
 }
 
-func (s *toolBehaviorStub) SearchCurrentNodes(_ context.Context, projectID int64, query string, limit int) ([]catalog.Node, error) {
-	s.searchProjectID, s.searchQuery, s.searchLimit = projectID, query, limit
+func (s *toolBehaviorStub) SearchCurrentNodes(_ context.Context, projectID int64, dataSourceID int64, query string, limit int) ([]catalog.Node, error) {
+	s.searchProjectID, s.searchDataSourceID, s.searchQuery, s.searchLimit = projectID, dataSourceID, query, limit
 	s.searchCalls++
 	return []catalog.Node{testNode()}, nil
 }
@@ -233,8 +234,9 @@ func TestReadToolsParseInputsAndMapStructuredOutputs(t *testing.T) {
 	}
 
 	search := callToolOK(t, session, "dbgraph_search_nodes", `{"projectId":"9007199254740993","query":"orders"}`)
-	if stub.searchProjectID != testProjectID || stub.searchQuery != "orders" || stub.searchLimit != 20 {
-		t.Fatalf("search input = project:%d query:%q limit:%d", stub.searchProjectID, stub.searchQuery, stub.searchLimit)
+	if stub.searchProjectID != testProjectID || stub.searchDataSourceID != 0 || stub.searchQuery != "orders" || stub.searchLimit != 20 {
+		t.Fatalf("search input = project:%d dataSource:%d query:%q limit:%d",
+			stub.searchProjectID, stub.searchDataSourceID, stub.searchQuery, stub.searchLimit)
 	}
 	if firstArrayObject(t, search, "nodes")["id"] != "9007199254740993" {
 		t.Fatalf("search output = %#v", search)

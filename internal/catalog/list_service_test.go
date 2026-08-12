@@ -99,7 +99,7 @@ func (s *listCatalogStub) FindCurrentNode(context.Context, int64, int64, string)
 func (s *listCatalogStub) GetCurrentNode(context.Context, int64, int64) (catalog.Node, error) {
 	return catalog.Node{}, catalog.ErrNodeNotFound
 }
-func (s *listCatalogStub) SearchCurrentNodes(context.Context, int64, string, int) ([]catalog.Node, error) {
+func (s *listCatalogStub) SearchCurrentNodes(context.Context, int64, int64, string, int) ([]catalog.Node, error) {
 	return nil, nil
 }
 

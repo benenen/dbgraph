@@ -122,7 +122,7 @@ func (s *catalogHTTPStub) FindCurrentNode(context.Context, int64, int64, string)
 	return catalog.Node{}, catalog.ErrNodeNotFound
 }
 
-func (s *catalogHTTPStub) SearchCurrentNodes(context.Context, int64, string, int) ([]catalog.Node, error) {
+func (s *catalogHTTPStub) SearchCurrentNodes(context.Context, int64, int64, string, int) ([]catalog.Node, error) {
 	return append([]catalog.Node(nil), s.nodes...), s.searchErr
 }
 

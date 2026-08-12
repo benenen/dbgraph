@@ -63,3 +63,9 @@ func TestListRoutesApplyRoleScopedFields(t *testing.T) {
 	assertWebStatus(t, admin.request(http.MethodGet, "/api/v1/projects/10/data-sources?limit=0", "", false),
 		http.StatusBadRequest, "INVALID_REQUEST")
 }
+
+func TestNodeSearchRejectsAnUnparseableDataSourceID(t *testing.T) {
+	client := newWebTestClient(t, Services{Catalog: &catalogHTTPStub{}}, relations.RoleViewer)
+	response := client.request(http.MethodGet, "/api/v1/projects/10/nodes?q=user&dataSourceId=abc", "", false)
+	assertWebStatus(t, response, http.StatusBadRequest, "INVALID_REQUEST")
+}

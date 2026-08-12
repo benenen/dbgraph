@@ -187,7 +187,7 @@ type CatalogRepository interface {
 	PublishSnapshot(context.Context, SnapshotPublication) (PublishedSnapshot, error)
 	FindCurrentNode(context.Context, int64, int64, string) (Node, error)
 	GetCurrentNode(context.Context, int64, int64) (Node, error)
-	SearchCurrentNodes(context.Context, int64, string, int) ([]Node, error)
+	SearchCurrentNodes(context.Context, int64, int64, string, int) ([]Node, error)
 }
 
 func (s *Service) GetDataSource(ctx context.Context, dataSourceID int64) (DataSource, error) {
@@ -427,14 +427,15 @@ func (s *Service) GetCurrentNode(ctx context.Context, projectID int64, nodeID in
 func (s *Service) SearchCurrentNodes(
 	ctx context.Context,
 	projectID int64,
+	dataSourceID int64,
 	query string,
 	limit int,
 ) ([]Node, error) {
 	query = strings.TrimSpace(query)
-	if projectID <= 0 || query == "" || len(query) > 500 || limit <= 0 || limit > 100 {
+	if projectID <= 0 || dataSourceID < 0 || query == "" || len(query) > 500 || limit <= 0 || limit > 100 {
 		return nil, ErrInvalidSnapshot
 	}
-	return s.repository.SearchCurrentNodes(ctx, projectID, query, limit)
+	return s.repository.SearchCurrentNodes(ctx, projectID, dataSourceID, query, limit)
 }
 
 func validateSnapshot(command PublishSnapshot) error {

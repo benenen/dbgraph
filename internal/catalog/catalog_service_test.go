@@ -287,7 +287,7 @@ func TestServicePublishesCurrentSchemaSnapshot(t *testing.T) {
 		t.Fatalf("primary current node changed across data sources: %#v", primaryNode)
 	}
 
-	matches, err := service.SearchCurrentNodes(ctx, project.ID, "student", 10)
+	matches, err := service.SearchCurrentNodes(ctx, project.ID, 0, "student", 10)
 	if err != nil {
 		t.Fatalf("search current nodes: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestServicePublishesCurrentSchemaSnapshot(t *testing.T) {
 	if staleNode.ID != node.ID || staleNode.VersionID == node.VersionID || staleNode.Status != catalog.NodeStale {
 		t.Fatalf("stale node = %#v, previous = %#v", staleNode, node)
 	}
-	matches, err = service.SearchCurrentNodes(ctx, project.ID, "student", 10)
+	matches, err = service.SearchCurrentNodes(ctx, project.ID, 0, "student", 10)
 	if err != nil {
 		t.Fatalf("search after stale publication: %v", err)
 	}

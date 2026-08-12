@@ -24,7 +24,7 @@ func (s *catalogStub) FindCurrentNode(context.Context, int64, int64, string) (ca
 	return catalog.Node{}, nil
 }
 
-func (s *catalogStub) SearchCurrentNodes(_ context.Context, projectID int64, _ string, _ int) ([]catalog.Node, error) {
+func (s *catalogStub) SearchCurrentNodes(_ context.Context, projectID int64, _ int64, _ string, _ int) ([]catalog.Node, error) {
 	s.projectID = projectID
 	return []catalog.Node{{ID: 9_007_199_254_740_993, ProjectID: projectID, Kind: catalog.NodeColumn, QualifiedName: "app.orders.id"}}, nil
 }

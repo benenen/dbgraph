@@ -80,7 +80,7 @@ func registerReadTools(server *mcp.Server, services Services) {
 			if input.Limit == 0 {
 				input.Limit = 20
 			}
-			nodes, err := services.Catalog.SearchCurrentNodes(ctx, projectID, input.Query, input.Limit)
+			nodes, err := services.Catalog.SearchCurrentNodes(ctx, projectID, 0, input.Query, input.Limit)
 			if err != nil {
 				return nil, searchNodesOutput{}, safeToolError(err)
 			}

@@ -33,7 +33,7 @@ type StatusService interface {
 
 type CatalogService interface {
 	FindCurrentNode(context.Context, int64, int64, string) (catalog.Node, error)
-	SearchCurrentNodes(context.Context, int64, string, int) ([]catalog.Node, error)
+	SearchCurrentNodes(context.Context, int64, int64, string, int) ([]catalog.Node, error)
 }
 
 type RelationService interface {

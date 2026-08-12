@@ -415,10 +415,18 @@ LIMIT 1
 func (r *CatalogRepository) SearchCurrentNodes(
 	ctx context.Context,
 	projectID int64,
+	dataSourceID int64,
 	query string,
 	limit int,
 ) (nodes []catalog.Node, returnError error) {
 	searchQuery := ftsPrefixQuery(query)
+	sourceClause := ""
+	arguments := []any{searchQuery, projectID, searchQuery, projectID, catalog.NodeActive}
+	if dataSourceID > 0 {
+		sourceClause = "\n  AND n.data_source_id = ?"
+		arguments = append(arguments, dataSourceID)
+	}
+	arguments = append(arguments, limit)
 	rows, err := r.store.db.QueryContext(ctx, `
 WITH matched_nodes(node_id) AS (
     SELECT node_id
@@ -438,10 +446,10 @@ FROM matched_nodes
 JOIN nodes n ON n.id = matched_nodes.node_id
 JOIN node_current nc ON nc.node_id = n.id
 JOIN node_versions nv ON nv.id = nc.version_id
-WHERE nv.status = ?
+WHERE nv.status = ?`+sourceClause+`
 ORDER BY length(nv.qualified_name), nv.qualified_name
 LIMIT ?
-`, searchQuery, projectID, searchQuery, projectID, catalog.NodeActive, limit)
+`, arguments...)
 	if err != nil {
 		return nil, fmt.Errorf("search current nodes: %w", err)
 	}

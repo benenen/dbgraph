@@ -114,7 +114,7 @@ func TestRelationCommandsPublishOnlyApprovedRevisions(t *testing.T) {
 	}
 	symbolMatches, err := catalog.NewService(
 		dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime },
-	).SearchCurrentNodes(ctx, project.ID, "ExampleService.save", 10)
+	).SearchCurrentNodes(ctx, project.ID, 0, "ExampleService.save", 10)
 	if err != nil {
 		t.Fatalf("search catalog by evidence symbol: %v", err)
 	}
