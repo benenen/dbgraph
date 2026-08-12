@@ -32,8 +32,11 @@ function initializeAdmin() {
     try {
       const source = await api(`/api/v1/projects/${requireProject()}/data-sources`, { method: "POST", body: JSON.stringify({
         name: byId("data-source-name").value, kind: "MYSQL", dsnEnvironment: byId("data-source-environment").value,
-        reason: byId("data-source-reason").value,
+        dsn: byId("data-source-dsn").value, reason: byId("data-source-reason").value,
       }) });
+      // The connection string is write-only: clear it so it cannot be read
+      // back off the screen or resubmitted by accident.
+      byId("data-source-dsn").value = "";
       byId("scan-data-source-id").value = source.id;
       loadDataSourceList();
       showMessage(`Data source ${source.id} created.`, true);

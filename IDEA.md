@@ -363,6 +363,8 @@
   - Viewer is read-only; Editor can propose create/revision/tombstone; Reviewer can approve/reject/suppress/restore; Admin manages data sources and schema scans
   - the data source list is readable by Viewer and above; the DSN environment variable name (`dsnEnvironment`) and its timestamps are returned only to Admin, so the deployment detail never reaches a non-Admin role
   - Require CSRF tokens and HttpOnly, Secure, SameSite session cookies
+  - Source-database DSNs may rest in SQLite, sealed with AES-256-GCM under `DBGRAPH_SECRET_KEY`, which is read from the environment and never stored. The sealed DSN is write-only: no Web, REST, or MCP response returns it, and audit events record only how a DSN resolves. A data source that names an environment variable instead keeps working, and that variable is the fallback when no ciphertext is stored
+  - Access tokens are seeded from the environment on startup and stored as SHA-256 digests, never as tokens. The serving process verifies a presented token and never reproduces one, so the database holds no presentable credential and needs no key for them
   - One documented exception: `--insecure-cleartext-web` (development only) drops the `__Host-` prefix and the Secure attribute so a browser keeps the session cookie over plain HTTP. It is rejected unless the listener is loopback, it cannot be combined with TLS, it is off by default, and it changes nothing else: CSRF tokens, HttpOnly, SameSite=Strict, role authorization, and audit remain in force
   - validate node IDs, enums, relation type and all required fields
   - bound AST depth/node count, batch size, string length and evidence count
