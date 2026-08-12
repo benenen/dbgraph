@@ -22,7 +22,7 @@ def run_flow(page):
     page.get_by_role("button", name="Sign in").click()
     page.wait_for_url(f"{BASE_URL}/")
     expect(page.locator("#session-role")).to_have_text("ADMIN")
-    page.locator("#project-id").fill(PROJECT_ID)
+    page.locator("#project-id").select_option(PROJECT_ID)
     assert_literal_guard_roundtrip(page)
 
     page.get_by_role("link", name="Schema Explorer").click()
@@ -143,7 +143,7 @@ def run_reviewer_flow(browser, relation_id):
         page.get_by_role("button", name="Sign in").click()
         page.wait_for_url(f"{BASE_URL}/")
         expect(page.locator("#session-role")).to_have_text("REVIEWER")
-        page.locator("#project-id").fill(PROJECT_ID)
+        page.locator("#project-id").select_option(PROJECT_ID)
         page.get_by_role("link", name="Relation Details").click()
         expect(page.locator("#proposal-form")).to_be_visible()
         expect(page.locator("#submit-proposal")).to_have_count(1)

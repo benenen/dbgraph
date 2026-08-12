@@ -96,6 +96,39 @@ function requireProject() {
   return value;
 }
 
+const PROJECT_STORAGE_KEY = "dbgraph.projectId";
+
+async function loadProjects(preferredId = "") {
+  const select = byId("project-id");
+  if (!select) return;
+  let projects = [];
+  try { projects = await api("/api/v1/projects?limit=200"); }
+  catch (error) { showMessage(error.message); return; }
+
+  const stored = preferredId || localStorage.getItem(PROJECT_STORAGE_KEY) || "";
+  select.replaceChildren();
+  if (!projects.length) {
+    select.append(new Option("No projects yet — create one in Projects", ""));
+    return;
+  }
+  select.append(new Option("Select a project", ""));
+  for (const project of projects) select.append(new Option(`${project.name} · ${project.id}`, project.id));
+
+  const known = projects.some(project => project.id === stored);
+  select.value = known ? stored : (projects.length === 1 ? projects[0].id : "");
+  if (!known && stored) localStorage.removeItem(PROJECT_STORAGE_KEY);
+  if (select.value) localStorage.setItem(PROJECT_STORAGE_KEY, select.value);
+}
+
+function initializeProjectPicker() {
+  const select = byId("project-id");
+  if (!select) return;
+  select.addEventListener("change", () => {
+    if (select.value) localStorage.setItem(PROJECT_STORAGE_KEY, select.value);
+    else localStorage.removeItem(PROJECT_STORAGE_KEY);
+  });
+}
+
 function resultCard(title, detail, meta = "", state = "") {
   const card = document.createElement("article");
   card.className = "result-card";
@@ -712,7 +745,7 @@ function initializeReview() {
 async function initializeApp() {
   if (await initializeLogin()) return;
   try {
-    await initializeSession(); initializeNavigation(); applyRoleCapabilities(); initializeNodeSearch(); initializeGraphNodeSearch(); initializeTrace(); initializeStructuredEditors(); initializeProposal();
+    await initializeSession(); initializeNavigation(); applyRoleCapabilities(); initializeProjectPicker(); await loadProjects(); initializeNodeSearch(); initializeGraphNodeSearch(); initializeTrace(); initializeStructuredEditors(); initializeProposal();
     initializeRelationActions(); initializeGraphRelationActions(); initializeReview(); initializeQueries(); initializeAdmin();
     ["trace-type-filter", "trace-status-filter", "trace-confidence-filter"].forEach(id => byId(id).addEventListener("change", () => {
       if (state.traceResult) renderGraph(state.traceResult);
