@@ -36,21 +36,13 @@ func TestRunnerLoadsDSNFromEnvironmentAndPublishesSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create ID generator: %v", err)
 	}
-	projectService := catalog.NewProjectService(
-		dbsqlite.NewProjectRepository(store),
-		idGenerator,
-		func() time.Time { return fixedTime },
-	)
-	project, err := projectService.Create(ctx, catalog.CreateProject{Name: "Learning Platform"})
-	if err != nil {
-		t.Fatalf("create project: %v", err)
-	}
 	catalogService := catalog.NewService(
 		dbsqlite.NewCatalogRepository(store, idGenerator),
 		idGenerator,
 		func() time.Time { return fixedTime },
 	)
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
+
 		Name:           "primary",
 		Kind:           catalog.DataSourceMySQL,
 		DSNEnvironment: "DBGRAPH_PRIMARY_MYSQL_DSN",
@@ -106,14 +98,14 @@ func TestRunnerLoadsDSNFromEnvironmentAndPublishesSnapshot(t *testing.T) {
 	}
 	runner := mysql.NewRunner(catalogService, mysql.NewScanner(), openDatabase, lookupEnvironment)
 
-	published, err := runner.Run(ctx, project.ID, dataSource.ID)
+	published, err := runner.Run(ctx, dataSource.ID)
 	if err != nil {
 		t.Fatalf("run schema scan: %v", err)
 	}
 	if published.NodeCount != 2 {
 		t.Fatalf("published node count = %d, want database and schema", published.NodeCount)
 	}
-	if _, err := catalogService.FindCurrentNode(ctx, project.ID, dataSource.ID, "learn"); err != nil {
+	if _, err := catalogService.FindCurrentNode(ctx, dataSource.ID, "learn"); err != nil {
 		t.Fatalf("find published schema: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -137,15 +129,7 @@ func TestRunnerIgnoresCrossSchemaForeignKeysThatCatalogCannotRepresent(t *testin
 	if err != nil {
 		t.Fatalf("create ID generator: %v", err)
 	}
-	project, err := catalog.NewProjectService(
-		dbsqlite.NewProjectRepository(store), idGenerator, func() time.Time { return fixedTime },
-	).Create(ctx, catalog.CreateProject{Name: "Cross-schema filter"})
-	if err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	catalogService := catalog.NewService(
-		dbsqlite.NewCatalogRepository(store, idGenerator), idGenerator, func() time.Time { return fixedTime },
-	)
+	catalogService := catalog.NewService(dbsqlite.NewCatalogRepository(store, idGenerator), idGenerator, func() time.Time { return fixedTime })
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
 		Name: "primary", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "CROSS_SCHEMA_MYSQL_DSN",
@@ -203,7 +187,7 @@ func TestRunnerIgnoresCrossSchemaForeignKeysThatCatalogCannotRepresent(t *testin
 		},
 	)
 
-	published, err := runner.Run(ctx, project.ID, dataSource.ID)
+	published, err := runner.Run(ctx, dataSource.ID)
 	if err != nil {
 		t.Fatalf("publish schema containing external foreign key metadata: %v", err)
 	}
@@ -211,7 +195,7 @@ func TestRunnerIgnoresCrossSchemaForeignKeysThatCatalogCannotRepresent(t *testin
 		t.Fatalf("published node count = %d, want 4 local nodes", published.NodeCount)
 	}
 	if _, err := catalogService.FindCurrentNode(
-		ctx, project.ID, dataSource.ID, "learn.classes.external_id",
+		ctx, dataSource.ID, "learn.classes.external_id",
 	); err != nil {
 		t.Fatalf("find local column after filtered publication: %v", err)
 	}
@@ -239,16 +223,9 @@ func TestRunnerPersistsFailedScanRunWhenSourceCannotConnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create ID generator: %v", err)
 	}
-	project, err := catalog.NewProjectService(
-		dbsqlite.NewProjectRepository(store), idGenerator, func() time.Time { return fixedTime },
-	).Create(ctx, catalog.CreateProject{Name: "Failed scan lifecycle"})
-	if err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	catalogService := catalog.NewService(
-		dbsqlite.NewCatalogRepository(store, idGenerator), idGenerator, func() time.Time { return fixedTime },
-	)
+	catalogService := catalog.NewService(dbsqlite.NewCatalogRepository(store, idGenerator), idGenerator, func() time.Time { return fixedTime })
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
+
 		Name: "unavailable", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "FAILED_SCAN_DSN",
 	})
@@ -265,7 +242,7 @@ func TestRunnerPersistsFailedScanRunWhenSourceCannotConnect(t *testing.T) {
 			return "readonly:secret@tcp(mysql.example.test:3306)/learn?tls=true", true
 		},
 	)
-	if _, err := runner.Run(ctx, project.ID, dataSource.ID); !errors.Is(err, connectFailure) {
+	if _, err := runner.Run(ctx, dataSource.ID); !errors.Is(err, connectFailure) {
 		t.Fatalf("run scan error = %v, want source failure", err)
 	}
 
@@ -289,8 +266,8 @@ func TestRunnerPersistsFailedScanRunWhenSourceCannotConnect(t *testing.T) {
 	if err := reader.QueryRowContext(ctx, `
 SELECT status, error_code, error_message, completed_at
 FROM schema_scan_runs
-WHERE project_id = ? AND data_source_id = ?
-`, project.ID, dataSource.ID).Scan(&status, &errorCode, &errorMessage, &completedAt); err != nil {
+WHERE data_source_id = ?
+`, dataSource.ID).Scan(&status, &errorCode, &errorMessage, &completedAt); err != nil {
 		t.Fatalf("read failed schema scan run: %v", err)
 	}
 	if status != 3 || errorCode != "SOURCE_CONNECTION_FAILED" ||

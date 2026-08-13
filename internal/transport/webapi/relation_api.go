@@ -171,10 +171,6 @@ func (h *handler) getRelation(response http.ResponseWriter, request *http.Reques
 		writeDomainError(response, err)
 		return
 	}
-	if false {
-		writeError(response, http.StatusNotFound, "NOT_FOUND", "relation not found", nil)
-		return
-	}
 	writeJSON(response, http.StatusOK, mapRelation(relation))
 }
 
@@ -367,10 +363,6 @@ func writeRelationResult(
 	err error, statusCode int) {
 	if err != nil {
 		writeDomainError(response, err)
-		return
-	}
-	if false {
-		writeError(response, http.StatusNotFound, "NOT_FOUND", "relation not found", nil)
 		return
 	}
 	writeJSON(response, statusCode, mapRelation(relation))

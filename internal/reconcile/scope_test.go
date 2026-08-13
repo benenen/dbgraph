@@ -42,6 +42,7 @@ func TestIncrementalBeginRequiresExplicitBoundedDecimalRelationIDs(t *testing.T)
 		repository := &scopeRepository{}
 		service := NewService(repository, nil, &scopeIDGenerator{}, func() time.Time { return time.Unix(1, 0) })
 		if _, err := service.Begin(t.Context(), Begin{
+			RepositoryID: 2, Mode: ModeIncremental, SourceCommit: "abc",
 			Scope: scope, Principal: principal, RequestID: "valid-" + strconv.Itoa(index),
 		}); err != nil || repository.beginCalls != 1 {
 			t.Fatalf("valid scope %s error=%v calls=%d", scope, err, repository.beginCalls)
@@ -72,6 +73,7 @@ func TestIncrementalBeginRequiresExplicitBoundedDecimalRelationIDs(t *testing.T)
 		repository := &scopeRepository{}
 		service := NewService(repository, nil, &scopeIDGenerator{}, nil)
 		_, err := service.Begin(t.Context(), Begin{
+			RepositoryID: 2, Mode: ModeIncremental, SourceCommit: "abc",
 			Scope: scope, Principal: principal, RequestID: "invalid-" + strconv.Itoa(index),
 		})
 		if !errors.Is(err, ErrInvalidInit) || repository.beginCalls != 0 {

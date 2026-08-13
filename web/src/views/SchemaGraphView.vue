@@ -18,7 +18,6 @@ import {
 } from "@/api/client";
 import { conditionNodeIds, describeCondition } from "@/lib/conditions";
 
-const workspaceId = ref("");
 const dataSources = ref<DataSource[]>([]);
 const selectedSourceId = ref("");
 
@@ -53,8 +52,7 @@ async function loadWorkspace(): Promise<void> {
   loading.value = true;
   failure.value = "";
   try {
-    const [projects, sources] = await Promise.all([api.listProjects(), api.listAllDataSources()]);
-    workspaceId.value = projects[0]?.id ?? "";
+    const sources = await api.listAllDataSources();
     dataSources.value = sources;
     if (!selectedSourceId.value) selectedSourceId.value = sources[0]?.id ?? "";
   } catch (error) {
@@ -66,15 +64,15 @@ async function loadWorkspace(): Promise<void> {
 }
 
 async function loadSource(): Promise<void> {
-  if (!workspaceId.value || !selectedSourceId.value) return;
+  if (!selectedSourceId.value) return;
   loadingTables.value = true;
   failure.value = "";
   focusedTableId.value = "";
   filter.value = "";
   try {
     const [imported, relations] = await Promise.all([
-      api.listTables(workspaceId.value, selectedSourceId.value, filter.value),
-      api.relationGraph(workspaceId.value, selectedSourceId.value),
+      api.listTables(selectedSourceId.value, filter.value),
+      api.relationGraph(selectedSourceId.value),
     ]);
     tables.value = imported.tables;
     tablesTruncated.value = imported.truncated;
@@ -90,10 +88,10 @@ async function loadSource(): Promise<void> {
 }
 
 async function refilter(): Promise<void> {
-  if (!workspaceId.value || !selectedSourceId.value) return;
+  if (!selectedSourceId.value) return;
   loadingTables.value = true;
   try {
-    const listed = await api.listTables(workspaceId.value, selectedSourceId.value, filter.value);
+    const listed = await api.listTables(selectedSourceId.value, filter.value);
     tables.value = listed.tables;
     tablesTruncated.value = listed.truncated;
   } catch (error) {
@@ -301,7 +299,7 @@ async function openEdge(edge: RelationEdge): Promise<void> {
   const resolved = await Promise.all(
     wanted.map(async (id) => {
       try {
-        const node = await api.node(workspaceId.value, id);
+        const node = await api.node(id);
         return [id, node.qualifiedName] as const;
       } catch {
         // A name is a convenience; the guard is still readable without it.
@@ -348,7 +346,7 @@ async function focusTable(table: TableSummary): Promise<void> {
   detail.value = null;
   loadingDetail.value = true;
   try {
-    detail.value = await api.tableDetail(workspaceId.value, table.id);
+    detail.value = await api.tableDetail(table.id);
   } catch (error) {
     if (error instanceof UnauthenticatedError) return;
     failure.value = error instanceof Error ? error.message : "Could not read that table.";

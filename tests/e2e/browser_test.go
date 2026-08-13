@@ -18,7 +18,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"testing"
 	"time"
 
@@ -33,15 +32,9 @@ func (g *browserFixtureIDs) Next(context.Context) (int64, error) {
 	return g.next, nil
 }
 
-// TestBrowserConsoleBootstrapsAProject drives the console the way an operator
-// does. The relation lifecycle it used to cover moved to the API surface when
-// the vanilla panels were retired.
-func TestBrowserConsoleBootstrapsAProject(t *testing.T) {
-	// The Vue console replaced the vanilla panels this flow drives: its
-	// selectors, its "Add data source" copy, and its single-project data
-	// source model are all gone. Rewriting the flow against the new console
-	// is deferred until the console's own shape settles.
-	t.Skip("browser flow predates the Vue console; pending a rewrite against it")
+// TestBrowserConsoleManagesDataSources drives the projectless Vue console the
+// way an operator does: sign in, register a source, and reload its stable URL.
+func TestBrowserConsoleManagesDataSources(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the browser process lifecycle assertion requires Unix signals")
 	}
@@ -54,7 +47,7 @@ func TestBrowserConsoleBootstrapsAProject(t *testing.T) {
 	// The flow stores a connection string, which requires a sealing key.
 	secretKey := createBrowserToken(t)
 	databasePath := filepath.Join(testDirectory, "dbgraph.sqlite")
-	projectID, _, _ := seedBrowserDatabase(t, databasePath)
+	seedBrowserDatabase(t, databasePath)
 	certificatePath, keyPath := createLoopbackCertificate(t, testDirectory)
 	binaryPath := filepath.Join(testDirectory, "dbgraph")
 	build := exec.Command("go", "build", "-o", binaryPath, "../../cmd/dbgraph")
@@ -96,7 +89,6 @@ func TestBrowserConsoleBootstrapsAProject(t *testing.T) {
 	browser.Env = append(os.Environ(),
 		"DBGRAPH_BROWSER_BASE_URL="+baseURL,
 		"DBGRAPH_BROWSER_TOKEN="+adminToken,
-		"DBGRAPH_BROWSER_PROJECT_ID="+strconv.FormatInt(projectID, 10),
 		"DBGRAPH_BROWSER_ARTIFACTS="+testDirectory,
 	)
 	if output, err := browser.CombinedOutput(); err != nil {
@@ -125,7 +117,7 @@ func createBrowserToken(t *testing.T) string {
 	return hex.EncodeToString(random)
 }
 
-func seedBrowserDatabase(t *testing.T, databasePath string) (int64, int64, int64) {
+func seedBrowserDatabase(t *testing.T, databasePath string) {
 	t.Helper()
 	ctx := context.Background()
 	store, err := dbsqlite.Open(ctx, dbsqlite.Config{Path: databasePath})
@@ -134,14 +126,9 @@ func seedBrowserDatabase(t *testing.T, databasePath string) (int64, int64, int64
 	}
 	ids := &browserFixtureIDs{next: 100}
 	now := time.Date(2026, time.August, 11, 19, 0, 0, 0, time.UTC)
-	project, err := catalog.NewProjectService(dbsqlite.NewProjectRepository(store), ids, func() time.Time { return now }).Create(
-		ctx, catalog.CreateProject{Name: "Browser E2E"},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
 	catalogService := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return now })
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
+
 		Name: "browser-fixture", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "BROWSER_E2E_MYSQL_DSN",
 	})
@@ -149,6 +136,7 @@ func seedBrowserDatabase(t *testing.T, databasePath string) (int64, int64, int64
 		t.Fatal(err)
 	}
 	_, err = catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		DataSourceID: dataSource.ID,
 		Nodes: []catalog.NodeInput{
 			{StableKey: "database:e2e", Kind: catalog.NodeDatabase, Name: "e2e", QualifiedName: "mysql://e2e"},
 			{StableKey: "schema:e2e", ParentStableKey: "database:e2e", Kind: catalog.NodeSchema, Name: "e2e", QualifiedName: "e2e"},
@@ -160,18 +148,9 @@ func seedBrowserDatabase(t *testing.T, databasePath string) (int64, int64, int64
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err := catalogService.FindCurrentNode(ctx, project.ID, dataSource.ID, "e2e.mapping.source_value")
-	if err != nil {
-		t.Fatal(err)
-	}
-	target, err := catalogService.FindCurrentNode(ctx, project.ID, dataSource.ID, "e2e.mapping.target_value")
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	return project.ID, source.ID, target.ID
 }
 
 func createLoopbackCertificate(t *testing.T, directory string) (string, string) {

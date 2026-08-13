@@ -59,7 +59,7 @@ SELECT EXISTS(
 INSERT INTO relation_init_sessions(
     id, repository_id, mode, source_commit, scope_json,
     status, actor, origin, request_id, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
 			session.ID,
 			session.RepositoryID,
@@ -267,7 +267,7 @@ INSERT OR IGNORE INTO relation_origins(
 INSERT INTO unresolved_findings(
     id, repository_id, session_id, batch_id, fingerprint,
     finding_type, summary, evidence_json, status, actor, origin, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
 				finding.ID,
 				finding.RepositoryID,
@@ -640,7 +640,7 @@ func insertInitAudit(
 INSERT INTO audit_events(
     id, actor, origin, action, subject_type, subject_id,
     reason, request_id, expected_revision_no, details_json, occurred_at
-) VALUES (?, ?, ?, ?, ?, 'RELATION_INIT_SESSION', ?, ?, ?, ?, '{}', ?)
+) VALUES (?, ?, ?, ?, 'RELATION_INIT_SESSION', ?, ?, ?, ?, '{}', ?)
 `,
 		auditID,
 		principal.Actor,

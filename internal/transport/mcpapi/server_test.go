@@ -17,15 +17,13 @@ func (statusStub) Status(context.Context) (appstatus.Snapshot, error) {
 }
 
 type catalogStub struct {
-	projectID int64
 }
 
-func (s *catalogStub) FindCurrentNode(context.Context, string) (catalog.Node, error) {
+func (s *catalogStub) FindCurrentNode(context.Context, int64, string) (catalog.Node, error) {
 	return catalog.Node{}, nil
 }
 
-func (s *catalogStub) SearchCurrentNodes(_ context.Context, _ string, _ int) ([]catalog.Node, error) {
-	s.projectID = projectID
+func (s *catalogStub) SearchCurrentNodes(_ context.Context, _ int64, _ string, _ int) ([]catalog.Node, error) {
 	return []catalog.Node{{ID: 9_007_199_254_740_993, Kind: catalog.NodeColumn, QualifiedName: "app.orders.id"}}, nil
 }
 
@@ -59,11 +57,13 @@ func TestServerPublishesTheCompleteMCPToolSurfaceAndStringIDs(t *testing.T) {
 		"dbgraph_status", "dbgraph_suppress_relation", "dbgraph_trace",
 	}
 	got := make([]string, 0, len(tools.Tools))
+	schemas := make(map[string]map[string]any, len(tools.Tools))
 	var proposalSchema map[string]any
 	var initSchema map[string]any
 	var scanSchema map[string]any
 	for _, tool := range tools.Tools {
 		got = append(got, tool.Name)
+		schemas[tool.Name], _ = tool.InputSchema.(map[string]any)
 		if tool.Name == "dbgraph_propose_relation" {
 			proposalSchema, _ = tool.InputSchema.(map[string]any)
 		}
@@ -77,8 +77,16 @@ func TestServerPublishesTheCompleteMCPToolSurfaceAndStringIDs(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("tools = %v, want %v", got, want)
 	}
+	assertSchemaProperties(t, schemas["dbgraph_search_nodes"], "query", "limit")
+	assertSchemaProperties(t, schemas["dbgraph_get_node"], "dataSourceId", "qualifiedName")
+	assertSchemaProperties(t, schemas["dbgraph_list_proposals"], "limit")
+	assertSchemaProperties(t, schemas["dbgraph_list_unresolved"], "limit")
+	assertSchemaProperties(t, schemas["dbgraph_start_schema_scan"], "dataSourceId")
+	assertSchemaProperties(t, schemas["dbgraph_begin_relation_init"], "repositoryId", "mode")
+	assertSchemaProperties(t, schemas["dbgraph_trace"], "startNodeId", "targetNodeId")
+	assertSchemaProperties(t, schemas["dbgraph_impact"], "startNodeId", "targetNodeId")
 	properties, _ := proposalSchema["properties"].(map[string]any)
-	if proposalSchema["additionalProperties"] != false || properties["projectId"] == nil || properties["role"] != nil {
+	if proposalSchema["additionalProperties"] != false || properties["role"] != nil {
 		t.Fatalf("proposal schema = %#v", proposalSchema)
 	}
 	scanProperties, _ := scanSchema["properties"].(map[string]any)
@@ -101,9 +109,6 @@ func TestServerPublishesTheCompleteMCPToolSurfaceAndStringIDs(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("search returned a tool error: %v", result.Content)
 	}
-	if catalogService.projectID != 9_007_199_254_740_993 {
-		t.Fatalf("project ID = %d", catalogService.projectID)
-	}
 	structured, ok := result.StructuredContent.(map[string]any)
 	if !ok {
 		t.Fatalf("structured content type = %T", result.StructuredContent)
@@ -115,6 +120,16 @@ func TestServerPublishesTheCompleteMCPToolSurfaceAndStringIDs(t *testing.T) {
 	node, ok := nodes[0].(map[string]any)
 	if !ok || node["id"] != "9007199254740993" {
 		t.Fatalf("node = %#v", nodes[0])
+	}
+}
+
+func assertSchemaProperties(t *testing.T, schema map[string]any, names ...string) {
+	t.Helper()
+	properties, _ := schema["properties"].(map[string]any)
+	for _, name := range names {
+		if properties[name] == nil {
+			t.Fatalf("schema property %q is missing: %#v", name, schema)
+		}
 	}
 }
 

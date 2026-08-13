@@ -3,6 +3,7 @@ package catalog_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,36 +11,11 @@ import (
 	"github.com/benenen/dbgraph/internal/catalog"
 )
 
-type listProjectStub struct {
-	limit    int
-	projects []catalog.Project
-}
-
-func (s *listProjectStub) CreateProject(context.Context, catalog.Project) error { return nil }
-func (s *listProjectStub) CreateProjectWithAudit(context.Context, catalog.Project, audit.Event) error {
-	return nil
-}
-func (s *listProjectStub) GetProject(context.Context, int64) (catalog.Project, error) {
-	return catalog.Project{}, catalog.ErrProjectNotFound
-}
-func (s *listProjectStub) ArchiveProject(context.Context, int64, time.Time) error { return nil }
-
-func (s *listProjectStub) UpdateProjectWithAudit(context.Context, catalog.Project, audit.Event) error {
-	return nil
-}
-
-func (s *listProjectStub) ListProjects(_ context.Context, limit int) ([]catalog.Project, error) {
-	s.limit = limit
-	return s.projects, nil
-}
-
-func TestProjectServiceListClampsTheLimit(t *testing.T) {
+func TestCatalogServiceListAllDataSourcesClampsTheLimit(t *testing.T) {
 	t.Parallel()
 
-	now := time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC)
-	stub := &listProjectStub{projects: []catalog.Project{{ID: 10, Name: "orders"}}}
-	service := catalog.NewProjectService(stub, nil, func() time.Time { return now })
-
+	stub := &listCatalogStub{sources: []catalog.DataSource{{ID: 10, Name: "orders"}}}
+	service := catalog.NewService(stub, nil, time.Now)
 	tests := []struct {
 		name      string
 		limit     int
@@ -52,12 +28,12 @@ func TestProjectServiceListClampsTheLimit(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			projects, err := service.List(context.Background(), test.limit)
+			sources, err := service.ListAllDataSources(context.Background(), test.limit)
 			if err != nil {
-				t.Fatalf("List: %v", err)
+				t.Fatalf("ListAllDataSources: %v", err)
 			}
-			if len(projects) != 1 {
-				t.Fatalf("projects = %#v", projects)
+			if len(sources) != 1 {
+				t.Fatalf("sources = %#v", sources)
 			}
 			if stub.limit != test.wantLimit {
 				t.Fatalf("repository limit = %d, want %d", stub.limit, test.wantLimit)
@@ -66,70 +42,136 @@ func TestProjectServiceListClampsTheLimit(t *testing.T) {
 	}
 }
 
-func TestListMethodsRejectAnInvalidProject(t *testing.T) {
+func TestCodeRepositoryServiceListClampsTheLimit(t *testing.T) {
 	t.Parallel()
 
-	catalogService := catalog.NewService(&listCatalogStub{}, nil, time.Now)
-	if _, err := catalogService.ListDataSources(context.Background(), 0, 10); !errors.Is(err, catalog.ErrInvalidDataSource) {
-		t.Fatalf("ListDataSources error = %v, want ErrInvalidDataSource", err)
+	stub := &listRepositoryStub{repositories: []catalog.CodeRepository{{ID: 10, Name: "orders"}}}
+	service := catalog.NewCodeRepositoryService(stub, nil, time.Now)
+	tests := []struct {
+		name      string
+		limit     int
+		wantLimit int
+	}{
+		{name: "zero uses the default", limit: 0, wantLimit: catalog.DefaultListLimit},
+		{name: "negative uses the default", limit: -5, wantLimit: catalog.DefaultListLimit},
+		{name: "above the ceiling clamps", limit: 5000, wantLimit: catalog.MaximumListLimit},
+		{name: "inside the range passes through", limit: 7, wantLimit: 7},
 	}
-
-	repositoryService := catalog.NewCodeRepositoryService(&listRepositoryStub{}, nil, time.Now)
-	if _, err := repositoryService.List(context.Background(), -1, 10); !errors.Is(err, catalog.ErrInvalidRepository) {
-		t.Fatalf("List error = %v, want ErrInvalidRepository", err)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repositories, err := service.List(context.Background(), test.limit)
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			if len(repositories) != 1 {
+				t.Fatalf("repositories = %#v", repositories)
+			}
+			if stub.limit != test.wantLimit {
+				t.Fatalf("repository limit = %d, want %d", stub.limit, test.wantLimit)
+			}
+		})
 	}
 }
 
-type listCatalogStub struct{ sources []catalog.DataSource }
+func TestCatalogServiceBrowsesTablesThroughTheOptionalReadInterfaces(t *testing.T) {
+	t.Parallel()
 
-func (s *listCatalogStub) CreateDataSource(context.Context, catalog.DataSource, int64) error {
-	return nil
+	detail := catalog.TableDetail{Table: catalog.TableSummary{ID: 12, Name: "orders", QualifiedName: "app.orders"}}
+	stub := &listCatalogStub{
+		tables: []catalog.TableSummary{detail.Table},
+		detail: detail,
+	}
+	service := catalog.NewService(stub, nil, time.Now)
+
+	tables, err := service.ListTables(context.Background(), 9, "orders", 0)
+	if err != nil {
+		t.Fatalf("ListTables: %v", err)
+	}
+	if len(tables) != 1 || tables[0] != detail.Table {
+		t.Fatalf("tables = %#v", tables)
+	}
+	if stub.dataSourceID != 9 || stub.filter != "orders" || stub.tableLimit != catalog.MaximumTableListLimit {
+		t.Fatalf("list input = dataSource:%d filter:%q limit:%d", stub.dataSourceID, stub.filter, stub.tableLimit)
+	}
+
+	gotDetail, err := service.TableDetail(context.Background(), detail.Table.ID)
+	if err != nil {
+		t.Fatalf("TableDetail: %v", err)
+	}
+	if gotDetail.Table != detail.Table || stub.tableID != detail.Table.ID {
+		t.Fatalf("detail = %#v, table ID = %d", gotDetail, stub.tableID)
+	}
+
+	if _, err := service.ListTables(context.Background(), 0, "", 10); !errors.Is(err, catalog.ErrInvalidDataSource) {
+		t.Fatalf("invalid data source error = %v", err)
+	}
+	if _, err := service.ListTables(context.Background(), 9, strings.Repeat("x", 201), 10); !errors.Is(err, catalog.ErrInvalidDataSource) {
+		t.Fatalf("long filter error = %v", err)
+	}
+	if _, err := service.TableDetail(context.Background(), 0); !errors.Is(err, catalog.ErrInvalidDataSource) {
+		t.Fatalf("invalid table error = %v", err)
+	}
 }
-func (s *listCatalogStub) CreateDataSourceWithAudit(context.Context, catalog.DataSource, int64, audit.Event) error {
+
+type listCatalogStub struct {
+	sources      []catalog.DataSource
+	tables       []catalog.TableSummary
+	detail       catalog.TableDetail
+	limit        int
+	dataSourceID int64
+	filter       string
+	tableLimit   int
+	tableID      int64
+}
+
+func (s *listCatalogStub) CreateDataSource(context.Context, catalog.DataSource) error { return nil }
+func (s *listCatalogStub) CreateDataSourceWithAudit(context.Context, catalog.DataSource, audit.Event) error {
 	return nil
 }
 func (s *listCatalogStub) GetDataSource(context.Context, int64) (catalog.DataSource, error) {
 	return catalog.DataSource{}, catalog.ErrDataSourceNotFound
 }
-
-func (s *listCatalogStub) GetProjectDataSource(ctx context.Context, _ int64, dataSourceID int64) (catalog.DataSource, error) {
-	return s.GetDataSource(ctx, dataSourceID)
-}
-func (s *listCatalogStub) ListDataSources(context.Context, int64, int) ([]catalog.DataSource, error) {
+func (s *listCatalogStub) ListAllDataSources(_ context.Context, limit int) ([]catalog.DataSource, error) {
+	s.limit = limit
 	return s.sources, nil
 }
-
-func (s *listCatalogStub) ListAllDataSources(context.Context, int) ([]catalog.DataSource, error) {
-	return s.sources, nil
-}
-
-func (s *listCatalogStub) LinkDataSource(context.Context, int64, int64, time.Time) error { return nil }
-
-func (s *listCatalogStub) UnlinkDataSource(context.Context, int64, int64) error { return nil }
-
-func (s *listCatalogStub) DeleteDataSource(context.Context, int64) error { return nil }
-
 func (s *listCatalogStub) UpdateDataSourceWithAudit(context.Context, catalog.DataSource, bool, audit.Event) error {
 	return nil
 }
-func (s *listCatalogStub) BeginSchemaScan(context.Context, catalog.SchemaScanRun) error { return nil }
+func (s *listCatalogStub) DeleteDataSource(context.Context, int64) error { return nil }
+func (s *listCatalogStub) BeginSchemaScan(context.Context, catalog.SchemaScanRun) error {
+	return nil
+}
 func (s *listCatalogStub) FailSchemaScan(context.Context, catalog.SchemaScanFailure) error {
 	return nil
 }
 func (s *listCatalogStub) PublishSnapshot(context.Context, catalog.SnapshotPublication) (catalog.PublishedSnapshot, error) {
 	return catalog.PublishedSnapshot{}, nil
 }
-func (s *listCatalogStub) FindCurrentNode(context.Context, int64, int64, string) (catalog.Node, error) {
+func (s *listCatalogStub) FindCurrentNode(context.Context, int64, string) (catalog.Node, error) {
 	return catalog.Node{}, catalog.ErrNodeNotFound
 }
-func (s *listCatalogStub) GetCurrentNode(context.Context, int64, int64) (catalog.Node, error) {
+func (s *listCatalogStub) GetCurrentNode(context.Context, int64) (catalog.Node, error) {
 	return catalog.Node{}, catalog.ErrNodeNotFound
 }
-func (s *listCatalogStub) SearchCurrentNodes(context.Context, int64, int64, string, int) ([]catalog.Node, error) {
+func (s *listCatalogStub) SearchCurrentNodes(context.Context, int64, string, int) ([]catalog.Node, error) {
 	return nil, nil
 }
+func (s *listCatalogStub) ListTables(_ context.Context, dataSourceID int64, filter string, limit int) ([]catalog.TableSummary, error) {
+	s.dataSourceID = dataSourceID
+	s.filter = filter
+	s.tableLimit = limit
+	return s.tables, nil
+}
+func (s *listCatalogStub) LoadTableDetail(_ context.Context, tableID int64) (catalog.TableDetail, error) {
+	s.tableID = tableID
+	return s.detail, nil
+}
 
-type listRepositoryStub struct{ repositories []catalog.CodeRepository }
+type listRepositoryStub struct {
+	repositories []catalog.CodeRepository
+	limit        int
+}
 
 func (s *listRepositoryStub) CreateCodeRepository(context.Context, catalog.CodeRepository) error {
 	return nil
@@ -140,6 +182,7 @@ func (s *listRepositoryStub) CreateCodeRepositoryWithAudit(context.Context, cata
 func (s *listRepositoryStub) GetCodeRepository(context.Context, int64) (catalog.CodeRepository, error) {
 	return catalog.CodeRepository{}, catalog.ErrRepositoryNotFound
 }
-func (s *listRepositoryStub) ListCodeRepositories(context.Context, int64, int) ([]catalog.CodeRepository, error) {
+func (s *listRepositoryStub) ListCodeRepositories(_ context.Context, limit int) ([]catalog.CodeRepository, error) {
+	s.limit = limit
 	return s.repositories, nil
 }

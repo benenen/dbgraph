@@ -112,25 +112,10 @@ func (s *schemaScanStore) GetJob(_ context.Context, jobID int64) (jobs.Job, erro
 
 type dataSourceCatalog struct {
 	source catalog.DataSource
-	// linkedProject is the only project that may scan the source, mirroring
-	// project_data_sources.
-	linkedProject int64
 }
 
 func (s dataSourceCatalog) GetDataSource(context.Context, int64) (catalog.DataSource, error) {
 	return s.source, nil
-}
-
-// The link is what authorizes a scan, so the double answers only for the
-// project that owns the fixture.
-func (s dataSourceCatalog) GetProjectDataSource(
-	ctx context.Context,
-	dataSourceID int64,
-) (catalog.DataSource, error) {
-	if s.linkedProject != 0 && projectID != s.linkedProject {
-		return catalog.DataSource{}, catalog.ErrDataSourceNotFound
-	}
-	return s.GetDataSource(ctx, dataSourceID)
 }
 
 type schemaRunner struct {
@@ -149,11 +134,11 @@ type incrementalJobRunner struct {
 	result catalog.PublishedSnapshot
 }
 
-func (r incrementalJobRunner) Run(context.Context, int64, int64) (catalog.PublishedSnapshot, error) {
+func (r incrementalJobRunner) Run(context.Context, int64) (catalog.PublishedSnapshot, error) {
 	return catalog.PublishedSnapshot{}, errors.New("full schema scan was called")
 }
 
-func (r incrementalJobRunner) RunIncremental(_ context.Context, _ int64, dataSourceID int64,
+func (r incrementalJobRunner) RunIncremental(_ context.Context, dataSourceID int64,
 	tables []string,
 ) (catalog.PublishedSnapshot, error) {
 	if dataSourceID != 8 {
@@ -180,6 +165,7 @@ func TestSchemaScanCoordinatorDispatchesIncrementalTableScope(t *testing.T) {
 		func() time.Time { return fixedTime },
 	)
 	if _, err := coordinator.Start(context.Background(), jobs.StartSchemaScan{
+		DataSourceID: 8, Mode: jobs.SchemaScanIncremental,
 		Tables:    []string{"learn.orders"},
 		Principal: relations.Principal{Actor: "admin", Role: relations.RoleAdmin, Origin: audit.OriginAgent},
 		Reason:    "Refresh changed table", RequestID: "scan-incremental-1",
@@ -218,8 +204,9 @@ func TestSchemaScanCoordinatorQueuesAuditsAndCompletesJob(t *testing.T) {
 	)
 
 	created, err := coordinator.Start(context.Background(), jobs.StartSchemaScan{
-		Principal: relations.Principal{Actor: "admin", Role: relations.RoleAdmin, Origin: audit.OriginAgent},
-		Reason:    "Refresh source metadata", RequestID: "scan-1",
+		DataSourceID: 8,
+		Principal:    relations.Principal{Actor: "admin", Role: relations.RoleAdmin, Origin: audit.OriginAgent},
+		Reason:       "Refresh source metadata", RequestID: "scan-1",
 	})
 	if err != nil {
 		t.Fatalf("start schema scan: %v", err)
@@ -267,30 +254,24 @@ func TestSchemaScanCoordinatorQueuesAuditsAndCompletesJob(t *testing.T) {
 	}
 }
 
-func TestSchemaScanCoordinatorRejectsUnauthorizedOrMismatchedProject(t *testing.T) {
+func TestSchemaScanCoordinatorRejectsUnauthorizedStart(t *testing.T) {
 	t.Parallel()
 
 	store := &schemaScanStore{completed: make(chan jobs.Job, 1)}
 	coordinator := jobs.NewSchemaScanCoordinator(
 		store,
-		dataSourceCatalog{source: catalog.DataSource{ID: 8, Kind: catalog.DataSourceMySQL}, linkedProject: 7},
+		dataSourceCatalog{source: catalog.DataSource{ID: 8, Kind: catalog.DataSourceMySQL}},
 		schemaRunner{called: make(chan int64, 1)},
 		&sequenceIDs{},
 		time.Now,
 	)
 	viewer := jobs.StartSchemaScan{
-		Principal: relations.Principal{Actor: "viewer", Role: relations.RoleViewer, Origin: audit.OriginWeb},
-		Reason:    "Refresh source metadata", RequestID: "scan-2",
+		DataSourceID: 8,
+		Principal:    relations.Principal{Actor: "viewer", Role: relations.RoleViewer, Origin: audit.OriginWeb},
+		Reason:       "Refresh source metadata", RequestID: "scan-2",
 	}
 	if _, err := coordinator.Start(context.Background(), viewer); !errors.Is(err, jobs.ErrForbidden) {
 		t.Fatalf("viewer start error = %v, want forbidden", err)
-	}
-	viewer.Principal = relations.Principal{Actor: "admin", Role: relations.RoleAdmin, Origin: audit.OriginWeb}
-	viewer.ProjectID = 9
-	// A project that has not linked the source is told the source does not
-	// exist, rather than that it exists and belongs to someone else.
-	if _, err := coordinator.Start(context.Background(), viewer); !errors.Is(err, catalog.ErrDataSourceNotFound) {
-		t.Fatalf("cross-project start error = %v, want data source not found", err)
 	}
 	if store.job.ID != 0 || store.audit.ID != 0 {
 		t.Fatalf("rejected command persisted state: job=%#v audit=%#v", store.job, store.audit)
@@ -308,13 +289,9 @@ func TestSchemaScanCoordinatorPersistsLifecycleAndAudit(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	fixedTime := time.Date(2026, 8, 11, 15, 0, 0, 0, time.UTC)
 	ids := &sequenceIDs{next: 1_000}
-	projectService := catalog.NewProjectService(dbsqlite.NewProjectRepository(store), ids, func() time.Time { return fixedTime })
-	project, err := projectService.Create(ctx, catalog.CreateProject{Name: "Integration"})
-	if err != nil {
-		t.Fatal(err)
-	}
 	catalogService := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 	source, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
+
 		Name: "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "PRIMARY_MYSQL_DSN",
 	})
 	if err != nil {
@@ -327,8 +304,9 @@ func TestSchemaScanCoordinatorPersistsLifecycleAndAudit(t *testing.T) {
 		dbsqlite.NewJobRepository(store), catalogService, runner, ids, func() time.Time { return fixedTime },
 	)
 	job, err := coordinator.Start(ctx, jobs.StartSchemaScan{
-		Principal: relations.Principal{Actor: "admin", Role: relations.RoleAdmin, Origin: audit.OriginWeb},
-		Reason:    "Run integration scan", RequestID: "web-request-1",
+		DataSourceID: source.ID,
+		Principal:    relations.Principal{Actor: "admin", Role: relations.RoleAdmin, Origin: audit.OriginWeb},
+		Reason:       "Run integration scan", RequestID: "web-request-1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -348,7 +326,7 @@ func TestSchemaScanCoordinatorPersistsLifecycleAndAudit(t *testing.T) {
 	if persisted.Status != jobs.StatusSucceeded || persisted.RevisionNo != 3 {
 		t.Fatalf("persisted job = %#v, err=%v", persisted, err)
 	}
-	events, err := dbsqlite.NewAuditRepository(store).ListAuditEvents(ctx, project.ID, 10)
+	events, err := dbsqlite.NewAuditRepository(store).ListAuditEvents(ctx, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

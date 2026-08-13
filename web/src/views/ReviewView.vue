@@ -12,7 +12,6 @@ import { conditionNodeIds, describeCondition } from "@/lib/conditions";
 
 const toast = useToast();
 
-const workspaceId = ref("");
 const proposals = ref<Relation[]>([]);
 const loading = ref(true);
 const failure = ref("");
@@ -29,13 +28,7 @@ async function load(): Promise<void> {
   loading.value = true;
   failure.value = "";
   try {
-    const projects = await api.listProjects();
-    workspaceId.value = projects[0]?.id ?? "";
-    if (!workspaceId.value) {
-      failure.value = "The server has no workspace yet.";
-      return;
-    }
-    const listed = await api.listProposals(workspaceId.value);
+    const listed = await api.listProposals();
     proposals.value = listed.relations;
     await resolveNames(listed.relations);
   } catch (error) {
@@ -57,7 +50,7 @@ async function resolveNames(relations: Relation[]): Promise<void> {
   const resolved = await Promise.all(
     missing.map(async (id) => {
       try {
-        const node = await api.node(workspaceId.value, id);
+        const node = await api.node(id);
         return [id, node.qualifiedName] as const;
       } catch {
         // A name is a convenience; a proposal is still reviewable without it.
@@ -108,7 +101,7 @@ async function decide(relation: Relation, decision: "APPROVE" | "REJECT"): Promi
     // expectedRevisionNo is the concurrency check: if someone revised this
     // proposal since the page loaded, the server refuses instead of
     // overwriting a decision made against different content.
-    await api.reviewRelation(workspaceId.value, relation.id, {
+    await api.reviewRelation(relation.id, {
       expectedRevisionNo: revision.revisionNo,
       decision,
       reason,

@@ -36,7 +36,7 @@ func TestRelationCommandsPublishOnlyApprovedRevisions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create ID generator: %v", err)
 	}
-	project, dataSource, nodes := createRelationCatalogFixture(t, ctx, store, ids, fixedTime)
+	dataSource, nodes := createRelationCatalogFixture(t, ctx, store, ids, fixedTime)
 	repository := dbsqlite.NewRelationRepository(store)
 	commands := relations.NewCommands(repository, ids, func() time.Time { return fixedTime })
 	editor := relations.Principal{
@@ -51,7 +51,7 @@ func TestRelationCommandsPublishOnlyApprovedRevisions(t *testing.T) {
 	}
 
 	created, err := commands.ProposeCreate(ctx, relations.ProposeCreate{
-		ProjectID:    project.ID,
+
 		Type:         relations.TypeConditionalValueCopy,
 		SourceNodeID: nodes["source"].ID,
 		TargetNodeID: nodes["target"].ID,
@@ -91,7 +91,7 @@ func TestRelationCommandsPublishOnlyApprovedRevisions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("propose relation: %v", err)
 	}
-	if created.ProjectID != project.ID || created.LatestRevisionNo != 1 || created.Proposed == nil {
+	if created.LatestRevisionNo != 1 || created.Proposed == nil {
 		t.Fatalf("created relation = %#v", created)
 	}
 	if created.Active != nil || created.Effective {
@@ -114,7 +114,7 @@ func TestRelationCommandsPublishOnlyApprovedRevisions(t *testing.T) {
 	}
 	symbolMatches, err := catalog.NewService(
 		dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime },
-	).SearchCurrentNodes(ctx, project.ID, 0, "ExampleService.save", 10)
+	).SearchCurrentNodes(ctx, 0, "ExampleService.save", 10)
 	if err != nil {
 		t.Fatalf("search catalog by evidence symbol: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestRelationCommandsPublishOnlyApprovedRevisions(t *testing.T) {
 	}
 	graphService := graph.NewService(dbsqlite.NewGraphRepository(store))
 	trace, err := graphService.Trace(ctx, graph.TraceRequest{
-		ProjectID:   project.ID,
+
 		StartNodeID: nodes["source"].ID,
 		Direction:   graph.DirectionDownstream,
 		Context: conditions.Context{Columns: map[int64]json.RawMessage{
@@ -175,9 +175,9 @@ func TestRelationCommandsPublishOnlyApprovedRevisions(t *testing.T) {
 		t.Fatalf("pending revision replaced active graph: %#v", revised)
 	}
 	pendingTrace, err := graphService.Trace(ctx, graph.TraceRequest{
-		ProjectID: project.ID, StartNodeID: nodes["source"].ID,
-		Direction: graph.DirectionDownstream,
-		Limits:    graph.Limits{MaxDepth: 2, MaxNodes: 10, MaxPaths: 10},
+		StartNodeID: nodes["source"].ID,
+		Direction:   graph.DirectionDownstream,
+		Limits:      graph.Limits{MaxDepth: 2, MaxNodes: 10, MaxPaths: 10},
 	})
 	if err != nil {
 		t.Fatalf("trace relation with pending revision: %v", err)
@@ -275,9 +275,9 @@ func TestRelationCommandsPublishOnlyApprovedRevisions(t *testing.T) {
 		t.Fatalf("approved tombstone left effective graph active: %#v", tombstoned)
 	}
 	trace, err = graphService.Trace(ctx, graph.TraceRequest{
-		ProjectID: project.ID, StartNodeID: nodes["source"].ID,
-		Direction: graph.DirectionDownstream,
-		Limits:    graph.Limits{MaxDepth: 2, MaxNodes: 10, MaxPaths: 10},
+		StartNodeID: nodes["source"].ID,
+		Direction:   graph.DirectionDownstream,
+		Limits:      graph.Limits{MaxDepth: 2, MaxNodes: 10, MaxPaths: 10},
 	})
 	if err != nil {
 		t.Fatalf("trace tombstoned relation: %v", err)
@@ -286,7 +286,7 @@ func TestRelationCommandsPublishOnlyApprovedRevisions(t *testing.T) {
 		t.Fatalf("tombstoned relation remained traversable: %#v", trace.Paths)
 	}
 
-	auditEvents, err := dbsqlite.NewAuditRepository(store).ListAuditEvents(ctx, project.ID, 20)
+	auditEvents, err := dbsqlite.NewAuditRepository(store).ListAuditEvents(ctx, 20)
 	if err != nil {
 		t.Fatalf("list relation audit events: %v", err)
 	}
@@ -302,24 +302,15 @@ func createRelationCatalogFixture(
 	store *dbsqlite.Store,
 	ids *id.Generator,
 	fixedTime time.Time,
-) (catalog.Project, catalog.DataSource, map[string]catalog.Node) {
+) (catalog.DataSource, map[string]catalog.Node) {
 	t.Helper()
-	projectService := catalog.NewProjectService(
-		dbsqlite.NewProjectRepository(store),
-		ids,
-		func() time.Time { return fixedTime },
-	)
-	project, err := projectService.Create(ctx, catalog.CreateProject{Name: "Relation Test"})
-	if err != nil {
-		t.Fatalf("create project: %v", err)
-	}
 	catalogService := catalog.NewService(
 		dbsqlite.NewCatalogRepository(store, ids),
 		ids,
 		func() time.Time { return fixedTime },
 	)
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID:      project.ID,
+
 		Name:           "primary",
 		Kind:           catalog.DataSourceMySQL,
 		DSNEnvironment: "DBGRAPH_RELATION_TEST_DSN",
@@ -339,7 +330,7 @@ func createRelationCatalogFixture(
 		{StableKey: "column:learn.b.x", ParentStableKey: "table:learn.b", Kind: catalog.NodeColumn, Name: "x", QualifiedName: "learn.b.x", DataType: "varchar(255)", Ordinal: 2},
 	}
 	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID:    project.ID,
+
 		DataSourceID: dataSource.ID,
 		Nodes:        inputs,
 	}); err != nil {
@@ -353,11 +344,11 @@ func createRelationCatalogFixture(
 		"selector_left":  "learn.a.b_id",
 		"selector_right": "learn.b.id",
 	} {
-		node, err := catalogService.FindCurrentNode(ctx, project.ID, dataSource.ID, qualifiedName)
+		node, err := catalogService.FindCurrentNode(ctx, dataSource.ID, qualifiedName)
 		if err != nil {
 			t.Fatalf("find fixture node %q: %v", qualifiedName, err)
 		}
 		nodes[key] = node
 	}
-	return project, dataSource, nodes
+	return dataSource, nodes
 }

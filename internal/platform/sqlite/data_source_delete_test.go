@@ -54,6 +54,7 @@ func TestDeleteDataSourceRefusesOneThatImportedACatalog(t *testing.T) {
 	ctx, repository, service := newDeleteFixture(t)
 
 	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		DataSourceID: 30,
 		Nodes: []catalog.NodeInput{
 			{StableKey: "database:app", Kind: catalog.NodeDatabase, Name: "app", QualifiedName: "mysql://app"},
 		},
@@ -90,16 +91,11 @@ func newDeleteFixture(t *testing.T) (context.Context, *dbsqlite.CatalogRepositor
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := dbsqlite.NewProjectRepository(store).CreateProject(ctx, catalog.Project{
-		ID: 10, Name: "orders", CreatedAt: createdAt, UpdatedAt: createdAt,
-	}); err != nil {
-		t.Fatal(err)
-	}
 	repository := dbsqlite.NewCatalogRepository(store, ids)
 	if err := repository.CreateDataSource(ctx, catalog.DataSource{
 		ID: 30, Name: "orders-primary", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "ORDERS_DSN", CreatedAt: createdAt, UpdatedAt: createdAt,
-	}, 10); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	return ctx, repository, catalog.NewService(repository, ids, func() time.Time { return createdAt })

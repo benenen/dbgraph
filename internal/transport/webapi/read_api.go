@@ -203,7 +203,7 @@ func (h *handler) getJob(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	job, err := h.services.Jobs.Get(request.Context(), jobID)
-	if errors.Is(err, jobs.ErrJobNotFound) || (err == nil && false) {
+	if errors.Is(err, jobs.ErrJobNotFound) {
 		writeError(response, http.StatusNotFound, "NOT_FOUND", "job not found", nil)
 		return
 	}
@@ -225,7 +225,7 @@ func (h *handler) getInitSession(response http.ResponseWriter, request *http.Req
 		return
 	}
 	session, err := h.services.Reconcile.Get(request.Context(), sessionID)
-	if errors.Is(err, reconcile.ErrInitNotFound) || (err == nil && false) {
+	if errors.Is(err, reconcile.ErrInitNotFound) {
 		writeError(response, http.StatusNotFound, "NOT_FOUND", "relation init session not found", nil)
 		return
 	}
@@ -242,7 +242,7 @@ func (h *handler) listAuditEvents(response http.ResponseWriter, request *http.Re
 		return
 	}
 	responseLimit := maximumAuditResponseCount
-	events, err := h.services.Audit.ListProject(request.Context(), responseLimit+1)
+	events, err := h.services.Audit.ListEvents(request.Context(), responseLimit+1)
 	if err != nil {
 		if errors.Is(err, audit.ErrInvalidEvent) {
 			writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "audit query was rejected", nil)

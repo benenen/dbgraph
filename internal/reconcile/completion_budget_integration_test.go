@@ -71,7 +71,7 @@ func TestSQLiteCompletionBudgetFailureIsAtomicAndLeavesSessionOpen(t *testing.T)
 				t.Fatal(err)
 			}
 			auditRepository := dbsqlite.NewAuditRepository(fixture.store)
-			beforeAudit, err := auditRepository.ListAuditEvents(fixture.ctx, fixture.project.ID, 100)
+			beforeAudit, err := auditRepository.ListAuditEvents(fixture.ctx, 100)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -93,7 +93,7 @@ func TestSQLiteCompletionBudgetFailureIsAtomicAndLeavesSessionOpen(t *testing.T)
 			if getErr != nil || relation.LatestRevisionNo != 1 || relation.Proposed != nil || !relation.Effective {
 				t.Fatalf("relation after budget rejection = %#v, error = %v", relation, getErr)
 			}
-			afterAudit, getErr := auditRepository.ListAuditEvents(fixture.ctx, fixture.project.ID, 100)
+			afterAudit, getErr := auditRepository.ListAuditEvents(fixture.ctx, 100)
 			if getErr != nil || len(afterAudit) != len(beforeAudit) {
 				t.Fatalf("audit count after budget rejection = %d, want %d, error = %v", len(afterAudit), len(beforeAudit), getErr)
 			}
@@ -120,6 +120,7 @@ func TestSQLiteOmissionListingStopsAtRemainingBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	omissionSession, err := fixture.service.Begin(fixture.ctx, reconcile.Begin{
+		RepositoryID: fixture.repository.ID, Mode: reconcile.ModeFull,
 		SourceCommit: "bounded-omission", Scope: json.RawMessage(`{}`), Principal: fixture.agent,
 		RequestID: "begin-bounded-omission",
 	})

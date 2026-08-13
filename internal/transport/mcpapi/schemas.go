@@ -5,13 +5,17 @@ func inputSchema(name string) map[string]any {
 	case "dbgraph_status":
 		return strictObject(nil, nil)
 	case "dbgraph_search_nodes":
-		return strictObject(map[string]any{}, []string{"query"})
+		return strictObject(map[string]any{
+			"query": stringSchema(1, 500), "limit": integerSchema(1, 100),
+		}, []string{"query"})
 	case "dbgraph_get_node":
-		return strictObject(map[string]any{}, []string{"dataSourceId", "qualifiedName"})
+		return strictObject(map[string]any{
+			"dataSourceId": idSchema(), "qualifiedName": stringSchema(1, 1000),
+		}, []string{"dataSourceId", "qualifiedName"})
 	case "dbgraph_get_relation", "dbgraph_explain_relation":
 		return strictObject(map[string]any{"relationId": idSchema()}, []string{"relationId"})
 	case "dbgraph_list_proposals":
-		return strictObject(map[string]any{}, nil)
+		return strictObject(map[string]any{"limit": integerSchema(1, 100)}, nil)
 	case "dbgraph_trace", "dbgraph_impact":
 		return traceSchema()
 	case "dbgraph_propose_relation":
@@ -38,10 +42,11 @@ func inputSchema(name string) map[string]any {
 	case "dbgraph_get_relation_init":
 		return strictObject(map[string]any{"sessionId": idSchema()}, []string{"sessionId"})
 	case "dbgraph_list_unresolved":
-		return strictObject(map[string]any{}, nil)
+		return strictObject(map[string]any{"limit": integerSchema(1, 100)}, nil)
 	case "dbgraph_start_schema_scan":
 		return strictObject(map[string]any{
-			"mode": enumSchema("FULL", "INCREMENTAL"),
+			"dataSourceId": idSchema(),
+			"mode":         enumSchema("FULL", "INCREMENTAL"),
 			"tables": map[string]any{
 				"type": "array", "maxItems": 100,
 				"items": stringSchema(3, 1000),
@@ -57,6 +62,7 @@ func inputSchema(name string) map[string]any {
 
 func relationInitBeginSchema() map[string]any {
 	schema := strictObject(map[string]any{
+		"repositoryId": idSchema(), "mode": enumSchema("FULL", "INCREMENTAL"),
 		"sourceCommit": stringSchema(1, 200), "scope": map[string]any{"type": "object"},
 		"requestId": stringSchema(1, 200),
 	}, []string{"repositoryId", "mode", "sourceCommit", "requestId"})
@@ -80,6 +86,7 @@ func relationInitBeginSchema() map[string]any {
 
 func traceSchema() map[string]any {
 	return strictObject(map[string]any{
+		"startNodeId": idSchema(), "targetNodeId": idSchema(),
 		"direction": enumSchema("UPSTREAM", "DOWNSTREAM"),
 		"context": strictObject(map[string]any{
 			"columns":    map[string]any{"type": "object", "maxProperties": 1000},

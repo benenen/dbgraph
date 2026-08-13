@@ -41,18 +41,18 @@ func TestRelationMutationRoutesUseSharedCommands(t *testing.T) {
 		wantStatus int
 		operation  string
 	}{
-		{name: "create", role: relations.RoleEditor, path: "/api/v1/projects/10/relations", body: validRelationBody, wantStatus: http.StatusCreated, operation: "create"},
-		{name: "revise", role: relations.RoleEditor, path: "/api/v1/projects/10/relations/20/revisions", body: validRevisionBody, wantStatus: http.StatusCreated, operation: "revision"},
-		{name: "tombstone", role: relations.RoleEditor, path: "/api/v1/projects/10/relations/20/tombstones", body: `{"expectedRevisionNo":4,"reason":"No longer present"}`, wantStatus: http.StatusCreated, operation: "tombstone"},
-		{name: "approve", role: relations.RoleReviewer, path: "/api/v1/projects/10/relations/20/reviews", body: `{"expectedRevisionNo":4,"decision":"APPROVE","reason":"Evidence verified"}`, wantStatus: http.StatusOK, operation: "review"},
-		{name: "reject", role: relations.RoleAdmin, path: "/api/v1/projects/10/relations/20/reviews", body: `{"expectedRevisionNo":4,"decision":"REJECT","reason":"Evidence contradicted"}`, wantStatus: http.StatusOK, operation: "review"},
-		{name: "suppress", role: relations.RoleReviewer, path: "/api/v1/projects/10/relations/20/suppress", body: `{"expectedRevisionNo":4,"reason":"Temporarily hidden"}`, wantStatus: http.StatusOK, operation: "suppress"},
-		{name: "restore", role: relations.RoleAdmin, path: "/api/v1/projects/10/relations/20/restore", body: `{"expectedRevisionNo":4,"reason":"Visibility restored"}`, wantStatus: http.StatusOK, operation: "restore"},
+		{name: "create", role: relations.RoleEditor, path: "/api/v1/relations", body: validRelationBody, wantStatus: http.StatusCreated, operation: "create"},
+		{name: "revise", role: relations.RoleEditor, path: "/api/v1/relations/20/revisions", body: validRevisionBody, wantStatus: http.StatusCreated, operation: "revision"},
+		{name: "tombstone", role: relations.RoleEditor, path: "/api/v1/relations/20/tombstones", body: `{"expectedRevisionNo":4,"reason":"No longer present"}`, wantStatus: http.StatusCreated, operation: "tombstone"},
+		{name: "approve", role: relations.RoleReviewer, path: "/api/v1/relations/20/reviews", body: `{"expectedRevisionNo":4,"decision":"APPROVE","reason":"Evidence verified"}`, wantStatus: http.StatusOK, operation: "review"},
+		{name: "reject", role: relations.RoleAdmin, path: "/api/v1/relations/20/reviews", body: `{"expectedRevisionNo":4,"decision":"REJECT","reason":"Evidence contradicted"}`, wantStatus: http.StatusOK, operation: "review"},
+		{name: "suppress", role: relations.RoleReviewer, path: "/api/v1/relations/20/suppress", body: `{"expectedRevisionNo":4,"reason":"Temporarily hidden"}`, wantStatus: http.StatusOK, operation: "suppress"},
+		{name: "restore", role: relations.RoleAdmin, path: "/api/v1/relations/20/restore", body: `{"expectedRevisionNo":4,"reason":"Visibility restored"}`, wantStatus: http.StatusOK, operation: "restore"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			service := &relationHTTPStub{relation: relations.Relation{
-				ID: 20, ProjectID: 10, Type: relations.TypeConditionalValueCopy,
+				ID: 20, Type: relations.TypeConditionalValueCopy,
 				LatestRevisionNo: 4, Status: relations.StatusPending, CreatedAt: testWebTime,
 			}}
 			client := newWebTestClient(t, Services{Relations: service}, test.role)
@@ -72,7 +72,7 @@ func TestRelationMutationRoutesUseSharedCommands(t *testing.T) {
 				t.Fatalf("expectedRevisionNo=%d, want 4", expectedRevision)
 			}
 			if test.operation == "create" {
-				if service.create.ProjectID != 10 || service.create.SourceNodeID != 11 || service.create.TargetNodeID != 12 ||
+				if service.create.SourceNodeID != 11 || service.create.TargetNodeID != 12 ||
 					service.create.Guard == nil || service.create.Selector == nil || len(service.create.Evidence) != 1 {
 					t.Fatalf("create command=%#v", service.create)
 				}
@@ -100,14 +100,14 @@ func TestRelationMutationsEnforceRoleAndCSRFBeforeServiceCalls(t *testing.T) {
 		path string
 		body string
 	}{
-		{name: "viewer cannot propose", role: relations.RoleViewer, path: "/api/v1/projects/10/relations", body: validRelationBody},
-		{name: "editor cannot review", role: relations.RoleEditor, path: "/api/v1/projects/10/relations/20/reviews", body: `{"expectedRevisionNo":4,"decision":"APPROVE","reason":"review"}`},
-		{name: "reviewer cannot create", role: relations.RoleReviewer, path: "/api/v1/projects/10/relations", body: validRelationBody},
-		{name: "reviewer cannot tombstone", role: relations.RoleReviewer, path: "/api/v1/projects/10/relations/20/tombstones", body: `{"expectedRevisionNo":4,"reason":"remove"}`},
+		{name: "viewer cannot propose", role: relations.RoleViewer, path: "/api/v1/relations", body: validRelationBody},
+		{name: "editor cannot review", role: relations.RoleEditor, path: "/api/v1/relations/20/reviews", body: `{"expectedRevisionNo":4,"decision":"APPROVE","reason":"review"}`},
+		{name: "reviewer cannot create", role: relations.RoleReviewer, path: "/api/v1/relations", body: validRelationBody},
+		{name: "reviewer cannot tombstone", role: relations.RoleReviewer, path: "/api/v1/relations/20/tombstones", body: `{"expectedRevisionNo":4,"reason":"remove"}`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			service := &relationHTTPStub{relation: relations.Relation{ID: 20, ProjectID: 10}}
+			service := &relationHTTPStub{relation: relations.Relation{ID: 20}}
 			client := newWebTestClient(t, Services{Relations: service}, test.role)
 			response := client.request(http.MethodPost, test.path, test.body, true)
 			assertWebStatus(t, response, http.StatusForbidden, "FORBIDDEN")
@@ -117,9 +117,9 @@ func TestRelationMutationsEnforceRoleAndCSRFBeforeServiceCalls(t *testing.T) {
 		})
 	}
 
-	service := &relationHTTPStub{relation: relations.Relation{ID: 20, ProjectID: 10}}
+	service := &relationHTTPStub{relation: relations.Relation{ID: 20}}
 	client := newWebTestClient(t, Services{Relations: service}, relations.RoleAdmin)
-	withoutCSRF := client.request(http.MethodPost, "/api/v1/projects/10/relations/20/restore", `{"expectedRevisionNo":4,"reason":"restore"}`, false)
+	withoutCSRF := client.request(http.MethodPost, "/api/v1/relations/20/restore", `{"expectedRevisionNo":4,"reason":"restore"}`, false)
 	assertWebStatus(t, withoutCSRF, http.StatusForbidden, "CSRF_REJECTED")
 	if service.mutationCalls != 0 {
 		t.Fatalf("mutation calls=%d", service.mutationCalls)
@@ -145,11 +145,11 @@ func TestRelationDomainErrorsHaveStableHTTPMappings(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			service := &relationHTTPStub{
-				relation:    relations.Relation{ID: 20, ProjectID: 10, Type: relations.TypeConditionalValueCopy, CreatedAt: testWebTime},
+				relation:    relations.Relation{ID: 20, Type: relations.TypeConditionalValueCopy, CreatedAt: testWebTime},
 				mutationErr: test.err,
 			}
 			client := newWebTestClient(t, Services{Relations: service}, relations.RoleEditor)
-			response := client.request(http.MethodPost, "/api/v1/projects/10/relations", validRelationBody, true)
+			response := client.request(http.MethodPost, "/api/v1/relations", validRelationBody, true)
 			assertWebStatus(t, response, test.wantStatus, test.wantCode)
 			if test.wantCode == "REVISION_CONFLICT" {
 				details := decodeWebEnvelope(t, response)["error"].(map[string]any)["details"].(map[string]any)

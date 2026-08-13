@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/benenen/dbgraph/internal/catalog"
 	"github.com/benenen/dbgraph/internal/id"
 	"github.com/benenen/dbgraph/internal/jobs"
 	dbsqlite "github.com/benenen/dbgraph/internal/platform/sqlite"
@@ -33,15 +32,6 @@ func TestServiceCreatesPendingSchemaScanJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create ID generator: %v", err)
 	}
-	projectService := catalog.NewProjectService(
-		dbsqlite.NewProjectRepository(store),
-		idGenerator,
-		func() time.Time { return fixedTime },
-	)
-	project, err := projectService.Create(ctx, catalog.CreateProject{Name: "Learning Platform"})
-	if err != nil {
-		t.Fatalf("create project: %v", err)
-	}
 
 	service := jobs.NewService(
 		dbsqlite.NewJobRepository(store),
@@ -49,6 +39,7 @@ func TestServiceCreatesPendingSchemaScanJob(t *testing.T) {
 		func() time.Time { return fixedTime },
 	)
 	created, err := service.Create(ctx, jobs.CreateJob{
+
 		Type:    jobs.TypeSchemaScan,
 		Payload: []byte(`{"source":"primary"}`),
 	})
@@ -66,7 +57,7 @@ func TestServiceCreatesPendingSchemaScanJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get job: %v", err)
 	}
-	if retrieved.ID != created.ID || retrieved.ProjectID != project.ID {
+	if retrieved.ID != created.ID {
 		t.Fatalf("retrieved job = %#v, want IDs from %#v", retrieved, created)
 	}
 	if string(retrieved.Payload) != `{"source":"primary"}` {

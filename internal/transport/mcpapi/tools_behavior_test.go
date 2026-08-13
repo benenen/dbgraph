@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	testProjectID    int64 = 9_007_199_254_740_993
+	testNodeID       int64 = 9_007_199_254_740_993
 	testRelationID   int64 = 9_007_199_254_740_994
 	testSessionID    int64 = 9_007_199_254_740_995
 	testJobID        int64 = 9_007_199_254_740_996
@@ -30,12 +30,10 @@ const (
 var testMCPTime = time.Date(2026, time.August, 11, 18, 30, 0, 123, time.UTC)
 
 type toolBehaviorStub struct {
-	searchProjectID    int64
 	searchDataSourceID int64
 	searchQuery        string
 	searchLimit        int
 	searchCalls        int
-	findProjectID      int64
 	findDataSource     int64
 	findQualified      string
 
@@ -67,14 +65,14 @@ func (s *toolBehaviorStub) Status(context.Context) (appstatus.Snapshot, error) {
 	}, nil
 }
 
-func (s *toolBehaviorStub) SearchCurrentNodes(_ context.Context, query string, limit int) ([]catalog.Node, error) {
-	s.searchProjectID, s.searchDataSourceID, s.searchQuery, s.searchLimit = projectID, dataSourceID, query, limit
+func (s *toolBehaviorStub) SearchCurrentNodes(_ context.Context, dataSourceID int64, query string, limit int) ([]catalog.Node, error) {
+	s.searchDataSourceID, s.searchQuery, s.searchLimit = dataSourceID, query, limit
 	s.searchCalls++
 	return []catalog.Node{testNode()}, nil
 }
 
-func (s *toolBehaviorStub) FindCurrentNode(_ context.Context, qualifiedName string) (catalog.Node, error) {
-	s.findProjectID, s.findDataSource, s.findQualified = projectID, dataSourceID, qualifiedName
+func (s *toolBehaviorStub) FindCurrentNode(_ context.Context, dataSourceID int64, qualifiedName string) (catalog.Node, error) {
+	s.findDataSource, s.findQualified = dataSourceID, qualifiedName
 	return testNode(), nil
 }
 
@@ -233,17 +231,17 @@ func TestReadToolsParseInputsAndMapStructuredOutputs(t *testing.T) {
 		t.Fatalf("status output = %#v", status)
 	}
 
-	search := callToolOK(t, session, "dbgraph_search_nodes", `{"projectId":"9007199254740993","query":"orders"}`)
-	if stub.searchProjectID != testProjectID || stub.searchDataSourceID != 0 || stub.searchQuery != "orders" || stub.searchLimit != 20 {
-		t.Fatalf("search input = project:%d dataSource:%d query:%q limit:%d",
-			stub.searchProjectID, stub.searchDataSourceID, stub.searchQuery, stub.searchLimit)
+	search := callToolOK(t, session, "dbgraph_search_nodes", `{"query":"orders"}`)
+	if stub.searchDataSourceID != 0 || stub.searchQuery != "orders" || stub.searchLimit != 20 {
+		t.Fatalf("search input = dataSource:%d query:%q limit:%d",
+			stub.searchDataSourceID, stub.searchQuery, stub.searchLimit)
 	}
 	if firstArrayObject(t, search, "nodes")["id"] != "9007199254740993" {
 		t.Fatalf("search output = %#v", search)
 	}
 
-	node := callToolOK(t, session, "dbgraph_get_node", `{"projectId":"9007199254740993","dataSourceId":"9007199254740997","qualifiedName":"app.orders.id"}`)
-	if stub.findProjectID != testProjectID || stub.findDataSource != testDataSourceID || stub.findQualified != "app.orders.id" || node["kind"] != "COLUMN" {
+	node := callToolOK(t, session, "dbgraph_get_node", `{"dataSourceId":"9007199254740997","qualifiedName":"app.orders.id"}`)
+	if stub.findDataSource != testDataSourceID || stub.findQualified != "app.orders.id" || node["kind"] != "COLUMN" {
 		t.Fatalf("get node input/output = %#v; %#v", stub, node)
 	}
 
@@ -266,13 +264,13 @@ func TestReadToolsParseInputsAndMapStructuredOutputs(t *testing.T) {
 		t.Fatalf("explain output = %#v", explained)
 	}
 
-	proposals := callToolOK(t, session, "dbgraph_list_proposals", `{"projectId":"9007199254740993"}`)
+	proposals := callToolOK(t, session, "dbgraph_list_proposals", `{}`)
 	if firstArrayObject(t, proposals, "relations")["id"] != "9007199254740994" {
 		t.Fatalf("proposal output = %#v", proposals)
 	}
 
 	trace := callToolOK(t, session, "dbgraph_trace", `{
-		"projectId":"9007199254740993","startNodeId":"11","targetNodeId":"12","direction":"UPSTREAM",
+		"startNodeId":"11","targetNodeId":"12","direction":"UPSTREAM",
 		"context":{"columns":{"11":9007199254740993},"parameters":{"tenant":"north"}},
 		"maxDepth":4,"maxNodes":30,"maxPaths":5
 	}`)
@@ -282,11 +280,12 @@ func TestReadToolsParseInputsAndMapStructuredOutputs(t *testing.T) {
 	}
 	path := firstArrayObject(t, trace, "paths")
 	step := path["steps"].([]any)[0].(map[string]any)
-	if step["evaluation"].(map[string]any)["truth"] != "UNKNOWN" {
+	edge := step["edge"].(map[string]any)
+	if edge["sourceNodeId"] != "11" || step["evaluation"].(map[string]any)["truth"] != "UNKNOWN" {
 		t.Fatalf("trace output = %#v", trace)
 	}
 
-	callToolOK(t, session, "dbgraph_impact", `{"projectId":"9007199254740993","startNodeId":"11"}`)
+	callToolOK(t, session, "dbgraph_impact", `{"startNodeId":"11"}`)
 	if stub.impactRequest.Direction != graph.DirectionDownstream || stub.impactRequest.Limits != graph.DefaultLimits() {
 		t.Fatalf("impact request = %#v", stub.impactRequest)
 	}
@@ -296,7 +295,7 @@ func TestReadToolsParseInputsAndMapStructuredOutputs(t *testing.T) {
 		t.Fatalf("init session = %#v", initSession)
 	}
 
-	unresolved := callToolOK(t, session, "dbgraph_list_unresolved", `{"projectId":"9007199254740993"}`)
+	unresolved := callToolOK(t, session, "dbgraph_list_unresolved", `{}`)
 	if stub.unresolvedLimit != 21 || firstArrayObject(t, unresolved, "findings")["status"] != "OPEN" {
 		t.Fatalf("unresolved output = %#v", unresolved)
 	}
@@ -313,8 +312,9 @@ func TestAgentToolsForwardCommandsWithAuthenticatedPrincipal(t *testing.T) {
 	session := connectInMemoryClient(t, testServices(stub), principal)
 
 	callToolOK(t, session, "dbgraph_propose_relation", relationCreateArguments())
-	if stub.stub.createCommand.Principal != principal ||
-		stub.createCommand.Type != relations.TypeConditionalValueCopy || len(stub.createCommand.Evidence) != 1 ||
+	if stub.createCommand.Principal != principal ||
+		stub.createCommand.Type != relations.TypeConditionalValueCopy || stub.createCommand.SourceNodeID != 11 ||
+		len(stub.createCommand.Evidence) != 1 ||
 		string(stub.createCommand.Transform.Literal.Value) != "9007199254740993" {
 		t.Fatalf("create command = %#v", stub.createCommand)
 	}
@@ -336,7 +336,7 @@ func TestAgentToolsForwardCommandsWithAuthenticatedPrincipal(t *testing.T) {
 	}
 
 	callToolOK(t, session, "dbgraph_begin_relation_init", `{
-		"projectId":"9007199254740993","repositoryId":"41","mode":"FULL","sourceCommit":"abc123",
+		"repositoryId":"41","mode":"FULL","sourceCommit":"abc123",
 		"scope":{"module":"service","counter":9007199254740993},"requestId":"init-1"
 	}`)
 	if stub.beginCommand.Mode != reconcile.ModeFull || stub.beginCommand.Principal != principal ||
@@ -393,7 +393,7 @@ func TestReviewerAndAdminToolsForwardOnlyAuthorizedCommands(t *testing.T) {
 	}{
 		{"dbgraph_propose_relation", relationCreateArguments()},
 		{"dbgraph_propose_relation_tombstone", relationStateArguments("Reviewer must not tombstone")},
-		{"dbgraph_begin_relation_init", `{"projectId":"9007199254740993","repositoryId":"41","mode":"FULL","sourceCommit":"abc","requestId":"reviewer-init"}`},
+		{"dbgraph_begin_relation_init", `{"repositoryId":"41","mode":"FULL","sourceCommit":"abc","requestId":"reviewer-init"}`},
 	} {
 		result := callTool(t, reviewerSession, forbidden.name, forbidden.arguments)
 		if !result.IsError || reviewerStub.writeCalls != writeCalls {
@@ -409,14 +409,13 @@ func TestReviewerAndAdminToolsForwardOnlyAuthorizedCommands(t *testing.T) {
 	admin := relations.Principal{Actor: "admin", Role: relations.RoleAdmin, Origin: audit.OriginAgent}
 	adminSession := connectInMemoryClient(t, testServices(adminStub), admin)
 	job := callToolOK(t, adminSession, "dbgraph_start_schema_scan", `{
-		"projectId":"9007199254740993","dataSourceId":"9007199254740997",
+		"dataSourceId":"9007199254740997",
 		"mode":"INCREMENTAL","tables":["learn.orders"],
 		"reason":"Refresh source schema","requestId":"scan-1"
 	}`)
-	if adminStub.adminStub.startJobCommand.DataSourceID != testDataSourceID ||
+	if adminStub.startJobCommand.DataSourceID != testDataSourceID || adminStub.startJobCommand.Principal != admin ||
 		adminStub.startJobCommand.Mode != jobs.SchemaScanIncremental || len(adminStub.startJobCommand.Tables) != 1 ||
-		adminStub.startJobCommand.Tables[0] != "learn.orders" || adminStub.startJobCommand.Principal != admin ||
-		adminStub.startJobCommand.Reason != "Refresh source schema" || job["id"] != "9007199254740996" {
+		adminStub.startJobCommand.Tables[0] != "learn.orders" || adminStub.startJobCommand.Reason != "Refresh source schema" || job["id"] != "9007199254740996" {
 		t.Fatalf("start job command/output = %#v; %#v", adminStub.startJobCommand, job)
 	}
 }
@@ -473,13 +472,13 @@ func TestEveryStateChangingToolRejectsAnUnauthorizedRoleBeforeService(t *testing
 		{"dbgraph_propose_relation", ViewerPrincipal(), relationCreateArguments()},
 		{"dbgraph_propose_relation_revision", ViewerPrincipal(), `{"relationId":"9007199254740994","expectedRevisionNo":1,"sourceNodeId":"11","targetNodeId":"12","confidence":1,"transform":{"kind":"column_copy","nodeId":"11"},"evidence":[{"kind":"CODE","repository":"r","commit":"c","file":"f","startLine":1,"endLine":1}],"reason":"r","requestId":"q"}`},
 		{"dbgraph_propose_relation_tombstone", ViewerPrincipal(), relationStateArguments("Remove")},
-		{"dbgraph_begin_relation_init", ViewerPrincipal(), `{"projectId":"9007199254740993","repositoryId":"41","mode":"FULL","sourceCommit":"abc","requestId":"q"}`},
+		{"dbgraph_begin_relation_init", ViewerPrincipal(), `{"repositoryId":"41","mode":"FULL","sourceCommit":"abc","requestId":"q"}`},
 		{"dbgraph_propose_relations", ViewerPrincipal(), `{"sessionId":"9007199254740995","batchNo":1,"idempotencyKey":"k","unresolved":[{"type":"X","summary":"Y","evidence":{}}],"requestId":"q"}`},
 		{"dbgraph_complete_relation_init", ViewerPrincipal(), `{"sessionId":"9007199254740995","expectedBatchCount":1,"reason":"r","requestId":"q"}`},
 		{"dbgraph_review_relation", relations.Principal{Actor: "agent", Role: relations.RoleAgent, Origin: audit.OriginAgent}, `{"relationId":"9007199254740994","expectedRevisionNo":1,"decision":"REJECT","reason":"r","requestId":"q"}`},
 		{"dbgraph_suppress_relation", relations.Principal{Actor: "agent", Role: relations.RoleAgent, Origin: audit.OriginAgent}, relationStateArguments("Suppress")},
 		{"dbgraph_restore_relation", relations.Principal{Actor: "agent", Role: relations.RoleAgent, Origin: audit.OriginAgent}, relationStateArguments("Restore")},
-		{"dbgraph_start_schema_scan", relations.Principal{Actor: "reviewer", Role: relations.RoleReviewer, Origin: audit.OriginAgent}, `{"projectId":"9007199254740993","dataSourceId":"9007199254740997","reason":"r","requestId":"q"}`},
+		{"dbgraph_start_schema_scan", relations.Principal{Actor: "reviewer", Role: relations.RoleReviewer, Origin: audit.OriginAgent}, `{"dataSourceId":"9007199254740997","reason":"r","requestId":"q"}`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -507,8 +506,7 @@ func TestToolBoundaryRejectsMalformedInputsAndSanitizesServiceErrors(t *testing.
 		arguments string
 	}{
 		{"dbgraph_status", `{"unexpected":true}`},
-		{"dbgraph_search_nodes", `{"projectId":"0","query":"orders"}`},
-		{"dbgraph_trace", `{"projectId":"9007199254740993","startNodeId":"11","direction":"SIDEWAYS"}`},
+		{"dbgraph_trace", `{"startNodeId":"11","direction":"SIDEWAYS"}`},
 	}
 	for _, test := range tests {
 		result := callTool(t, viewer, test.name, test.arguments)
@@ -611,7 +609,7 @@ func firstArrayObject(t *testing.T, object map[string]any, key string) map[strin
 
 func relationCreateArguments() string {
 	return `{
-		"projectId":"9007199254740993","type":"CONDITIONAL_VALUE_COPY","sourceNodeId":"11","targetNodeId":"12",
+		"type":"CONDITIONAL_VALUE_COPY","sourceNodeId":"11","targetNodeId":"12",
 		"guard":{"kind":"compare","operator":"eq","left":{"kind":"column","nodeId":"11"},"right":{"kind":"literal","valueType":"integer","value":1}},
 		"selector":{"kind":"is_not_null","left":{"kind":"parameter","parameter":"tenant"}},
 		"transform":{"kind":"literal","valueType":"integer","value":9007199254740993},"confidence":0.9,
@@ -627,8 +625,8 @@ func relationStateArguments(reason string) string {
 
 func testNode() catalog.Node {
 	return catalog.Node{
-		ID: testProjectID, VersionID: testProjectID + 20, ProjectID: testProjectID,
-		DataSourceID: testDataSourceID, ScanRunID: testProjectID + 21, ParentNodeID: testProjectID + 22,
+		ID: testNodeID, VersionID: testNodeID + 20,
+		DataSourceID: testDataSourceID, ScanRunID: testNodeID + 21, ParentNodeID: testNodeID + 22,
 		Kind: catalog.NodeColumn, Status: catalog.NodeActive, StableKey: "orders.id", Name: "id",
 		QualifiedName: "app.orders.id", DataType: "BIGINT", Nullable: false, Ordinal: 1,
 	}
@@ -661,7 +659,7 @@ func testRelation() relations.Relation {
 			},
 			{
 				Kind: relations.EvidenceDatabaseConstraint, DataSourceID: testDataSourceID,
-				ConstraintSchema: "app", ConstraintName: "fk_orders_customer", ScanRunID: testProjectID + 25,
+				ConstraintSchema: "app", ConstraintName: "fk_orders_customer", ScanRunID: testNodeID + 25,
 			},
 		},
 		Actor: "agent", Origin: audit.OriginAgent, Reason: "Initial mapping", RequestID: "create-1",
@@ -686,7 +684,7 @@ func testTraceResult() graph.TraceResult {
 			Nodes: []int64{11, 12},
 			Steps: []graph.Step{{
 				Edge: graph.Edge{
-					RelationID: relation.ID, VersionID: relation.Active.ID, ProjectID: relation.ProjectID,
+					RelationID: relation.ID, VersionID: relation.Active.ID,
 					SourceNodeID: 11, TargetNodeID: 12, Type: relation.Type, Guard: relation.Active.Guard,
 					Status:   relations.StatusApproved,
 					Selector: relation.Active.Selector, Transform: relation.Active.Transform, Confidence: relation.Active.Confidence,

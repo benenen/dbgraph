@@ -2,17 +2,8 @@
 // header, and what a 401 means. The server rejects unknown JSON fields, so
 // every body below is built field by field instead of spread from form state.
 
-export interface Project {
-  id: string;
-  name: string;
-  description: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface DataSource {
   id: string;
-  projectId: string;
   name: string;
   kind: string;
   /** Present only for Admin; the connection string itself is never returned. */
@@ -133,7 +124,6 @@ export interface RelationGraph {
 
 export interface Job {
   id: string;
-  projectId: string;
   type: string;
   status: string;
   errorCode: string;
@@ -218,32 +208,7 @@ export const api = {
 
   session: () => request<Session>("/api/v1/session"),
 
-  listProjects: () => request<Project[]>("/api/v1/projects"),
-
-  createProject: (input: { name: string; description: string; reason: string }) =>
-    request<Project>("/api/v1/projects", {
-      method: "POST",
-      body: JSON.stringify({
-        name: input.name,
-        description: input.description,
-        reason: input.reason,
-      }),
-    }),
-
-  listDataSources: (projectId: string) =>
-    request<DataSource[]>(`/api/v1/projects/${projectId}/data-sources`),
-
   listAllDataSources: () => request<DataSource[]>("/api/v1/data-sources"),
-
-  updateProject: (projectId: string, input: { name: string; description: string; reason: string }) =>
-    request<Project>(`/api/v1/projects/${projectId}/update`, {
-      method: "POST",
-      body: JSON.stringify({
-        name: input.name,
-        description: input.description,
-        reason: input.reason,
-      }),
-    }),
 
   // An empty dsn leaves the stored connection string exactly as it is.
   updateDataSource: (
@@ -260,35 +225,19 @@ export const api = {
       }),
     }),
 
-  deleteProject: (projectId: string) =>
-    request<unknown>(`/api/v1/projects/${projectId}/delete`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    }),
-
   deleteDataSource: (dataSourceId: string) =>
     request<unknown>(`/api/v1/data-sources/${dataSourceId}/delete`, {
       method: "POST",
       body: JSON.stringify({}),
     }),
 
-  linkDataSource: (projectId: string, dataSourceId: string) =>
-    request<unknown>(`/api/v1/projects/${projectId}/data-sources/${dataSourceId}/link`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    }),
-
-  unlinkDataSource: (projectId: string, dataSourceId: string) =>
-    request<unknown>(`/api/v1/projects/${projectId}/data-sources/${dataSourceId}/unlink`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    }),
-
-  createDataSource: (
-    projectId: string,
-    input: { name: string; dsnEnvironment: string; dsn: string; reason: string },
-  ) =>
-    request<DataSource>(`/api/v1/projects/${projectId}/data-sources`, {
+  createDataSource: (input: {
+    name: string;
+    dsnEnvironment: string;
+    dsn: string;
+    reason: string;
+  }) =>
+    request<DataSource>("/api/v1/data-sources", {
       method: "POST",
       body: JSON.stringify({
         kind: "MYSQL",
@@ -299,34 +248,29 @@ export const api = {
       }),
     }),
 
-  startScan: (projectId: string, dataSourceId: string, reason: string) =>
-    request<Job>(`/api/v1/projects/${projectId}/data-sources/${dataSourceId}/schema-scan-jobs`, {
+  startScan: (dataSourceId: string, reason: string) =>
+    request<Job>(`/api/v1/data-sources/${dataSourceId}/schema-scan-jobs`, {
       method: "POST",
       body: JSON.stringify({ mode: "FULL", reason }),
     }),
 
-  listTables: (projectId: string, dataSourceId: string, filter: string) =>
+  listTables: (dataSourceId: string, filter: string) =>
     request<{ tables: TableSummary[]; truncated: boolean }>(
-      `/api/v1/projects/${projectId}/data-sources/${dataSourceId}/tables?q=${encodeURIComponent(filter)}`,
+      `/api/v1/data-sources/${dataSourceId}/tables?q=${encodeURIComponent(filter)}`,
     ),
 
-  tableDetail: (projectId: string, tableId: string) =>
-    request<TableDetail>(`/api/v1/projects/${projectId}/tables/${tableId}`),
+  tableDetail: (tableId: string) => request<TableDetail>(`/api/v1/tables/${tableId}`),
 
-  listProposals: (projectId: string) =>
-    request<{ relations: Relation[]; truncated: boolean }>(
-      `/api/v1/projects/${projectId}/relation-proposals`,
-    ),
+  listProposals: () =>
+    request<{ relations: Relation[]; truncated: boolean }>("/api/v1/relation-proposals"),
 
-  node: (projectId: string, nodeId: string) =>
-    request<CatalogNode>(`/api/v1/projects/${projectId}/nodes/${nodeId}`),
+  node: (nodeId: string) => request<CatalogNode>(`/api/v1/nodes/${nodeId}`),
 
   reviewRelation: (
-    projectId: string,
     relationId: string,
     input: { expectedRevisionNo: number; decision: "APPROVE" | "REJECT"; reason: string },
   ) =>
-    request<Relation>(`/api/v1/projects/${projectId}/relations/${relationId}/reviews`, {
+    request<Relation>(`/api/v1/relations/${relationId}/reviews`, {
       method: "POST",
       body: JSON.stringify({
         expectedRevisionNo: input.expectedRevisionNo,
@@ -335,11 +279,8 @@ export const api = {
       }),
     }),
 
-  relationGraph: (projectId: string, dataSourceId: string) =>
-    request<RelationGraph>(
-      `/api/v1/projects/${projectId}/data-sources/${dataSourceId}/relation-graph`,
-    ),
+  relationGraph: (dataSourceId: string) =>
+    request<RelationGraph>(`/api/v1/data-sources/${dataSourceId}/relation-graph`),
 
-  job: (projectId: string, jobId: string) =>
-    request<Job>(`/api/v1/projects/${projectId}/schema-scan-jobs/${jobId}`),
+  job: (jobId: string) => request<Job>(`/api/v1/schema-scan-jobs/${jobId}`),
 };

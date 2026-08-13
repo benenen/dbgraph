@@ -18,10 +18,6 @@ func (c *resolveCatalog) GetDataSource(context.Context, int64) (catalog.DataSour
 	return c.source, nil
 }
 
-func (c *resolveCatalog) GetProjectDataSource(ctx context.Context, dataSourceID int64) (catalog.DataSource, error) {
-	return c.GetDataSource(ctx, dataSourceID)
-}
-
 func (c *resolveCatalog) BeginSchemaScan(_ context.Context, dataSourceID int64) (catalog.SchemaScanRun, error) {
 	return catalog.SchemaScanRun{ID: 40, DataSourceID: dataSourceID}, nil
 }

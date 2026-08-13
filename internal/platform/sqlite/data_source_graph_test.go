@@ -17,10 +17,11 @@ import (
 func TestDataSourceGraphDrawsColumnRelationsBetweenTables(t *testing.T) {
 	t.Parallel()
 
-	ctx, store, project, source, catalogService := newGraphFixture(t, "graph")
+	ctx, store, source, catalogService := newGraphFixture(t, "graph")
 
 	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		Nodes: sampleTables(),
+		DataSourceID: source,
+		Nodes:        sampleTables(),
 		ForeignKeys: []catalog.DeclaredForeignKey{
 			{ConstraintSchema: "shop", Name: "fk_order_user", SourceColumn: "shop.orders.user_id", TargetColumn: "shop.users.id", Ordinal: 1},
 			{ConstraintSchema: "shop", Name: "fk_order_buyer", SourceColumn: "shop.orders.buyer_id", TargetColumn: "shop.users.id", Ordinal: 1},
@@ -29,7 +30,7 @@ func TestDataSourceGraphDrawsColumnRelationsBetweenTables(t *testing.T) {
 		t.Fatalf("PublishSnapshot: %v", err)
 	}
 
-	result, err := dbsqlite.NewGraphRepository(store).LoadDataSourceGraph(ctx, project, source, 100)
+	result, err := dbsqlite.NewGraphRepository(store).LoadDataSourceGraph(ctx, source, 100)
 	if err != nil {
 		t.Fatalf("LoadDataSourceGraph: %v", err)
 	}
@@ -60,13 +61,15 @@ func TestDataSourceGraphDrawsColumnRelationsBetweenTables(t *testing.T) {
 func TestDataSourceGraphIsEmptyForAScanWithoutForeignKeys(t *testing.T) {
 	t.Parallel()
 
-	ctx, store, project, source, catalogService := newGraphFixture(t, "no-keys")
+	ctx, store, source, catalogService := newGraphFixture(t, "no-keys")
 
-	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
+	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		DataSourceID: source, Nodes: sampleTables(),
+	}); err != nil {
 		t.Fatalf("PublishSnapshot: %v", err)
 	}
 
-	result, err := dbsqlite.NewGraphRepository(store).LoadDataSourceGraph(ctx, project, source, 100)
+	result, err := dbsqlite.NewGraphRepository(store).LoadDataSourceGraph(ctx, source, 100)
 	if err != nil {
 		t.Fatalf("LoadDataSourceGraph: %v", err)
 	}
@@ -80,13 +83,15 @@ func TestDataSourceGraphIsEmptyForAScanWithoutForeignKeys(t *testing.T) {
 func TestListTablesBrowsesAndFiltersLiterally(t *testing.T) {
 	t.Parallel()
 
-	ctx, store, project, source, catalogService := newGraphFixture(t, "browse")
-	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
+	ctx, store, source, catalogService := newGraphFixture(t, "browse")
+	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		DataSourceID: source, Nodes: sampleTables(),
+	}); err != nil {
 		t.Fatalf("PublishSnapshot: %v", err)
 	}
 	repository := dbsqlite.NewCatalogRepository(store, nil)
 
-	all, err := repository.ListTables(ctx, project, source, "", 50)
+	all, err := repository.ListTables(ctx, source, "", 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +99,7 @@ func TestListTablesBrowsesAndFiltersLiterally(t *testing.T) {
 		t.Fatalf("tables = %#v, want orders then users", all)
 	}
 
-	filtered, err := repository.ListTables(ctx, project, source, "user", 50)
+	filtered, err := repository.ListTables(ctx, source, "user", 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +108,7 @@ func TestListTablesBrowsesAndFiltersLiterally(t *testing.T) {
 	}
 
 	// A wildcard typed into the filter is a character, not a pattern.
-	wild, err := repository.ListTables(ctx, project, source, "%", 50)
+	wild, err := repository.ListTables(ctx, source, "%", 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +130,7 @@ func sampleTables() []catalog.NodeInput {
 }
 
 func newGraphFixture(t *testing.T, name string) (
-	context.Context, *dbsqlite.Store, int64, int64, *catalog.Service,
+	context.Context, *dbsqlite.Store, int64, *catalog.Service,
 ) {
 	t.Helper()
 
@@ -141,22 +146,15 @@ func newGraphFixture(t *testing.T, name string) (
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := catalog.NewProjectService(
-		dbsqlite.NewProjectRepository(store), ids, func() time.Time { return fixedTime },
-	).Create(ctx, catalog.CreateProject{Name: name})
-	if err != nil {
-		t.Fatal(err)
-	}
-	catalogService := catalog.NewService(
-		dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime },
-	)
+	catalogService := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 	source, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
+		Name: name, Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "GRAPH_FIXTURE_DSN",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ctx, store, project.ID, source.ID, catalogService
+	return ctx, store, source.ID, catalogService
 }
 
 // Columns were always scanned and never readable; indexes were never scanned at
@@ -165,7 +163,7 @@ func newGraphFixture(t *testing.T, name string) (
 func TestTableDetailReturnsColumnsAndIndexes(t *testing.T) {
 	t.Parallel()
 
-	ctx, store, project, source, catalogService := newGraphFixture(t, "detail")
+	ctx, store, source, catalogService := newGraphFixture(t, "detail")
 	nodes := sampleTables()
 	for position := range nodes {
 		if nodes[position].StableKey != "table:shop.orders" {
@@ -176,16 +174,18 @@ func TestTableDetailReturnsColumnsAndIndexes(t *testing.T) {
 			{Name: "idx_user_buyer", Columns: []string{"user_id", "buyer_id"}},
 		}
 	}
-	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
+	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		DataSourceID: source, Nodes: nodes,
+	}); err != nil {
 		t.Fatalf("PublishSnapshot: %v", err)
 	}
 	repository := dbsqlite.NewCatalogRepository(store, nil)
-	listed, err := repository.ListTables(ctx, project, source, "orders", 50)
+	listed, err := repository.ListTables(ctx, source, "orders", 50)
 	if err != nil || len(listed) != 1 {
 		t.Fatalf("ListTables = %#v err = %v", listed, err)
 	}
 
-	detail, err := repository.LoadTableDetail(ctx, project, listed[0].ID)
+	detail, err := repository.LoadTableDetail(ctx, listed[0].ID)
 	if err != nil {
 		t.Fatalf("LoadTableDetail: %v", err)
 	}
@@ -218,11 +218,11 @@ func TestTableDetailReturnsColumnsAndIndexes(t *testing.T) {
 
 	// A table with no recorded indexes reads back empty, not as an error: every
 	// row scanned before indexes were captured holds the empty object.
-	users, err := repository.ListTables(ctx, project, source, "users", 50)
+	users, err := repository.ListTables(ctx, source, "users", 50)
 	if err != nil || len(users) != 1 {
 		t.Fatalf("ListTables users = %#v err = %v", users, err)
 	}
-	plain, err := repository.LoadTableDetail(ctx, project, users[0].ID)
+	plain, err := repository.LoadTableDetail(ctx, users[0].ID)
 	if err != nil {
 		t.Fatalf("LoadTableDetail without indexes: %v", err)
 	}

@@ -296,8 +296,9 @@ func (s *Service) traceRecursive(
 	repositoryTruncated, consumedBytes, err := repository.LoadRecursiveEdges(
 		ctx,
 		RecursiveTraceRequest{
-			TargetNodeID: request.TargetNodeID, Direction: request.Direction,
-			MaxDepth: request.Limits.MaxDepth, MaxEdgeExpansions: maximumEdgeExpansions,
+			StartNodeID: request.StartNodeID, TargetNodeID: request.TargetNodeID,
+			Direction: request.Direction,
+			MaxDepth:  request.Limits.MaxDepth, MaxEdgeExpansions: maximumEdgeExpansions,
 			MaxLoadedBytes: maximumLoadedEdgeBytes,
 		},
 		func(candidate RecursiveEdgeState) error {

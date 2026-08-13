@@ -57,7 +57,7 @@ func TestAuditListPublishesAnExactEnvelopeBudgetAndRequestsOnlyOneExtraRecord(t 
 	events := make([]audit.Event, 75)
 	for index := range events {
 		events[index] = audit.Event{
-			ID: int64(index + 1), ProjectID: 10, Actor: strings.Repeat("a", 200), Origin: audit.OriginWeb,
+			ID: int64(index + 1), Actor: strings.Repeat("a", 200), Origin: audit.OriginWeb,
 			Action: strings.Repeat("A", 100), SubjectType: strings.Repeat("S", 100), SubjectID: int64(index + 100),
 			Reason: strings.Repeat("r", 2_000), RequestID: strings.Repeat("q", 200),
 			Details:    json.RawMessage(`{"payload":"` + strings.Repeat("d", 19_980) + `"}`),
@@ -66,7 +66,7 @@ func TestAuditListPublishesAnExactEnvelopeBudgetAndRequestsOnlyOneExtraRecord(t 
 	}
 	service := &auditHTTPStub{events: events}
 	client := newWebTestClient(t, Services{Audit: service}, relations.RoleViewer)
-	response := client.request(http.MethodGet, "/api/v1/projects/10/audit-events?limit=1000", "", false)
+	response := client.request(http.MethodGet, "/api/v1/audit-events?limit=1000", "", false)
 	assertWebStatus(t, response, http.StatusOK, "")
 	if response.Body.Len() > 1<<20 {
 		t.Fatalf("audit response bytes=%d, budget=%d", response.Body.Len(), 1<<20)
@@ -107,7 +107,7 @@ func proposalListResponse(t *testing.T, proposals []relations.Relation) (*httpte
 	t.Helper()
 	service := &relationHTTPStub{proposals: proposals}
 	client := newWebTestClient(t, Services{Relations: service}, relations.RoleViewer)
-	response := client.request(http.MethodGet, "/api/v1/projects/10/relation-proposals?limit=100", "", false)
+	response := client.request(http.MethodGet, "/api/v1/relation-proposals?limit=100", "", false)
 	assertWebStatus(t, response, http.StatusOK, "")
 	return response, service
 }
@@ -137,7 +137,7 @@ func proposalForResponseBudget(id int64, large bool) relations.Relation {
 		CreatedAt: testWebTime,
 	}
 	return relations.Relation{
-		ID: id, ProjectID: 10, Type: relations.TypeConditionalValueCopy,
+		ID: id, Type: relations.TypeConditionalValueCopy,
 		LatestRevisionNo: 1, Status: relations.StatusPending, Proposed: revision,
 		CreatedAt: testWebTime,
 	}

@@ -39,6 +39,7 @@ func TestTraceRejectsUnboundedOrCompositeContextBeforeLoadingEdges(t *testing.T)
 		t.Run(test.name, func(t *testing.T) {
 			repository := &fakeGraphRepository{}
 			_, err := graph.NewService(repository).Trace(context.Background(), graph.TraceRequest{
+				StartNodeID: 1, Direction: graph.DirectionDownstream,
 				Context: test.context,
 				Limits:  graph.Limits{MaxDepth: 2, MaxNodes: 10, MaxPaths: 10},
 			})
@@ -56,6 +57,7 @@ func TestTracePreparesAnImmutableContextBeforeRepositoryWork(t *testing.T) {
 	raw := json.RawMessage(`1`)
 	repository := &contextMutatingRepository{raw: raw}
 	result, err := graph.NewService(repository).Trace(context.Background(), graph.TraceRequest{
+		StartNodeID: 1, TargetNodeID: 2, Direction: graph.DirectionDownstream,
 		Context: conditions.Context{Columns: map[int64]json.RawMessage{100: raw}},
 		Limits:  graph.Limits{MaxDepth: 2, MaxNodes: 10, MaxPaths: 10},
 	})

@@ -96,7 +96,7 @@ func (s *Service) Record(ctx context.Context, command RecordEvent) (Event, error
 	return event, nil
 }
 
-func (s *Service) ListProject(ctx context.Context, limit int) ([]Event, error) {
+func (s *Service) ListEvents(ctx context.Context, limit int) ([]Event, error) {
 	if limit <= 0 || limit > 1000 {
 		return nil, ErrInvalidEvent
 	}

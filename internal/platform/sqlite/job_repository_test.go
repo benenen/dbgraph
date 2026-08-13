@@ -25,16 +25,11 @@ func TestJobRepositoryRecoveryTerminatesOrphanedSchemaScanRun(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	recoveredAt := time.Date(2026, 8, 11, 17, 5, 0, 0, time.UTC)
 	startedAt := recoveredAt.Add(-time.Minute)
-	if err := dbsqlite.NewProjectRepository(store).CreateProject(ctx, catalog.Project{
-		ID: 10, Name: "Recovery", CreatedAt: startedAt, UpdatedAt: startedAt,
-	}); err != nil {
-		t.Fatal(err)
-	}
 	catalogRepository := dbsqlite.NewCatalogRepository(store, nil)
 	if err := catalogRepository.CreateDataSource(ctx, catalog.DataSource{
 		ID: 20, Name: "interrupted", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "INTERRUPTED_SCAN_DSN", CreatedAt: startedAt, UpdatedAt: startedAt,
-	}, 10); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := catalogRepository.BeginSchemaScan(ctx, catalog.SchemaScanRun{
@@ -64,7 +59,6 @@ func TestJobRepositoryRecoveryTerminatesOrphanedSchemaScanRun(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = reader.Close() })
 	var runID int64
-	var projectID int64
 	var dataSourceID int64
 	var status int
 	var errorCode sql.NullString
@@ -72,21 +66,21 @@ func TestJobRepositoryRecoveryTerminatesOrphanedSchemaScanRun(t *testing.T) {
 	var persistedStartedAt string
 	var completedAt sql.NullString
 	if err := reader.QueryRowContext(ctx, `
-SELECT id, project_id, data_source_id, status, error_code, error_message, started_at, completed_at
+SELECT id, data_source_id, status, error_code, error_message, started_at, completed_at
 FROM schema_scan_runs
 WHERE id = ?
 `, 30).Scan(
-		&runID, &projectID, &dataSourceID, &status, &errorCode, &errorMessage,
+		&runID, &dataSourceID, &status, &errorCode, &errorMessage,
 		&persistedStartedAt, &completedAt,
 	); err != nil {
 		t.Fatal(err)
 	}
-	if runID != 30 || projectID != 10 || dataSourceID != 20 || status != 3 ||
+	if runID != 30 || dataSourceID != 20 || status != 3 ||
 		errorCode.String != "PROCESS_INTERRUPTED" || errorMessage.String != "schema scan did not complete" ||
 		persistedStartedAt != startedAt.Format(time.RFC3339Nano) ||
 		completedAt.String != recoveredAt.Format(time.RFC3339Nano) {
 		t.Fatalf(
-			"recovered run id=%d project=%d source=%d status=%d code=%q message=%q started=%q completed=%q",
+			"recovered run id=%d source=%d status=%d code=%q message=%q started=%q completed=%q",
 			runID, dataSourceID, status, errorCode.String, errorMessage.String,
 			persistedStartedAt, completedAt.String,
 		)
@@ -104,11 +98,6 @@ func TestJobRepositoryRecoversRunningSchemaScans(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	repository := dbsqlite.NewJobRepository(store)
 	createdAt := time.Date(2026, 8, 11, 17, 0, 0, 0, time.UTC)
-	if err := dbsqlite.NewProjectRepository(store).CreateProject(ctx, catalog.Project{
-		ID: 10, Name: "Jobs", CreatedAt: createdAt, UpdatedAt: createdAt,
-	}); err != nil {
-		t.Fatal(err)
-	}
 	job := jobs.Job{
 		ID: 501, Type: jobs.TypeSchemaScan, Status: jobs.StatusPending,
 		Payload: []byte(`{"dataSourceId":"20"}`), CreatedAt: createdAt, RevisionNo: 1,

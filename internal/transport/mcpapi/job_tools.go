@@ -69,8 +69,8 @@ func registerJobWriteTools(server *mcp.Server, services Services, principal rela
 				return nil, jobOutput{}, err
 			}
 			job, err := services.Jobs.Start(ctx, jobs.StartSchemaScan{
-				DataSourceID: dataSourceID,
-				Mode:         mode, Tables: append([]string(nil), input.Tables...),
+				DataSourceID: dataSourceID, Principal: principal,
+				Mode: mode, Tables: append([]string(nil), input.Tables...),
 				Reason: input.Reason, RequestID: input.RequestID,
 			})
 			return nil, mapJob(job), safeToolError(err)

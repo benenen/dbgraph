@@ -104,9 +104,11 @@ console: $(CONSOLE_DIR)/index.html ## Build the Vue console into the embedded di
 
 # The build output is git-ignored, so a fresh checkout has to produce it before
 # the binary can embed anything useful.
-$(CONSOLE_DIR)/index.html: $(shell find $(WEB_DIR)/src $(WEB_DIR)/index.html -type f 2>/dev/null) $(WEB_DIR)/package.json
+$(CONSOLE_DIR)/index.html: $(shell find $(WEB_DIR)/src $(WEB_DIR)/index.html -type f 2>/dev/null) \
+	$(WEB_DIR)/package.json $(WEB_DIR)/package-lock.json $(WEB_DIR)/vite.config.ts \
+	$(WEB_DIR)/tsconfig.json $(WEB_DIR)/tsconfig.app.json $(WEB_DIR)/tsconfig.node.json
 	@command -v $(NPM) >/dev/null || { echo 'npm is required to build the console' >&2; exit 1; }
-	@[ -d $(WEB_DIR)/node_modules ] || (cd $(WEB_DIR) && $(NPM) install)
+	@[ -d $(WEB_DIR)/node_modules ] || (cd $(WEB_DIR) && $(NPM) ci)
 	cd $(WEB_DIR) && $(NPM) run build
 
 $(BINARY): $(SOURCES) go.mod go.sum $(CONSOLE_DIR)/index.html
@@ -217,13 +219,13 @@ mcp: build dev-env ## Run the stdio MCP proxy against a local server
 	$(MCP_TLS_ENV) \
 		exec $(BINARY) mcp --server-url $(SERVER_URL)
 
-test: ## Run the test suite
+test: console ## Build the console and run the test suite
 	$(GO) test ./...
 
-test-race: ## Run the test suite with the race detector
+test-race: console ## Build the console and run the test suite with the race detector
 	$(GO) test -race ./...
 
-vet: ## Run go vet
+vet: console ## Build the console and run go vet
 	$(GO) vet ./...
 
 fmt: ## Format the Go sources
@@ -237,7 +239,7 @@ lint: ## Run staticcheck and golangci-lint when installed
 
 verify: fmt test test-race vet lint ## Run the pre-handoff verification gates
 
-cover: ## Report total test coverage
+cover: console ## Build the console and report total test coverage
 	$(GO) test -coverprofile=$(COVERAGE_FILE) ./...
 	$(GO) tool cover -func=$(COVERAGE_FILE) | tail -1
 

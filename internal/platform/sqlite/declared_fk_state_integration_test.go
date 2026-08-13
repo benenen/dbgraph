@@ -31,15 +31,7 @@ func TestDeclaredForeignKeyCannotBeRestoredWhileAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := catalog.NewProjectService(
-		dbsqlite.NewProjectRepository(store), ids, func() time.Time { return fixedTime },
-	).Create(ctx, catalog.CreateProject{Name: "Declared FK state"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	catalogService := catalog.NewService(
-		dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime },
-	)
+	catalogService := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
 		Name: "primary", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "DECLARED_FK_STATE_MYSQL_DSN",
@@ -60,16 +52,17 @@ func TestDeclaredForeignKeyCannotBeRestoredWhileAbsent(t *testing.T) {
 		SourceColumn: "learn.classes.student_id", TargetColumn: "learn.students.id", Ordinal: 1,
 	}
 	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		DataSourceID: dataSource.ID, Nodes: nodes,
 		ForeignKeys: []catalog.DeclaredForeignKey{foreignKey},
 	}); err != nil {
 		t.Fatalf("publish declared foreign key: %v", err)
 	}
 
-	sourceNode, err := catalogService.FindCurrentNode(ctx, project.ID, dataSource.ID, foreignKey.SourceColumn)
+	sourceNode, err := catalogService.FindCurrentNode(ctx, dataSource.ID, foreignKey.SourceColumn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	targetNode, err := catalogService.FindCurrentNode(ctx, project.ID, dataSource.ID, foreignKey.TargetColumn)
+	targetNode, err := catalogService.FindCurrentNode(ctx, dataSource.ID, foreignKey.TargetColumn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,6 +70,7 @@ func TestDeclaredForeignKeyCannotBeRestoredWhileAbsent(t *testing.T) {
 	trace := func() graph.TraceResult {
 		t.Helper()
 		result, err := graphService.Trace(ctx, graph.TraceRequest{
+			StartNodeID: sourceNode.ID, TargetNodeID: targetNode.ID,
 			Direction: graph.DirectionDownstream, Context: conditions.Context{}, Limits: graph.DefaultLimits(),
 		})
 		if err != nil {
@@ -104,7 +98,9 @@ func TestDeclaredForeignKeyCannotBeRestoredWhileAbsent(t *testing.T) {
 		t.Fatalf("suppressed declared FK = %#v", suppressed)
 	}
 
-	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
+	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		DataSourceID: dataSource.ID, Nodes: nodes,
+	}); err != nil {
 		t.Fatalf("publish snapshot without declared FK: %v", err)
 	}
 	_, err = relationCommands.Restore(ctx, relations.ChangeState{
@@ -123,6 +119,7 @@ func TestDeclaredForeignKeyCannotBeRestoredWhileAbsent(t *testing.T) {
 	}
 
 	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		DataSourceID: dataSource.ID, Nodes: nodes,
 		ForeignKeys: []catalog.DeclaredForeignKey{foreignKey},
 	}); err != nil {
 		t.Fatalf("publish reappeared declared FK: %v", err)

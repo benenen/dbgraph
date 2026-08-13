@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/benenen/dbgraph/internal/audit"
-	"github.com/benenen/dbgraph/internal/catalog"
 	"github.com/benenen/dbgraph/internal/id"
 	dbsqlite "github.com/benenen/dbgraph/internal/platform/sqlite"
 )
@@ -47,6 +46,7 @@ func TestServiceRejectsUnboundedOrNonObjectDetailsBeforeAllocation(t *testing.T)
 			repository := &auditCounterRepository{}
 			service := audit.NewService(repository, ids, time.Now)
 			_, err := service.Record(context.Background(), audit.RecordEvent{
+				Actor: "actor", Origin: audit.OriginWeb, Action: "TEST",
 				SubjectType: "TEST", SubjectID: 1, Reason: "reason", RequestID: "request", Details: details,
 			})
 			if !errors.Is(err, audit.ErrInvalidEvent) {
@@ -80,15 +80,6 @@ func TestServiceRecordsRetrievableEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create ID generator: %v", err)
 	}
-	projectService := catalog.NewProjectService(
-		dbsqlite.NewProjectRepository(store),
-		idGenerator,
-		func() time.Time { return fixedTime },
-	)
-	project, err := projectService.Create(ctx, catalog.CreateProject{Name: "Learning Platform"})
-	if err != nil {
-		t.Fatalf("create project: %v", err)
-	}
 
 	service := audit.NewService(
 		dbsqlite.NewAuditRepository(store),
@@ -97,6 +88,7 @@ func TestServiceRecordsRetrievableEvent(t *testing.T) {
 	)
 	expectedRevision := 2
 	recorded, err := service.Record(ctx, audit.RecordEvent{
+
 		Actor:            "web-editor@example.test",
 		Origin:           audit.OriginWeb,
 		Action:           "RELATION_REVISION_PROPOSED",
@@ -114,7 +106,7 @@ func TestServiceRecordsRetrievableEvent(t *testing.T) {
 		t.Fatalf("recorded event = %#v", recorded)
 	}
 
-	events, err := service.ListProject(ctx, project.ID, 10)
+	events, err := service.ListEvents(ctx, 10)
 	if err != nil {
 		t.Fatalf("list events: %v", err)
 	}

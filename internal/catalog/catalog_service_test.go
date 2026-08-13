@@ -31,12 +31,6 @@ func TestAdminCreatesAuditedDataSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := catalog.NewProjectService(dbsqlite.NewProjectRepository(store), ids, func() time.Time { return fixedTime }).Create(
-		ctx, catalog.CreateProject{Name: "Admin Test"},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
 	service := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 	command := catalog.AdminCreateDataSource{
 		Name: "primary", Kind: catalog.DataSourceMySQL,
@@ -51,7 +45,7 @@ func TestAdminCreatesAuditedDataSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := dbsqlite.NewAuditRepository(store).ListAuditEvents(ctx, project.ID, 10)
+	events, err := dbsqlite.NewAuditRepository(store).ListAuditEvents(ctx, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,12 +69,6 @@ func TestPublishSnapshotPublishesAndReconcilesDeclaredForeignKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := catalog.NewProjectService(dbsqlite.NewProjectRepository(store), ids, func() time.Time { return fixedTime }).Create(
-		ctx, catalog.CreateProject{Name: "Declared FK"},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
 	service := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 	source, err := service.CreateDataSource(ctx, catalog.CreateDataSource{
 		Name: "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "FK_MYSQL_DSN",
@@ -100,21 +88,24 @@ func TestPublishSnapshotPublishesAndReconcilesDeclaredForeignKey(t *testing.T) {
 		ConstraintSchema: "learn", Name: "fk_classes_student",
 		SourceColumn: "learn.classes.student_id", TargetColumn: "learn.students.id", Ordinal: 1,
 	}
-	first, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{})
+	first, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		DataSourceID: source.ID, Nodes: nodes, ForeignKeys: []catalog.DeclaredForeignKey{fk},
+	})
 	if err != nil {
 		t.Fatalf("publish snapshot with FK: %v", err)
 	}
-	from, err := service.FindCurrentNode(ctx, project.ID, source.ID, fk.SourceColumn)
+	from, err := service.FindCurrentNode(ctx, source.ID, fk.SourceColumn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	to, err := service.FindCurrentNode(ctx, project.ID, source.ID, fk.TargetColumn)
+	to, err := service.FindCurrentNode(ctx, source.ID, fk.TargetColumn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	graphService := graph.NewService(dbsqlite.NewGraphRepository(store))
 	trace := func() graph.TraceResult {
 		result, err := graphService.Trace(ctx, graph.TraceRequest{
+			StartNodeID: from.ID, TargetNodeID: to.ID,
 			Direction: graph.DirectionDownstream, Context: conditions.Context{}, Limits: graph.DefaultLimits(),
 		})
 		if err != nil {
@@ -139,21 +130,25 @@ func TestPublishSnapshotPublishesAndReconcilesDeclaredForeignKey(t *testing.T) {
 		t.Fatalf("declared FK relation = %#v", relation)
 	}
 
-	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
+	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		DataSourceID: source.ID, Nodes: nodes, ForeignKeys: []catalog.DeclaredForeignKey{fk},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	unchanged, err := relationRepository.Get(ctx, relationID)
 	if err != nil || unchanged.LatestRevisionNo != 1 || len(trace().Paths) != 1 {
 		t.Fatalf("unchanged FK relation = %#v, err=%v", unchanged, err)
 	}
-	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
+	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{DataSourceID: source.ID, Nodes: nodes}); err != nil {
 		t.Fatal(err)
 	}
 	removed, err := relationRepository.Get(ctx, relationID)
 	if err != nil || removed.Status != relations.StatusTombstoned || removed.Effective || removed.LatestRevisionNo != 2 || len(trace().Paths) != 0 {
 		t.Fatalf("removed FK relation = %#v, err=%v", removed, err)
 	}
-	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
+	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		DataSourceID: source.ID, Nodes: nodes, ForeignKeys: []catalog.DeclaredForeignKey{fk},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	reappeared, err := relationRepository.Get(ctx, relationID)
@@ -166,9 +161,7 @@ func TestServicePublishesCurrentSchemaSnapshot(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	store, err := dbsqlite.Open(ctx, dbsqlite.Config{
-		Path: filepath.Join(t.TempDir(), "dbgraph.sqlite"),
-	})
+	store, err := dbsqlite.Open(ctx, dbsqlite.Config{Path: filepath.Join(t.TempDir(), "dbgraph.sqlite")})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -177,31 +170,14 @@ func TestServicePublishesCurrentSchemaSnapshot(t *testing.T) {
 			t.Errorf("close store: %v", err)
 		}
 	})
-
 	fixedTime := time.Date(2026, time.August, 11, 13, 0, 0, 0, time.UTC)
-	idGenerator, err := id.NewGenerator(6, func() time.Time { return fixedTime })
+	ids, err := id.NewGenerator(6, func() time.Time { return fixedTime })
 	if err != nil {
 		t.Fatalf("create ID generator: %v", err)
 	}
-	projectService := catalog.NewProjectService(
-		dbsqlite.NewProjectRepository(store),
-		idGenerator,
-		func() time.Time { return fixedTime },
-	)
-	project, err := projectService.Create(ctx, catalog.CreateProject{Name: "Learning Platform"})
-	if err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	service := catalog.NewService(
-		dbsqlite.NewCatalogRepository(store, idGenerator),
-		idGenerator,
-		func() time.Time { return fixedTime },
-	)
+	service := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 	dataSource, err := service.CreateDataSource(ctx, catalog.CreateDataSource{
-		Name:           "Primary MySQL",
-		Kind:           catalog.DataSourceMySQL,
-		DSNEnvironment: "DBGRAPH_PRIMARY_MYSQL_DSN",
+		Name: "Primary MySQL", Kind: catalog.DataSourceMySQL, DSNEnvironment: "DBGRAPH_PRIMARY_MYSQL_DSN",
 	})
 	if err != nil {
 		t.Fatalf("create data source: %v", err)
@@ -213,14 +189,13 @@ func TestServicePublishesCurrentSchemaSnapshot(t *testing.T) {
 	if !reflect.DeepEqual(retrievedSource, dataSource) {
 		t.Fatalf("retrieved data source = %#v, want %#v", retrievedSource, dataSource)
 	}
-
 	published, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
 		DataSourceID: dataSource.ID,
 		Nodes: []catalog.NodeInput{
 			{StableKey: "database:primary", Kind: catalog.NodeDatabase, Name: "primary", QualifiedName: "primary"},
 			{StableKey: "schema:learn", ParentStableKey: "database:primary", Kind: catalog.NodeSchema, Name: "learn", QualifiedName: "learn"},
 			{StableKey: "table:learn.students", ParentStableKey: "schema:learn", Kind: catalog.NodeTable, Name: "students", QualifiedName: "learn.students"},
-			{StableKey: "column:learn.students.id", ParentStableKey: "table:learn.students", Kind: catalog.NodeColumn, Name: "id", QualifiedName: "learn.students.id", DataType: "bigint", Nullable: false, Ordinal: 1},
+			{StableKey: "column:learn.students.id", ParentStableKey: "table:learn.students", Kind: catalog.NodeColumn, Name: "id", QualifiedName: "learn.students.id", DataType: "bigint", Ordinal: 1},
 		},
 	})
 	if err != nil {
@@ -229,8 +204,7 @@ func TestServicePublishesCurrentSchemaSnapshot(t *testing.T) {
 	if published.ScanRunID <= 0 || published.NodeCount != 4 {
 		t.Fatalf("published snapshot = %#v", published)
 	}
-
-	node, err := service.FindCurrentNode(ctx, project.ID, dataSource.ID, "learn.students.id")
+	node, err := service.FindCurrentNode(ctx, dataSource.ID, "learn.students.id")
 	if err != nil {
 		t.Fatalf("find current node: %v", err)
 	}
@@ -242,9 +216,7 @@ func TestServicePublishesCurrentSchemaSnapshot(t *testing.T) {
 	}
 
 	secondarySource, err := service.CreateDataSource(ctx, catalog.CreateDataSource{
-		Name:           "Analytics MySQL",
-		Kind:           catalog.DataSourceMySQL,
-		DSNEnvironment: "DBGRAPH_ANALYTICS_MYSQL_DSN",
+		Name: "Analytics MySQL", Kind: catalog.DataSourceMySQL, DSNEnvironment: "DBGRAPH_ANALYTICS_MYSQL_DSN",
 	})
 	if err != nil {
 		t.Fatalf("create secondary data source: %v", err)
@@ -260,29 +232,28 @@ func TestServicePublishesCurrentSchemaSnapshot(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish secondary snapshot: %v", err)
 	}
-	secondaryNode, err := service.FindCurrentNode(ctx, project.ID, secondarySource.ID, "learn.students.id")
+	secondaryNode, err := service.FindCurrentNode(ctx, secondarySource.ID, "learn.students.id")
 	if err != nil {
 		t.Fatalf("find secondary current node: %v", err)
 	}
 	if secondaryNode.DataSourceID != secondarySource.ID || secondaryNode.DataType != "varchar(64)" {
 		t.Fatalf("secondary current node = %#v", secondaryNode)
 	}
-	primaryNode, err := service.FindCurrentNode(ctx, project.ID, dataSource.ID, "learn.students.id")
+	primaryNode, err := service.FindCurrentNode(ctx, dataSource.ID, "learn.students.id")
 	if err != nil {
 		t.Fatalf("find primary current node after secondary publication: %v", err)
 	}
 	if primaryNode.ID != node.ID || primaryNode.DataType != "bigint" {
 		t.Fatalf("primary current node changed across data sources: %#v", primaryNode)
 	}
-
-	matches, err := service.SearchCurrentNodes(ctx, project.ID, 0, "student", 10)
+	matches, err := service.SearchCurrentNodes(ctx, 0, "student", 10)
 	if err != nil {
 		t.Fatalf("search current nodes: %v", err)
 	}
 	if len(matches) != 4 {
 		t.Fatalf("search match count = %d, want table and column from both data sources", len(matches))
 	}
-	scopedMatches, err := service.SearchCurrentNodes(ctx, project.ID, secondarySource.ID, "student", 10)
+	scopedMatches, err := service.SearchCurrentNodes(ctx, secondarySource.ID, "student", 10)
 	if err != nil {
 		t.Fatalf("search current nodes scoped to a data source: %v", err)
 	}
@@ -316,14 +287,14 @@ func TestServicePublishesCurrentSchemaSnapshot(t *testing.T) {
 	if secondSnapshot.StaleCount != 1 {
 		t.Fatalf("second snapshot stale count = %d, want 1", secondSnapshot.StaleCount)
 	}
-	staleNode, err := service.FindCurrentNode(ctx, project.ID, dataSource.ID, "learn.students.id")
+	staleNode, err := service.FindCurrentNode(ctx, dataSource.ID, "learn.students.id")
 	if err != nil {
 		t.Fatalf("find stale node: %v", err)
 	}
 	if staleNode.ID != node.ID || staleNode.VersionID == node.VersionID || staleNode.Status != catalog.NodeStale {
 		t.Fatalf("stale node = %#v, previous = %#v", staleNode, node)
 	}
-	matches, err = service.SearchCurrentNodes(ctx, project.ID, 0, "student", 10)
+	matches, err = service.SearchCurrentNodes(ctx, 0, "student", 10)
 	if err != nil {
 		t.Fatalf("search after stale publication: %v", err)
 	}
@@ -353,18 +324,9 @@ func TestIncrementalSnapshotMarksOnlyNodesInsideExplicitTableScopeStale(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := catalog.NewProjectService(
-		dbsqlite.NewProjectRepository(store), ids, func() time.Time { return fixedTime },
-	).Create(ctx, catalog.CreateProject{Name: "Incremental catalog"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	service := catalog.NewService(
-		dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime },
-	)
+	service := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 	source, err := service.CreateDataSource(ctx, catalog.CreateDataSource{
-		Name: "primary", Kind: catalog.DataSourceMySQL,
-		DSNEnvironment: "INCREMENTAL_MYSQL_DSN",
+		Name: "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "INCREMENTAL_MYSQL_DSN",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -379,10 +341,12 @@ func TestIncrementalSnapshotMarksOnlyNodesInsideExplicitTableScopeStale(t *testi
 		catalog.NodeInput{StableKey: "table:learn.b", ParentStableKey: "schema:learn", Kind: catalog.NodeTable, Name: "b", QualifiedName: "learn.b"},
 		catalog.NodeInput{StableKey: "column:learn.b.id", ParentStableKey: "table:learn.b", Kind: catalog.NodeColumn, Name: "id", QualifiedName: "learn.b.id", DataType: "bigint", Ordinal: 1},
 	)
-	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
+	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		DataSourceID: source.ID, Nodes: fullNodes,
+	}); err != nil {
 		t.Fatal(err)
 	}
-	bBefore, err := service.FindCurrentNode(ctx, project.ID, source.ID, "learn.b.id")
+	bBefore, err := service.FindCurrentNode(ctx, source.ID, "learn.b.id")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,6 +354,7 @@ func TestIncrementalSnapshotMarksOnlyNodesInsideExplicitTableScopeStale(t *testi
 		catalog.NodeInput{StableKey: "table:learn.a", ParentStableKey: "schema:learn", Kind: catalog.NodeTable, Name: "a", QualifiedName: "learn.a"},
 	)
 	published, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		DataSourceID: source.ID, Nodes: incrementalNodes,
 		ScopeTables: []string{"learn.a"},
 	})
 	if err != nil {
@@ -398,11 +363,11 @@ func TestIncrementalSnapshotMarksOnlyNodesInsideExplicitTableScopeStale(t *testi
 	if published.StaleCount != 1 {
 		t.Fatalf("incremental stale count = %d, want one scoped column", published.StaleCount)
 	}
-	aAfter, err := service.FindCurrentNode(ctx, project.ID, source.ID, "learn.a.id")
+	aAfter, err := service.FindCurrentNode(ctx, source.ID, "learn.a.id")
 	if err != nil || aAfter.Status != catalog.NodeStale {
 		t.Fatalf("scoped missing column = %#v, err=%v", aAfter, err)
 	}
-	bAfter, err := service.FindCurrentNode(ctx, project.ID, source.ID, "learn.b.id")
+	bAfter, err := service.FindCurrentNode(ctx, source.ID, "learn.b.id")
 	if err != nil {
 		t.Fatal(err)
 	}

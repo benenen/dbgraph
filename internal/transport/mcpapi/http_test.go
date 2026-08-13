@@ -128,7 +128,7 @@ func TestHTTPMCPRejectsForgedRolesAndInjectsAuthenticatedPrincipal(t *testing.T)
 	authenticatedSession := connectHTTPClient(t, httpServer.URL, testMCPAgentToken)
 	forged, err := authenticatedSession.CallTool(t.Context(), &mcp.CallToolParams{
 		Name:      "dbgraph_propose_relation",
-		Arguments: json.RawMessage(`{"projectId":"1","type":"CONDITIONAL_VALUE_COPY","role":"ADMIN"}`),
+		Arguments: json.RawMessage(`{"type":"CONDITIONAL_VALUE_COPY","role":"ADMIN"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func TestHTTPMCPRejectsForgedRolesAndInjectsAuthenticatedPrincipal(t *testing.T)
 	result, err := authenticatedSession.CallTool(t.Context(), &mcp.CallToolParams{
 		Name: "dbgraph_propose_relation",
 		Arguments: json.RawMessage(`{
-			"projectId":"9007199254740993","type":"CONDITIONAL_VALUE_COPY",
+			"type":"CONDITIONAL_VALUE_COPY",
 			"sourceNodeId":"11","targetNodeId":"12","confidence":0.9,
 			"transform":{"kind":"literal","literal":{"type":"integer","value":9007199254740993}},
 			"evidence":[{"kind":"CODE","repository":"repo","commit":"abc","file":"Mapper.java","startLine":1,"endLine":2}],
@@ -243,7 +243,7 @@ func TestHTTPMCPRateLimitStopsWriteBeforeService(t *testing.T) {
 	t.Cleanup(httpServer.Close)
 	session := connectHTTPClient(t, httpServer.URL, testMCPAgentToken)
 	arguments := json.RawMessage(`{
-		"projectId":"1","type":"CONDITIONAL_VALUE_COPY","sourceNodeId":"11","targetNodeId":"12",
+		"type":"CONDITIONAL_VALUE_COPY","sourceNodeId":"11","targetNodeId":"12",
 		"confidence":0.9,"transform":{"kind":"column_copy","nodeId":"11"},
 		"evidence":[{"kind":"CODE","repository":"repo","commit":"abc","file":"Mapper.java","startLine":1,"endLine":2}],
 		"reason":"Mapped by source assignment","requestId":"req-rate"
@@ -277,7 +277,7 @@ func TestHTTPMCPRateLimitSeparatesCheapAndExpensiveTools(t *testing.T) {
 			t.Fatalf("cheap status call %d result=%#v err=%v", index+1, result, err)
 		}
 	}
-	arguments := json.RawMessage(`{"projectId":"9007199254740993","query":"orders"}`)
+	arguments := json.RawMessage(`{"query":"orders"}`)
 	first, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "dbgraph_search_nodes", Arguments: arguments})
 	if err != nil || first.IsError {
 		t.Fatalf("first expensive call result=%#v err=%v", first, err)
@@ -390,7 +390,7 @@ func TestHTTPMCPProposalListHasExactResponseBudgetAndNoDuplicatedTextPayload(t *
 	service := &proposalListBudgetStub{proposals: proposals}
 	handler := NewHTTPHandler(Services{Relations: service}, nil)
 	request := httptest.NewRequest(http.MethodPost, "http://localhost/mcp", strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"dbgraph_list_proposals","arguments":{"projectId":"1","limit":100}}}`,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"dbgraph_list_proposals","arguments":{"limit":100}}}`,
 	))
 	request.RemoteAddr = "127.0.0.1:41000"
 	request.Header.Set("Content-Type", "application/json")
@@ -437,7 +437,7 @@ func TestHTTPMCPUnresolvedListHasExactResponseBudgetAndNoDuplicatedTextPayload(t
 	service := &unresolvedListBudgetStub{findings: findings}
 	handler := NewHTTPHandler(Services{Reconcile: service}, nil)
 	request := httptest.NewRequest(http.MethodPost, "http://localhost/mcp", strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"dbgraph_list_unresolved","arguments":{"projectId":"1","limit":100}}}`,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"dbgraph_list_unresolved","arguments":{"limit":100}}}`,
 	))
 	request.RemoteAddr = "127.0.0.1:41000"
 	request.Header.Set("Content-Type", "application/json")
@@ -488,13 +488,13 @@ func TestHTTPMCPAmplifiableListsUseTheSharedStrictReadBucket(t *testing.T) {
 	httpServer := httptest.NewServer(handler)
 	t.Cleanup(httpServer.Close)
 	session := connectHTTPClient(t, httpServer.URL, "")
-	arguments := json.RawMessage(`{"projectId":"1"}`)
+	arguments := json.RawMessage(`{}`)
 	first, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "dbgraph_list_proposals", Arguments: arguments})
 	if err != nil || first.IsError {
 		t.Fatalf("first list result=%#v error=%v", first, err)
 	}
 	second, err := session.CallTool(t.Context(), &mcp.CallToolParams{
-		Name: "dbgraph_list_unresolved", Arguments: json.RawMessage(`{"projectId":"1"}`),
+		Name: "dbgraph_list_unresolved", Arguments: json.RawMessage(`{}`),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -518,7 +518,7 @@ func TestHTTPMCPLimitsSuccessfulWriteOutputsWithoutDuplicatingThePayload(t *test
 	request := httptest.NewRequest(http.MethodPost, "https://localhost/mcp", strings.NewReader(`{
 		"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
 			"name":"dbgraph_propose_relation","arguments":{
-				"projectId":"1","type":"CONDITIONAL_VALUE_COPY","sourceNodeId":"11","targetNodeId":"12",
+				"type":"CONDITIONAL_VALUE_COPY","sourceNodeId":"11","targetNodeId":"12",
 				"confidence":0.9,"transform":{"kind":"column_copy","nodeId":"11"},
 				"evidence":[{"kind":"CODE","repository":"repo","commit":"abc","file":"Mapper.java","startLine":1,"endLine":2}],
 				"reason":"Mapped by source assignment","requestId":"req-output-budget"

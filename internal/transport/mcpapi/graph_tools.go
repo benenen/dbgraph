@@ -184,7 +184,8 @@ func mapTrace(result graph.TraceResult) traceOutput {
 			steps[stepIndex] = graphStepOutput{
 				Edge: graphEdgeOutput{
 					RelationID: formatID(step.Edge.RelationID), VersionID: formatID(step.Edge.VersionID),
-					TargetNodeID: formatID(step.Edge.TargetNodeID), Type: relationTypeName(step.Edge.Type),
+					SourceNodeID: formatID(step.Edge.SourceNodeID), TargetNodeID: formatID(step.Edge.TargetNodeID),
+					Type:   relationTypeName(step.Edge.Type),
 					Status: relationStatusName(step.Edge.Status), ProposalStatus: proposalStatus,
 					Guard: mapBoolean(step.Edge.Guard), Selector: mapBoolean(step.Edge.Selector),
 					Transform: mapValue(step.Edge.Transform), Confidence: step.Edge.Confidence,

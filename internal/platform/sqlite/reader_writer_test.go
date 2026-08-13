@@ -26,15 +26,17 @@ func TestCommittedCatalogReadsContinueWhileWriterTransactionIsOpen(t *testing.T)
 	})
 
 	timestamp := time.Date(2026, time.August, 11, 15, 0, 0, 0, time.UTC)
-	project := catalog.Project{
-		ID:        42,
-		Name:      "concurrent readers",
-		CreatedAt: timestamp,
-		UpdatedAt: timestamp,
+	repository := NewCatalogRepository(store, nil)
+	source := catalog.DataSource{
+		ID:             42,
+		Name:           "concurrent readers",
+		Kind:           catalog.DataSourceMySQL,
+		DSNEnvironment: "READER_WRITER_DSN",
+		CreatedAt:      timestamp,
+		UpdatedAt:      timestamp,
 	}
-	repository := NewProjectRepository(store)
-	if err := repository.CreateProject(ctx, project); err != nil {
-		t.Fatalf("seed project: %v", err)
+	if err := repository.CreateDataSource(ctx, source); err != nil {
+		t.Fatalf("seed data source: %v", err)
 	}
 
 	writerEntered := make(chan struct{})
@@ -50,8 +52,8 @@ func TestCommittedCatalogReadsContinueWhileWriterTransactionIsOpen(t *testing.T)
 	go func() {
 		err := store.write(ctx, func(tx *sql.Tx) error {
 			if _, err := tx.ExecContext(ctx, `
-UPDATE projects SET description = description WHERE id = ?
-`, project.ID); err != nil {
+UPDATE data_sources SET name = name WHERE id = ?
+`, 0); err != nil {
 				return err
 			}
 			close(writerEntered)
@@ -71,12 +73,12 @@ UPDATE projects SET description = description WHERE id = ?
 
 	readCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
-	got, err := repository.GetProject(readCtx, project.ID)
+	got, err := repository.GetDataSource(readCtx, source.ID)
 	if err != nil {
 		t.Fatalf("read committed catalog data while writer is open: %v", err)
 	}
-	if got.ID != project.ID || got.Name != project.Name {
-		t.Fatalf("project = %+v, want committed project %+v", got, project)
+	if got.ID != source.ID || got.Name != source.Name {
+		t.Fatalf("data source = %+v, want committed data source %+v", got, source)
 	}
 
 	release()

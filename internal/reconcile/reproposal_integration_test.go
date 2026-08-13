@@ -123,7 +123,7 @@ func TestRelationInitReproposesTombstonedFingerprintWithoutPublishing(t *testing
 		t.Fatalf("reappeared relation was not an isolated proposed revision = %#v", reproposed)
 	}
 
-	auditEvents, err := dbsqlite.NewAuditRepository(fixture.store).ListAuditEvents(fixture.ctx, fixture.project.ID, 100)
+	auditEvents, err := dbsqlite.NewAuditRepository(fixture.store).ListAuditEvents(fixture.ctx, 100)
 	if err != nil {
 		t.Fatalf("list reproposal audit events: %v", err)
 	}
@@ -232,6 +232,7 @@ func TestRelationInitReproposesStaleFingerprintAfterCompletion(t *testing.T) {
 	}
 
 	omissionSession, err := fixture.service.Begin(fixture.ctx, reconcile.Begin{
+		RepositoryID: fixture.repository.ID, Mode: reconcile.ModeIncremental,
 		SourceCommit: "commit-stale-omission",
 		Scope:        json.RawMessage(fmt.Sprintf(`{"relationIds":["%d"]}`, relationID)),
 		Principal:    fixture.agent, RequestID: "begin-stale-omission",
@@ -325,6 +326,7 @@ func TestRelationInitCompletionLeavesSessionOpenWhenDeferredReproposalConflicts(
 		}},
 	}
 	second, err := fixture.commands.ProposeCreate(fixture.ctx, relations.ProposeCreate{
+		Type:         relations.TypeConditionalValueCopy,
 		SourceNodeID: fixture.source.ID, TargetNodeID: fixture.target.ID, Guard: secondGuard,
 		Transform: conditions.Value{Kind: conditions.ValueColumnCopy, NodeID: fixture.source.ID}, Confidence: 0.8,
 		Evidence: []relations.EvidenceInput{{
@@ -344,6 +346,7 @@ func TestRelationInitCompletionLeavesSessionOpenWhenDeferredReproposalConflicts(
 	}
 
 	session, err := fixture.service.Begin(fixture.ctx, reconcile.Begin{
+		RepositoryID: fixture.repository.ID, Mode: reconcile.ModeIncremental,
 		SourceCommit: "conflict-deferred", Scope: json.RawMessage(`{"relationIds":[]}`),
 		Principal: fixture.agent, RequestID: "begin-conflict-deferred",
 	})
@@ -436,10 +439,10 @@ func newReproposalFixture(t *testing.T, generatorNode uint16) reproposalFixture 
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, repository, source, target := createInitFixture(t, ctx, store, ids, fixedTime)
+	repository, source, target := createInitFixture(t, ctx, store, ids, fixedTime)
 	commands := relations.NewCommands(dbsqlite.NewRelationRepository(store), ids, func() time.Time { return fixedTime })
 	return reproposalFixture{
-		ctx: ctx, store: store, project: project, repository: repository, source: source, target: target,
+		ctx: ctx, store: store, repository: repository, source: source, target: target,
 		commands: commands,
 		service: reconcile.NewService(
 			dbsqlite.NewReconcileRepository(store), commands, ids, func() time.Time { return fixedTime },
@@ -458,6 +461,7 @@ func (f reproposalFixture) submit(t *testing.T, suffix string) reconcile.BatchRe
 func (f reproposalFixture) beginAndSubmit(t *testing.T, suffix string) (reconcile.Session, reconcile.BatchResult) {
 	t.Helper()
 	session, err := f.service.Begin(f.ctx, reconcile.Begin{
+		RepositoryID: f.repository.ID, Mode: reconcile.ModeIncremental,
 		SourceCommit: "commit-" + suffix, Scope: json.RawMessage(`{"relationIds":[]}`),
 		Principal: f.agent, RequestID: "begin-" + suffix,
 	})

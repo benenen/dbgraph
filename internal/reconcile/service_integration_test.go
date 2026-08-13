@@ -39,7 +39,7 @@ func TestRelationInitBatchIsIdempotentAndCompletionOnlyProposesOmissions(t *test
 	if err != nil {
 		t.Fatalf("create ID generator: %v", err)
 	}
-	project, repository, sourceNode, targetNode := createInitFixture(t, ctx, store, ids, fixedTime)
+	repository, sourceNode, targetNode := createInitFixture(t, ctx, store, ids, fixedTime)
 	relationRepository := dbsqlite.NewRelationRepository(store)
 	relationCommands := relations.NewCommands(relationRepository, ids, func() time.Time { return fixedTime })
 	service := reconcile.NewService(
@@ -52,7 +52,7 @@ func TestRelationInitBatchIsIdempotentAndCompletionOnlyProposesOmissions(t *test
 	reviewer := relations.Principal{Actor: "reviewer@example.test", Role: relations.RoleReviewer, Origin: audit.OriginWeb}
 
 	firstSession, err := service.Begin(ctx, reconcile.Begin{
-		ProjectID:    project.ID,
+
 		RepositoryID: repository.ID,
 		Mode:         reconcile.ModeFull,
 		SourceCommit: "abc1234",
@@ -99,7 +99,7 @@ func TestRelationInitBatchIsIdempotentAndCompletionOnlyProposesOmissions(t *test
 	if len(firstBatch.Items) != 1 || firstBatch.Items[0].Status != reconcile.ItemCreated || len(firstBatch.UnresolvedIDs) != 1 {
 		t.Fatalf("first batch result = %#v", firstBatch)
 	}
-	auditEvents, err := dbsqlite.NewAuditRepository(store).ListAuditEvents(ctx, project.ID, 20)
+	auditEvents, err := dbsqlite.NewAuditRepository(store).ListAuditEvents(ctx, 20)
 	if err != nil {
 		t.Fatalf("list batch audit events: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestRelationInitBatchIsIdempotentAndCompletionOnlyProposesOmissions(t *test
 	}
 
 	secondSession, err := service.Begin(ctx, reconcile.Begin{
-		ProjectID: project.ID, RepositoryID: repository.ID, Mode: reconcile.ModeFull,
+		RepositoryID: repository.ID, Mode: reconcile.ModeFull,
 		SourceCommit: "def5678", Scope: json.RawMessage(`{"module":"service"}`),
 		Principal: agent, RequestID: "init-begin-002",
 	})
@@ -222,7 +222,7 @@ SELECT COUNT(*) FROM relation_events WHERE relation_id = ? AND event_type = ?
 		t.Fatalf("stale relation event count = %d, want 1", staleEvents)
 	}
 
-	findings, err := service.ListUnresolved(ctx, project.ID, 10)
+	findings, err := service.ListUnresolved(ctx, 10)
 	if err != nil {
 		t.Fatalf("list unresolved findings: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestIncrementalRelationInitOnlyProposesOmissionsInsideExplicitRelationScope
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, repository, sourceNode, targetNode := createInitFixture(t, ctx, store, ids, fixedTime)
+	repository, sourceNode, targetNode := createInitFixture(t, ctx, store, ids, fixedTime)
 	commands := relations.NewCommands(dbsqlite.NewRelationRepository(store), ids, func() time.Time { return fixedTime })
 	service := reconcile.NewService(
 		dbsqlite.NewReconcileRepository(store), commands, ids, func() time.Time { return fixedTime },
@@ -255,7 +255,7 @@ func TestIncrementalRelationInitOnlyProposesOmissionsInsideExplicitRelationScope
 	reviewer := relations.Principal{Actor: "reviewer@example.test", Role: relations.RoleReviewer, Origin: audit.OriginWeb}
 
 	initial, err := service.Begin(ctx, reconcile.Begin{
-		ProjectID: project.ID, RepositoryID: repository.ID, Mode: reconcile.ModeFull,
+		RepositoryID: repository.ID, Mode: reconcile.ModeFull,
 		SourceCommit: "initial", Scope: json.RawMessage(`{}`), Principal: agent, RequestID: "scope-initial",
 	})
 	if err != nil {
@@ -311,7 +311,7 @@ func TestIncrementalRelationInitOnlyProposesOmissionsInsideExplicitRelationScope
 	scope := json.RawMessage(`{"relationIds":["` + strconv.FormatInt(seenInScopeID, 10) + `","` +
 		strconv.FormatInt(omittedInScopeID, 10) + `"]}`)
 	incremental, err := service.Begin(ctx, reconcile.Begin{
-		ProjectID: project.ID, RepositoryID: repository.ID, Mode: reconcile.ModeIncremental,
+		RepositoryID: repository.ID, Mode: reconcile.ModeIncremental,
 		SourceCommit: "incremental", Scope: scope, Principal: agent, RequestID: "scope-incremental",
 	})
 	if err != nil {
@@ -363,24 +363,19 @@ func createInitFixture(
 	store *dbsqlite.Store,
 	ids *id.Generator,
 	fixedTime time.Time,
-) (catalog.Project, catalog.CodeRepository, catalog.Node, catalog.Node) {
+) (catalog.CodeRepository, catalog.Node, catalog.Node) {
 	t.Helper()
-	projectService := catalog.NewProjectService(dbsqlite.NewProjectRepository(store), ids, func() time.Time { return fixedTime })
-	project, err := projectService.Create(ctx, catalog.CreateProject{Name: "Relation Init Test"})
-	if err != nil {
-		t.Fatalf("create project: %v", err)
-	}
 	repositoryService := catalog.NewCodeRepositoryService(dbsqlite.NewCodeRepository(store), ids, func() time.Time { return fixedTime })
 	repository, err := repositoryService.Create(ctx, catalog.CreateCodeRepository{
-		ProjectID: project.ID, Name: "example-service", RemoteURL: "https://example.test/repository.git", DefaultBranch: "main",
+		Name: "example-service", RemoteURL: "https://example.test/repository.git", DefaultBranch: "main",
 	})
 	if err != nil {
 		t.Fatalf("create code repository: %v", err)
 	}
 	catalogService := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID,
-		Name:      "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "DBGRAPH_INIT_TEST_DSN",
+
+		Name: "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "DBGRAPH_INIT_TEST_DSN",
 	})
 	if err != nil {
 		t.Fatalf("create data source: %v", err)
@@ -394,17 +389,17 @@ func createInitFixture(
 		{StableKey: "column:target.value", ParentStableKey: "table:target", Kind: catalog.NodeColumn, Name: "value", QualifiedName: "learn.target.value", DataType: "text", Ordinal: 1},
 	}
 	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project.ID, DataSourceID: dataSource.ID, Nodes: inputs,
+		DataSourceID: dataSource.ID, Nodes: inputs,
 	}); err != nil {
 		t.Fatalf("publish catalog: %v", err)
 	}
-	source, err := catalogService.FindCurrentNode(ctx, project.ID, dataSource.ID, "learn.source.value")
+	source, err := catalogService.FindCurrentNode(ctx, dataSource.ID, "learn.source.value")
 	if err != nil {
 		t.Fatalf("find source node: %v", err)
 	}
-	target, err := catalogService.FindCurrentNode(ctx, project.ID, dataSource.ID, "learn.target.value")
+	target, err := catalogService.FindCurrentNode(ctx, dataSource.ID, "learn.target.value")
 	if err != nil {
 		t.Fatalf("find target node: %v", err)
 	}
-	return project, repository, source, target
+	return repository, source, target
 }

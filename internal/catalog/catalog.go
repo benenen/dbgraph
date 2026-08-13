@@ -17,9 +17,7 @@ import (
 var (
 	ErrInvalidDataSource  = errors.New("invalid data source")
 	ErrDataSourceNotFound = errors.New("data source not found")
-	// ErrDataSourceNameTaken reports a name already registered. Data sources are
-	// shared across projects, so their names are unique service-wide and the
-	// answer is usually to link the existing one.
+	// ErrDataSourceNameTaken reports a service-wide registry name collision.
 	ErrDataSourceNameTaken = errors.New("a data source with that name already exists")
 	// ErrDataSourceInUse reports a source that imported a catalog. Deleting it
 	// would orphan the nodes and scan runs that record what was imported.
@@ -102,9 +100,7 @@ const (
 )
 
 type DataSource struct {
-	ID int64
-	// A data source is shared: projects link to it through
-	// project_data_sources rather than owning it.
+	ID   int64
 	Name string
 	Kind DataSourceKind
 	// DSNEnvironment names the environment variable holding the DSN. It is the
@@ -473,16 +469,6 @@ func (s *Service) DeleteDataSource(ctx context.Context, dataSourceID int64) erro
 		return ErrInvalidDataSource
 	}
 	return s.repository.DeleteDataSource(ctx, dataSourceID)
-}
-
-func (s *Service) GetProjectDataSource(
-	ctx context.Context,
-	dataSourceID int64,
-) (DataSource, error) {
-	if dataSourceID <= 0 {
-		return DataSource{}, ErrInvalidDataSource
-	}
-	return s.repository.GetDataSource(ctx, dataSourceID)
 }
 
 func (s *Service) GetDataSource(ctx context.Context, dataSourceID int64) (DataSource, error) {

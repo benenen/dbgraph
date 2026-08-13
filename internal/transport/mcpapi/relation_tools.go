@@ -171,8 +171,8 @@ func registerRelationWriteTools(server *mcp.Server, services Services, principal
 				return nil, relationOutput{}, err
 			}
 			relation, err := services.Relations.ProposeCreate(ctx, relations.ProposeCreate{
-				Type:         relationType,
-				TargetNodeID: content.targetNodeID, Guard: content.guard, Selector: content.selector,
+				Type: relationType, SourceNodeID: content.sourceNodeID, TargetNodeID: content.targetNodeID,
+				Guard: content.guard, Selector: content.selector,
 				Transform: content.transform, Confidence: input.Confidence, Evidence: content.evidence,
 				Principal: principal, Reason: input.Reason, RequestID: input.RequestID,
 			})

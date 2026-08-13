@@ -1,4 +1,5 @@
 import { fileURLToPath, URL } from "node:url";
+import { writeFileSync } from "node:fs";
 
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
@@ -10,11 +11,21 @@ const goEmbedDirectory = fileURLToPath(
   new URL("../internal/transport/webapi/app", import.meta.url),
 );
 
+const preserveGoEmbedDirectory = {
+  name: "preserve-go-embed-directory",
+  closeBundle() {
+    writeFileSync(
+      new URL("../internal/transport/webapi/app/.gitkeep", import.meta.url),
+      "Vue build output is generated here before Go build and test commands.\n",
+    );
+  },
+};
+
 const backend = "http://127.0.0.1:8080";
 
 export default defineConfig({
   base: "/app/",
-  plugins: [vue()],
+  plugins: [vue(), preserveGoEmbedDirectory],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },

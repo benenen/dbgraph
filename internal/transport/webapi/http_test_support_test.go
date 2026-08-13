@@ -105,19 +105,23 @@ type catalogHTTPStub struct {
 	tables         []catalog.TableSummary
 	tableDetail    catalog.TableDetail
 	tableDetailErr error
+	tableDetailID  int64
+	tablesSourceID int64
 	tablesFilter   string
+	tablesLimit    int
 	tablesErr      error
 	createCommand  catalog.AdminCreateDataSource
 	createResult   catalog.DataSource
 	createErr      error
+	updateCommand  catalog.AdminUpdateDataSource
+	updateErr      error
 	nodes          []catalog.Node
 	node           catalog.Node
 	searchErr      error
 	getNodeErr     error
 	sources        []catalog.DataSource
 	listSrcErr     error
-	linked         [][2]int64
-	unlinked       [][2]int64
+	listSrcLimit   int
 	linkErr        error
 	deleted        []int64
 }
@@ -127,15 +131,15 @@ func (s *catalogHTTPStub) CreateDataSourceAsAdmin(_ context.Context, command cat
 	return s.createResult, s.createErr
 }
 
-func (s *catalogHTTPStub) FindCurrentNode(context.Context, int64, int64, string) (catalog.Node, error) {
+func (s *catalogHTTPStub) FindCurrentNode(context.Context, int64, string) (catalog.Node, error) {
 	return catalog.Node{}, catalog.ErrNodeNotFound
 }
 
-func (s *catalogHTTPStub) SearchCurrentNodes(context.Context, int64, int64, string, int) ([]catalog.Node, error) {
+func (s *catalogHTTPStub) SearchCurrentNodes(context.Context, int64, string, int) ([]catalog.Node, error) {
 	return append([]catalog.Node(nil), s.nodes...), s.searchErr
 }
 
-func (s *catalogHTTPStub) GetCurrentNode(context.Context, int64, int64) (catalog.Node, error) {
+func (s *catalogHTTPStub) GetCurrentNode(context.Context, int64) (catalog.Node, error) {
 	return s.node, s.getNodeErr
 }
 
@@ -143,26 +147,18 @@ func (s *catalogHTTPStub) ListDataSources(context.Context, int64, int) ([]catalo
 	return append([]catalog.DataSource(nil), s.sources...), s.listSrcErr
 }
 
-func (s *catalogHTTPStub) ListAllDataSources(context.Context, int) ([]catalog.DataSource, error) {
+func (s *catalogHTTPStub) ListAllDataSources(_ context.Context, limit int) ([]catalog.DataSource, error) {
+	s.listSrcLimit = limit
 	return append([]catalog.DataSource(nil), s.sources...), s.listSrcErr
 }
 
-func (s *catalogHTTPStub) LinkDataSource(_ context.Context, projectID int64, dataSourceID int64) error {
-	s.linked = append(s.linked, [2]int64{projectID, dataSourceID})
-	return s.linkErr
-}
-
-func (s *catalogHTTPStub) UpdateDataSourceAsAdmin(context.Context, catalog.AdminUpdateDataSource) (catalog.DataSource, error) {
-	return s.createResult, s.createErr
+func (s *catalogHTTPStub) UpdateDataSourceAsAdmin(_ context.Context, command catalog.AdminUpdateDataSource) (catalog.DataSource, error) {
+	s.updateCommand = command
+	return s.createResult, s.updateErr
 }
 
 func (s *catalogHTTPStub) DeleteDataSource(_ context.Context, dataSourceID int64) error {
 	s.deleted = append(s.deleted, dataSourceID)
-	return s.linkErr
-}
-
-func (s *catalogHTTPStub) UnlinkDataSource(_ context.Context, projectID int64, dataSourceID int64) error {
-	s.unlinked = append(s.unlinked, [2]int64{projectID, dataSourceID})
 	return s.linkErr
 }
 
@@ -222,7 +218,7 @@ func (s *relationHTTPStub) Get(context.Context, int64) (relations.Relation, erro
 	return s.relation, s.getErr
 }
 
-func (s *relationHTTPStub) ListProposals(_ context.Context, _ int64, limit int) ([]relations.Relation, error) {
+func (s *relationHTTPStub) ListProposals(_ context.Context, limit int) ([]relations.Relation, error) {
 	s.listLimit = limit
 	end := min(limit, len(s.proposals))
 	return append([]relations.Relation(nil), s.proposals[:end]...), s.listErr
@@ -241,7 +237,6 @@ type graphHTTPStub struct {
 
 func (s *graphHTTPStub) DataSourceGraph(
 	_ context.Context,
-	_ int64,
 	dataSourceID int64,
 ) (graph.DataSourceGraph, error) {
 	s.dataSourceCalls++
@@ -251,20 +246,21 @@ func (s *graphHTTPStub) DataSourceGraph(
 
 func (s *catalogHTTPStub) TableDetail(
 	_ context.Context,
-	_ int64,
-	_ int64,
+	tableID int64,
 ) (catalog.TableDetail, error) {
+	s.tableDetailID = tableID
 	return s.tableDetail, s.tableDetailErr
 }
 
 func (s *catalogHTTPStub) ListTables(
 	_ context.Context,
-	_ int64,
-	_ int64,
+	dataSourceID int64,
 	filter string,
-	_ int,
+	limit int,
 ) ([]catalog.TableSummary, error) {
+	s.tablesSourceID = dataSourceID
 	s.tablesFilter = filter
+	s.tablesLimit = limit
 	return s.tables, s.tablesErr
 }
 
@@ -285,7 +281,7 @@ func (s *reconcileHTTPStub) Get(context.Context, int64) (reconcile.Session, erro
 	return s.session, s.getErr
 }
 
-func (s *reconcileHTTPStub) ListUnresolved(context.Context, int64, int) ([]reconcile.Unresolved, error) {
+func (s *reconcileHTTPStub) ListUnresolved(context.Context, int) ([]reconcile.Unresolved, error) {
 	return append([]reconcile.Unresolved(nil), s.findings...), s.unresolvedErr
 }
 
@@ -311,7 +307,7 @@ type auditHTTPStub struct {
 	limit  int
 }
 
-func (s *auditHTTPStub) ListProject(_ context.Context, _ int64, limit int) ([]audit.Event, error) {
+func (s *auditHTTPStub) ListEvents(_ context.Context, limit int) ([]audit.Event, error) {
 	s.limit = limit
 	return append([]audit.Event(nil), s.events[:min(limit, len(s.events))]...), s.err
 }

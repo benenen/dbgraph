@@ -43,13 +43,13 @@ func TestFoundationEnumsAndRelationProjectionPairsAreDatabaseEnforced(t *testing
 			[]any{timestamp, timestamp},
 		},
 		{
-			`INSERT INTO schema_scan_runs(id, project_id, data_source_id, status, started_at)
-             VALUES (20, 1, 2, 99, ?)`,
+			`INSERT INTO schema_scan_runs(id, data_source_id, status, started_at)
+             VALUES (20, 2, 99, ?)`,
 			[]any{timestamp},
 		},
 		{
-			`INSERT INTO nodes(id, project_id, data_source_id, stable_key, kind, created_at)
-             VALUES (20, 1, 2, 'invalid-kind', 99, ?)`,
+			`INSERT INTO nodes(id, data_source_id, stable_key, kind, created_at)
+             VALUES (20, 2, 'invalid-kind', 99, ?)`,
 			[]any{timestamp},
 		},
 		{
@@ -59,24 +59,24 @@ func TestFoundationEnumsAndRelationProjectionPairsAreDatabaseEnforced(t *testing
 			[]any{timestamp},
 		},
 		{
-			`INSERT INTO jobs(id, project_id, job_type, status, payload_json, created_at)
-             VALUES (20, 1, 99, 1, '{}', ?)`,
+			`INSERT INTO jobs(id, job_type, status, payload_json, created_at)
+             VALUES (20, 99, 1, '{}', ?)`,
 			[]any{timestamp},
 		},
 		{
-			`INSERT INTO jobs(id, project_id, job_type, status, payload_json, created_at)
-             VALUES (20, 1, 1, 99, '{}', ?)`,
+			`INSERT INTO jobs(id, job_type, status, payload_json, created_at)
+             VALUES (20, 1, 99, '{}', ?)`,
 			[]any{timestamp},
 		},
 		{
 			`INSERT INTO audit_events(
-                 id, project_id, actor, origin, action, subject_type, reason, request_id, occurred_at
-             ) VALUES (20, 1, 'actor', 99, 'INVALID', 'TEST', 'reason', 'request', ?)`,
+                 id, actor, origin, action, subject_type, reason, request_id, occurred_at
+             ) VALUES (20, 'actor', 99, 'INVALID', 'TEST', 'reason', 'request', ?)`,
 			[]any{timestamp},
 		},
 		{
-			`INSERT INTO relations(id, project_id, relation_type, create_fingerprint, created_at)
-             VALUES (20, 1, 99, ?, ?)`,
+			`INSERT INTO relations(id, relation_type, create_fingerprint, created_at)
+             VALUES (20, 99, ?, ?)`,
 			[]any{fingerprint, timestamp},
 		},
 		{
@@ -123,27 +123,24 @@ func openIntegrityFixture(t *testing.T) *sql.DB {
 		query     string
 		arguments []any
 	}{
-		{`INSERT INTO projects(id, name, created_at, updated_at) VALUES (1, 'integrity', ?, ?)`, []any{timestamp, timestamp}},
 		{`INSERT INTO data_sources(
              id, name, source_kind, dsn_environment, created_at, updated_at
          ) VALUES (2, 'source', 1, 'INTEGRITY_DSN', ?, ?)`, []any{timestamp, timestamp}},
-		{`INSERT INTO project_data_sources(project_id, data_source_id, created_at)
-         VALUES (1, 2, ?)`, []any{timestamp}},
 		{`INSERT INTO schema_scan_runs(
-             id, project_id, data_source_id, status, started_at, completed_at
-         ) VALUES (3, 1, 2, 2, ?, ?)`, []any{timestamp, timestamp}},
-		{`INSERT INTO nodes(id, project_id, data_source_id, stable_key, kind, created_at)
-         VALUES (4, 1, 2, 'source-node', 4, ?)`, []any{timestamp}},
-		{`INSERT INTO nodes(id, project_id, data_source_id, stable_key, kind, created_at)
-         VALUES (5, 1, 2, 'target-node', 4, ?)`, []any{timestamp}},
+             id, data_source_id, status, started_at, completed_at
+         ) VALUES (3, 2, 2, ?, ?)`, []any{timestamp, timestamp}},
+		{`INSERT INTO nodes(id, data_source_id, stable_key, kind, created_at)
+         VALUES (4, 2, 'source-node', 4, ?)`, []any{timestamp}},
+		{`INSERT INTO nodes(id, data_source_id, stable_key, kind, created_at)
+         VALUES (5, 2, 'target-node', 4, ?)`, []any{timestamp}},
 		{`INSERT INTO node_versions(
              id, node_id, scan_run_id, status, name, qualified_name, nullable, created_at
          ) VALUES (6, 4, 3, 1, 'source', 'learn.source', 0, ?)`, []any{timestamp}},
 		{`INSERT INTO node_versions(
              id, node_id, scan_run_id, status, name, qualified_name, nullable, created_at
          ) VALUES (7, 5, 3, 1, 'target', 'learn.target', 0, ?)`, []any{timestamp}},
-		{`INSERT INTO relations(id, project_id, relation_type, create_fingerprint, created_at)
-         VALUES (8, 1, 1, ?, ?)`, []any{strings.Repeat("a", 64), timestamp}},
+		{`INSERT INTO relations(id, relation_type, create_fingerprint, created_at)
+         VALUES (8, 1, ?, ?)`, []any{strings.Repeat("a", 64), timestamp}},
 		{`INSERT INTO relation_versions(
              id, relation_id, revision_no, proposal_kind, confidence_bps, transform_json,
              content_fingerprint, actor, origin, reason, request_id, created_at
@@ -156,8 +153,8 @@ func openIntegrityFixture(t *testing.T) *sql.DB {
              version_id, ordinal, evidence_kind, repository_name, commit_hash,
              file_path, symbol, start_line, end_line
          ) VALUES (9, 1, 1, 'repo', 'abc123', 'src/File.java', 'copyValue', 10, 12)`, nil},
-		{`INSERT INTO relations(id, project_id, relation_type, create_fingerprint, created_at)
-         VALUES (10, 1, 1, ?, ?)`, []any{strings.Repeat("d", 64), timestamp}},
+		{`INSERT INTO relations(id, relation_type, create_fingerprint, created_at)
+         VALUES (10, 1, ?, ?)`, []any{strings.Repeat("d", 64), timestamp}},
 		{`INSERT INTO relation_versions(
              id, relation_id, revision_no, proposal_kind, confidence_bps, transform_json,
              content_fingerprint, actor, origin, reason, request_id, created_at

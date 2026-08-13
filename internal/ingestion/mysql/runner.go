@@ -27,7 +27,7 @@ type ConnectionPolicy struct {
 }
 
 type catalogService interface {
-	GetProjectDataSource(context.Context, int64) (catalog.DataSource, error)
+	GetDataSource(context.Context, int64) (catalog.DataSource, error)
 	BeginSchemaScan(context.Context, int64) (catalog.SchemaScanRun, error)
 	FailSchemaScan(context.Context, catalog.SchemaScanRun, string) error
 	PublishStartedSnapshot(
@@ -145,7 +145,7 @@ func (r *Runner) run(
 	dataSourceID int64,
 	scopeTables []string,
 ) (catalog.PublishedSnapshot, error) {
-	dataSource, err := r.catalog.GetProjectDataSource(ctx, dataSourceID)
+	dataSource, err := r.catalog.GetDataSource(ctx, dataSourceID)
 	if err != nil {
 		return catalog.PublishedSnapshot{}, err
 	}

@@ -82,22 +82,22 @@ func TestAuthenticatedGETRoutesReturnProjectScopedResources(t *testing.T) {
 		Actor:     "agent", Origin: audit.OriginAgent, Reason: "evidence", RequestID: "req", CreatedAt: now,
 	}
 	relation := relations.Relation{
-		ID: 20, ProjectID: 10, Type: relations.TypeConditionalValueCopy,
+		ID: 20, Type: relations.TypeConditionalValueCopy,
 		LatestRevisionNo: 1, Status: relations.StatusApproved, Active: revision,
 		Effective: true, CreatedAt: now,
 	}
 	catalogNode := catalog.Node{
-		ID: 11, VersionID: 111, ProjectID: 10, DataSourceID: 2, Kind: catalog.NodeColumn,
+		ID: 11, VersionID: 111, DataSourceID: 2, Kind: catalog.NodeColumn,
 		Status: catalog.NodeActive, Name: "student_id", QualifiedName: "school.student.id", DataType: "BIGINT",
 	}
 	catalogService := &catalogHTTPStub{nodes: []catalog.Node{catalogNode}, node: catalogNode}
 	relationService := &relationHTTPStub{relation: relation, proposals: []relations.Relation{relation}}
 	reconcileService := &reconcileHTTPStub{
-		session:  reconcile.Session{ID: 40, ProjectID: 10, RepositoryID: 3, Mode: reconcile.ModeFull, Status: reconcile.StatusOpen, Scope: json.RawMessage(`{}`), CreatedAt: now},
-		findings: []reconcile.Unresolved{{ID: 50, ProjectID: 10, RepositoryID: 3, SessionID: 40, Type: "AMBIGUOUS_MAPPING", Summary: "Two columns match", Evidence: json.RawMessage(`{}`), CreatedAt: now}},
+		session:  reconcile.Session{ID: 40, RepositoryID: 3, Mode: reconcile.ModeFull, Status: reconcile.StatusOpen, Scope: json.RawMessage(`{}`), CreatedAt: now},
+		findings: []reconcile.Unresolved{{ID: 50, RepositoryID: 3, SessionID: 40, Type: "AMBIGUOUS_MAPPING", Summary: "Two columns match", Evidence: json.RawMessage(`{}`), CreatedAt: now}},
 	}
-	jobService := &jobHTTPStub{job: jobs.Job{ID: 30, ProjectID: 10, Type: jobs.TypeSchemaScan, Status: jobs.StatusPending, Payload: json.RawMessage(`{"dataSourceId":"2"}`), CreatedAt: now, RevisionNo: 1}}
-	auditService := &auditHTTPStub{events: []audit.Event{{ID: 60, ProjectID: 10, Actor: "alice", Origin: audit.OriginWeb, Action: "RELATION_PROPOSED", SubjectType: "RELATION", SubjectID: 20, Reason: "update", RequestID: "web-1", Details: json.RawMessage(`{}`), OccurredAt: now}}}
+	jobService := &jobHTTPStub{job: jobs.Job{ID: 30, Type: jobs.TypeSchemaScan, Status: jobs.StatusPending, Payload: json.RawMessage(`{"dataSourceId":"2"}`), CreatedAt: now, RevisionNo: 1}}
+	auditService := &auditHTTPStub{events: []audit.Event{{ID: 60, Actor: "alice", Origin: audit.OriginWeb, Action: "RELATION_PROPOSED", SubjectType: "RELATION", SubjectID: 20, Reason: "update", RequestID: "web-1", Details: json.RawMessage(`{}`), OccurredAt: now}}}
 	client := newWebTestClient(t, Services{
 		Catalog: catalogService, Relations: relationService, Reconcile: reconcileService,
 		Jobs: jobService, Audit: auditService,
@@ -108,14 +108,14 @@ func TestAuthenticatedGETRoutesReturnProjectScopedResources(t *testing.T) {
 		path     string
 		contains string
 	}{
-		{name: "nodes", path: "/api/v1/projects/10/nodes?q=student&limit=5", contains: "school.student.id"},
-		{name: "node details", path: "/api/v1/projects/10/nodes/11", contains: "school.student.id"},
-		{name: "relation", path: "/api/v1/projects/10/relations/20", contains: `"relationId":"20"`},
-		{name: "proposals", path: "/api/v1/projects/10/relation-proposals?limit=5", contains: `"relations"`},
-		{name: "unresolved", path: "/api/v1/projects/10/unresolved-findings?limit=5", contains: "Two columns match"},
-		{name: "job", path: "/api/v1/projects/10/schema-scan-jobs/30", contains: `"SCHEMA_SCAN"`},
-		{name: "relation init", path: "/api/v1/projects/10/relation-init-sessions/40", contains: `"FULL"`},
-		{name: "audit", path: "/api/v1/projects/10/audit-events?limit=5", contains: "RELATION_PROPOSED"},
+		{name: "nodes", path: "/api/v1/nodes?q=student&limit=5", contains: "school.student.id"},
+		{name: "node details", path: "/api/v1/nodes/11", contains: "school.student.id"},
+		{name: "relation", path: "/api/v1/relations/20", contains: `"relationId":"20"`},
+		{name: "proposals", path: "/api/v1/relation-proposals?limit=5", contains: `"relations"`},
+		{name: "unresolved", path: "/api/v1/unresolved-findings?limit=5", contains: "Two columns match"},
+		{name: "job", path: "/api/v1/schema-scan-jobs/30", contains: `"SCHEMA_SCAN"`},
+		{name: "relation init", path: "/api/v1/relation-init-sessions/40", contains: `"FULL"`},
+		{name: "audit", path: "/api/v1/audit-events?limit=5", contains: "RELATION_PROPOSED"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -175,7 +175,7 @@ func TestUnauthenticatedPageNavigationRedirectsToLogin(t *testing.T) {
 			accept: browserAccept, status: http.StatusUnauthorized, code: "UNAUTHENTICATED",
 		},
 		{
-			name: "API write stays a JSON error", method: http.MethodPost, path: "/api/v1/projects",
+			name: "API write stays a JSON error", method: http.MethodPost, path: "/api/v1/data-sources",
 			accept: browserAccept, status: http.StatusUnauthorized, code: "UNAUTHENTICATED",
 		},
 		{
@@ -249,13 +249,13 @@ func TestGraphTraceMapsContextualPathsAndPreservesThreeValuedResults(t *testing.
 		VisitedNodes: 4, CycleDetected: true, Truncated: true,
 	}}
 	client := newWebTestClient(t, Services{Graph: service}, relations.RoleViewer)
-	response := client.request(http.MethodPost, "/api/v1/projects/10/graph-traces", `{
+	response := client.request(http.MethodPost, "/api/v1/graph-traces", `{
 		"startNodeId":"11","targetNodeId":"12","direction":"UPSTREAM",
 		"context":{"columns":{"11":9007199254740993},"parameters":{"tenant":"north"}},
 		"maxDepth":4,"maxNodes":50,"maxPaths":6
 	}`, true)
 	assertWebStatus(t, response, http.StatusOK, "")
-	if service.request.ProjectID != 10 || service.request.StartNodeID != 11 || service.request.TargetNodeID != 12 ||
+	if service.request.StartNodeID != 11 || service.request.TargetNodeID != 12 ||
 		service.request.Direction != graph.DirectionUpstream || service.request.Limits.MaxDepth != 4 ||
 		string(service.request.Context.Columns[11]) != "9007199254740993" || string(service.request.Context.Parameters["tenant"]) != `"north"` {
 		t.Fatalf("trace request=%#v", service.request)

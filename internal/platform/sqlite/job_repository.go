@@ -72,7 +72,7 @@ func insertJob(ctx context.Context, tx *sql.Tx, job jobs.Job) error {
 INSERT INTO jobs(
     id, job_type, status, payload_json, result_json,
     error_code, error_message, created_at, started_at, completed_at, revision_no
-) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?, NULL, NULL, ?)
+) VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, NULL, NULL, ?)
 `,
 		job.ID,
 		job.Type,

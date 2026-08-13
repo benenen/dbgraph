@@ -22,7 +22,7 @@ func TestCreateDataSourceAcceptsADSNAndNeverReturnsIt(t *testing.T) {
 
 	body := `{"name":"orders-primary","kind":"MYSQL","dsnEnvironment":"ORDERS_DSN",` +
 		`"dsn":"` + dsn + `","reason":"bootstrap the orders catalog"}`
-	response := client.request(http.MethodPost, "/api/v1/projects/10/data-sources", body, true)
+	response := client.request(http.MethodPost, "/api/v1/data-sources", body, true)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
 	}
@@ -42,7 +42,7 @@ func TestCreateDataSourceAcceptsADSNAndNeverReturnsIt(t *testing.T) {
 		DSNEnvironment: "ORDERS_DSN", DSNKeyID: "abcd1234", DSNCiphertext: []byte("sealed"),
 	}}}
 	admin := newWebTestClient(t, Services{Catalog: listStub}, relations.RoleAdmin)
-	listed := admin.request(http.MethodGet, "/api/v1/projects/10/data-sources", "", false)
+	listed := admin.request(http.MethodGet, "/api/v1/data-sources", "", false)
 	assertWebStatus(t, listed, http.StatusOK, "")
 	for _, secret := range []string{"sealed", "abcd1234"} {
 		if strings.Contains(listed.Body.String(), secret) {
@@ -59,6 +59,6 @@ func TestCreateDataSourceWithoutASecretKeyIsRejectedClearly(t *testing.T) {
 
 	body := `{"name":"orders-primary","kind":"MYSQL","dsnEnvironment":"ORDERS_DSN",` +
 		`"dsn":"root:pw@tcp(127.0.0.1:3306)/orders","reason":"bootstrap"}`
-	response := client.request(http.MethodPost, "/api/v1/projects/10/data-sources", body, true)
+	response := client.request(http.MethodPost, "/api/v1/data-sources", body, true)
 	assertWebStatus(t, response, http.StatusUnprocessableEntity, "SECRET_KEY_REQUIRED")
 }

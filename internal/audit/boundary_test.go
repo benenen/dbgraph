@@ -93,8 +93,8 @@ func TestServiceRejectsInvalidAuditListBoundaries(t *testing.T) {
 	for _, input := range []struct {
 		limit int
 	}{{0}, {1001}} {
-		if _, err := service.ListProject(context.Background(), input.limit); !errors.Is(err, audit.ErrInvalidEvent) {
-			t.Fatalf("ListProject(%d) error = %v", input.limit, err)
+		if _, err := service.ListEvents(context.Background(), input.limit); !errors.Is(err, audit.ErrInvalidEvent) {
+			t.Fatalf("ListEvents(%d) error = %v", input.limit, err)
 		}
 	}
 }
@@ -114,6 +114,7 @@ func (r *recordingAuditRepository) ListAuditEvents(context.Context, int) ([]audi
 
 func validAuditRecord() audit.RecordEvent {
 	return audit.RecordEvent{
+		Actor: "actor", Origin: audit.OriginWeb,
 		Action: "RELATION_PROPOSED", SubjectType: "RELATION", SubjectID: 2,
 		Reason: "Evidence supports the relation", RequestID: "request-1", Details: json.RawMessage(`{}`),
 	}

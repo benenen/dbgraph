@@ -206,7 +206,7 @@ func (r *CatalogRepository) insertDeclaredForeignKey(
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO relations(id, relation_type, create_fingerprint, created_at)
-VALUES (?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?)
 `, relationID, relations.TypeDeclaredForeignKey, stableKey, formatTime(publication.StartedAt)); err != nil {
 		return 0, fmt.Errorf("insert declared foreign key relation: %w", err)
 	}

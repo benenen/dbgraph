@@ -33,15 +33,10 @@ func TestDataSourceAcceptsABlankEnvironmentAndReason(t *testing.T) {
 		t.Fatal(err)
 	}
 	admin := relations.Principal{Actor: "web", Role: relations.RoleAdmin, Origin: audit.OriginWeb}
-	project, err := catalog.NewProjectService(
-		dbsqlite.NewProjectRepository(store), ids, func() time.Time { return fixedTime },
-	).Create(ctx, catalog.CreateProject{Name: "Optional Metadata"})
-	if err != nil {
-		t.Fatal(err)
-	}
 	service := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 
 	created, err := service.CreateDataSourceAsAdmin(ctx, catalog.AdminCreateDataSource{
+		Name: "resource", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "", Reason: "", RequestID: "web-1", Principal: admin,
 	})
 	if err != nil {
@@ -64,12 +59,11 @@ func TestDataSourceAcceptsABlankEnvironmentAndReason(t *testing.T) {
 
 	events, err := audit.NewService(
 		dbsqlite.NewAuditRepository(store), ids, func() time.Time { return fixedTime },
-	).ListProject(ctx, project.ID, 20)
+	).ListEvents(ctx, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Only the create is project-scoped: a data source is shared across
-	// projects, so later events about one are recorded without a project.
+	// Later events keep the data source itself as their audit subject.
 	recorded := map[string]string{}
 	for _, event := range events {
 		recorded[event.Action] = event.Reason
@@ -96,15 +90,10 @@ func TestDataSourceStillRejectsAMalformedEnvironmentName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := catalog.NewProjectService(
-		dbsqlite.NewProjectRepository(store), ids, func() time.Time { return fixedTime },
-	).Create(ctx, catalog.CreateProject{Name: "Optional Metadata"})
-	if err != nil {
-		t.Fatal(err)
-	}
 	service := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 
 	if _, err := service.CreateDataSourceAsAdmin(ctx, catalog.AdminCreateDataSource{
+		Name: "resource", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "lower case", Reason: "", RequestID: "web-1",
 		Principal: relations.Principal{Actor: "web", Role: relations.RoleAdmin, Origin: audit.OriginWeb},
 	}); err == nil {

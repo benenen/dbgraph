@@ -61,7 +61,7 @@ SELECT id FROM relations WHERE create_fingerprint = ?
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO relations(id, relation_type, create_fingerprint, created_at)
-VALUES (?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?)
 `, record.RelationID, record.Type, record.Fingerprint, formatTime(record.Revision.CreatedAt)); err != nil {
 		return relations.Relation{}, fmt.Errorf("insert relation: %w", err)
 	}
@@ -614,7 +614,7 @@ INSERT INTO effective_edges(
     relation_id, version_id, source_node_id, target_node_id,
     relation_type, guard_json, selector_json, transform_json,
     confidence_bps, published_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
 		relation.ID,
 		revision.ID,
@@ -650,7 +650,7 @@ func insertRelationEvent(
 INSERT INTO relation_events(
     id, relation_id, version_id, event_type, actor, origin,
     reason, request_id, expected_revision_no, occurred_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
 		eventID,
 		relationID,
@@ -692,7 +692,7 @@ func insertRelationAudit(
 INSERT INTO audit_events(
     id, actor, origin, action, subject_type, subject_id,
     reason, request_id, expected_revision_no, details_json, occurred_at
-) VALUES (?, ?, ?, ?, ?, 'RELATION', ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, 'RELATION', ?, ?, ?, ?, ?, ?)
 `,
 		auditID,
 		actor,

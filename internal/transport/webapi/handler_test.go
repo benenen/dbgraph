@@ -28,16 +28,6 @@ type adminCatalogStub struct {
 	command catalog.AdminCreateDataSource
 }
 
-type adminProjectStub struct {
-	ProjectService
-	command catalog.AdminCreateProject
-}
-
-func (s *adminProjectStub) CreateAsAdmin(_ context.Context, command catalog.AdminCreateProject) (catalog.Project, error) {
-	s.command = command
-	return catalog.Project{ID: 21, Name: command.Name, Description: command.Description}, nil
-}
-
 type adminCodeRepositoryStub struct {
 	CodeRepositoryService
 	command catalog.AdminCreateCodeRepository
@@ -45,7 +35,7 @@ type adminCodeRepositoryStub struct {
 
 func (s *adminCodeRepositoryStub) CreateAsAdmin(_ context.Context, command catalog.AdminCreateCodeRepository) (catalog.CodeRepository, error) {
 	s.command = command
-	return catalog.CodeRepository{ID: 35, ProjectID: command.ProjectID, Name: command.Name, DefaultBranch: command.DefaultBranch}, nil
+	return catalog.CodeRepository{ID: 35, Name: command.Name, DefaultBranch: command.DefaultBranch}, nil
 }
 
 func (s *adminCatalogStub) CreateDataSourceAsAdmin(_ context.Context, command catalog.AdminCreateDataSource) (catalog.DataSource, error) {
@@ -63,14 +53,14 @@ type adminJobStub struct {
 
 func (s *adminJobStub) Start(_ context.Context, command jobs.StartSchemaScan) (jobs.Job, error) {
 	s.command = command
-	return jobs.Job{ID: 41, ProjectID: command.ProjectID, Type: jobs.TypeSchemaScan, Status: jobs.StatusPending, RevisionNo: 1}, nil
+	return jobs.Job{ID: 41, Type: jobs.TypeSchemaScan, Status: jobs.StatusPending, RevisionNo: 1}, nil
 }
 
 func (s *relationStub) ProposeCreate(_ context.Context, command relations.ProposeCreate) (relations.Relation, error) {
 	s.calls++
 	s.principal = command.Principal
 	return relations.Relation{
-		ID: 9_007_199_254_740_993, ProjectID: command.ProjectID, Type: command.Type,
+		ID: 9_007_199_254_740_993, Type: command.Type,
 		LatestRevisionNo: 1, Status: relations.StatusPending,
 	}, nil
 }
@@ -117,7 +107,7 @@ func TestWebLoginCreatesSecureSessionAndCSRFProtectsRelationProposal(t *testing.
 		"evidence":[{"kind":"CODE","repository":"repo","commit":"abc","file":"Mapper.java","startLine":1,"endLine":2}],
 		"reason":"Mapped by source assignment"
 	}`
-	withoutCSRF := httptest.NewRequest(http.MethodPost, "https://localhost/api/v1/projects/9007199254740993/relations", bytes.NewBufferString(body))
+	withoutCSRF := httptest.NewRequest(http.MethodPost, "https://localhost/api/v1/relations", bytes.NewBufferString(body))
 	withoutCSRF.Header.Set("Content-Type", "application/json")
 	withoutCSRF.AddCookie(cookies[0])
 	withoutCSRFResponse := httptest.NewRecorder()
@@ -126,7 +116,7 @@ func TestWebLoginCreatesSecureSessionAndCSRFProtectsRelationProposal(t *testing.
 		t.Fatalf("without CSRF status=%d calls=%d", withoutCSRFResponse.Code, relationService.calls)
 	}
 
-	request := httptest.NewRequest(http.MethodPost, "https://localhost/api/v1/projects/9007199254740993/relations", bytes.NewBufferString(body))
+	request := httptest.NewRequest(http.MethodPost, "https://localhost/api/v1/relations", bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-CSRF-Token", loginBody.Data.CSRFToken)
 	request.AddCookie(cookies[0])
@@ -156,7 +146,7 @@ func TestRelationResponseUsesBrowserSafeCamelCaseDTOs(t *testing.T) {
 	}
 
 	encoded, err := json.Marshal(mapRelation(relations.Relation{
-		ID: 20, ProjectID: 10, Type: relations.TypeConditionalValueCopy,
+		ID: 20, Type: relations.TypeConditionalValueCopy,
 		LatestRevisionNo: 1, Status: relations.StatusApproved, Active: revision,
 		CreatedAt: revision.CreatedAt,
 	}))
@@ -185,7 +175,7 @@ func TestRelationResponseUsesBrowserSafeCamelCaseDTOs(t *testing.T) {
 
 func TestRejectedCreateHasExplicitAPIStatus(t *testing.T) {
 	mapped := mapRelation(relations.Relation{
-		ID: 20, ProjectID: 10, Type: relations.TypeConditionalValueCopy,
+		ID: 20, Type: relations.TypeConditionalValueCopy,
 		LatestRevisionNo: 1, Status: relations.StatusPending,
 	})
 	if mapped["status"] != "REJECTED" || mapped["proposed"] != nil || mapped["active"] != nil {
@@ -210,12 +200,11 @@ func TestWebAdminCreatesDataSourceAndStartsRealScanUseCase(t *testing.T) {
 	}
 	sessions := appauth.NewSessionManager(authenticator, time.Now, bytes.NewReader(bytes.Repeat([]byte{7}, 128)))
 	catalogService := &adminCatalogStub{}
-	projectService := &adminProjectStub{}
 	codeRepositoryService := &adminCodeRepositoryStub{}
 	jobService := &adminJobStub{}
 	handler := NewHandler(Services{
-		Projects: projectService, CodeRepositories: codeRepositoryService,
-		Catalog: catalogService, Jobs: jobService,
+		CodeRepositories: codeRepositoryService,
+		Catalog:          catalogService, Jobs: jobService,
 	}, sessions)
 
 	login := httptest.NewRequest(http.MethodPost, "https://localhost/login", bytes.NewBufferString(`{"token":"`+testWebToken+`"}`))
@@ -241,18 +230,14 @@ func TestWebAdminCreatesDataSourceAndStartsRealScanUseCase(t *testing.T) {
 		handler.ServeHTTP(response, request)
 		return response
 	}
-	projectResponse := postAdmin("/api/v1/projects", `{"name":"Learning","description":"Lineage","reason":"Initialize"}`)
-	if projectResponse.Code != http.StatusCreated || projectService.command.Principal.Actor != "sre" || projectService.command.RequestID == "" {
-		t.Fatalf("create project status=%d body=%s command=%#v", projectResponse.Code, projectResponse.Body.String(), projectService.command)
-	}
-	repositoryResponse := postAdmin("/api/v1/projects/21/repositories", `{"name":"service","remoteUrl":"https://example.test/service.git","defaultBranch":"main","reason":"Register evidence"}`)
-	if repositoryResponse.Code != http.StatusCreated || codeRepositoryService.command.ProjectID != 21 || codeRepositoryService.command.Principal.Actor != "sre" {
+	repositoryResponse := postAdmin("/api/v1/repositories", `{"name":"service","remoteUrl":"https://example.test/service.git","defaultBranch":"main","reason":"Register evidence"}`)
+	if repositoryResponse.Code != http.StatusCreated || codeRepositoryService.command.Principal.Actor != "sre" {
 		t.Fatalf("create repository status=%d body=%s command=%#v", repositoryResponse.Code, repositoryResponse.Body.String(), codeRepositoryService.command)
 	}
 
 	dataSourceRequest := httptest.NewRequest(
 		http.MethodPost,
-		"https://localhost/api/v1/projects/21/data-sources",
+		"https://localhost/api/v1/data-sources",
 		bytes.NewBufferString(`{"name":"primary","kind":"MYSQL","dsnEnvironment":"PRIMARY_MYSQL_DSN","reason":"Configure source"}`),
 	)
 	dataSourceRequest.Header.Set("Content-Type", "application/json")
@@ -269,7 +254,7 @@ func TestWebAdminCreatesDataSourceAndStartsRealScanUseCase(t *testing.T) {
 
 	scanRequest := httptest.NewRequest(
 		http.MethodPost,
-		"https://localhost/api/v1/projects/21/data-sources/31/schema-scan-jobs",
+		"https://localhost/api/v1/data-sources/31/schema-scan-jobs",
 		bytes.NewBufferString(`{"reason":"Refresh metadata"}`),
 	)
 	scanRequest.Header.Set("Content-Type", "application/json")
@@ -280,7 +265,7 @@ func TestWebAdminCreatesDataSourceAndStartsRealScanUseCase(t *testing.T) {
 	if scanResponse.Code != http.StatusCreated {
 		t.Fatalf("start scan status=%d body=%s", scanResponse.Code, scanResponse.Body.String())
 	}
-	if jobService.command.ProjectID != 21 || jobService.command.DataSourceID != 31 ||
+	if jobService.command.DataSourceID != 31 ||
 		jobService.command.Principal.Actor != "sre" || jobService.command.RequestID == "" {
 		t.Fatalf("schema scan command = %#v", jobService.command)
 	}

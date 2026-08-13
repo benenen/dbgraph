@@ -74,7 +74,7 @@ type JobService interface {
 }
 
 type AuditService interface {
-	ListProject(context.Context, int) ([]audit.Event, error)
+	ListEvents(context.Context, int) ([]audit.Event, error)
 }
 
 type Services struct {

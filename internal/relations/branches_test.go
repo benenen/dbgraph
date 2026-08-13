@@ -142,6 +142,7 @@ func TestReviewerMayReviseContentButCannotCreateOrTombstoneRelations(t *testing.
 	principal := validPrincipal(RoleReviewer)
 
 	if _, err := commands.ProposeCreate(context.Background(), ProposeCreate{
+		Type: TypeConditionalValueCopy, SourceNodeID: 11, TargetNodeID: 12,
 		Transform: transform, Confidence: 1, Evidence: evidence, Principal: principal,
 		Reason: "Reviewer create", RequestID: "reviewer-create",
 	}); !errors.Is(err, ErrForbidden) {

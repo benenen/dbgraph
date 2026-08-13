@@ -113,7 +113,6 @@ func TestSchemaScanCoordinatorRejectsInvalidPublicInputs(t *testing.T) {
 		mutate   func(*jobs.StartSchemaScan)
 		expected error
 	}{
-		{name: "missing project", mutate: func(command *jobs.StartSchemaScan) { command.ProjectID = 0 }, expected: jobs.ErrInvalidJob},
 		{name: "missing data source", mutate: func(command *jobs.StartSchemaScan) { command.DataSourceID = 0 }, expected: jobs.ErrInvalidJob},
 		{name: "missing actor", mutate: func(command *jobs.StartSchemaScan) { command.Principal.Actor = " " }, expected: jobs.ErrInvalidJob},
 		{name: "invalid origin", mutate: func(command *jobs.StartSchemaScan) { command.Principal.Origin = audit.OriginSystem }, expected: jobs.ErrInvalidJob},
@@ -147,7 +146,6 @@ func TestJobServiceRejectsInvalidCommandsBeforeUsingDependencies(t *testing.T) {
 
 	service := jobs.NewService(nil, nil, nil)
 	testCases := []jobs.CreateJob{
-		{Type: jobs.TypeSchemaScan, Payload: json.RawMessage(`{}`)},
 		{Type: jobs.Type(99), Payload: json.RawMessage(`{}`)},
 		{Type: jobs.TypeSchemaScan, Payload: json.RawMessage(`[]`)},
 		{Type: jobs.TypeSchemaScan, Payload: json.RawMessage(`{"source":`)},
@@ -191,7 +189,8 @@ func runCoordinatorUntilCompletion(
 
 func validSchemaScanCommand() jobs.StartSchemaScan {
 	return jobs.StartSchemaScan{
-		Principal: relations.Principal{Actor: "admin", Role: relations.RoleAdmin, Origin: audit.OriginWeb},
-		Reason:    "Refresh source metadata", RequestID: "scan-boundary-1",
+		DataSourceID: 8,
+		Principal:    relations.Principal{Actor: "admin", Role: relations.RoleAdmin, Origin: audit.OriginWeb},
+		Reason:       "Refresh source metadata", RequestID: "scan-boundary-1",
 	}
 }

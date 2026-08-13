@@ -16,11 +16,6 @@ import { api, UnauthenticatedError, type DataSource } from "@/api/client";
 
 const toast = useToast();
 
-// The server guarantees one workspace and links every source to it, so the
-// console never names a project. It reads the id once and uses it for the
-// calls that still take one.
-const workspaceId = ref("");
-
 const sources = ref<DataSource[]>([]);
 const loading = ref(true);
 const failure = ref("");
@@ -44,15 +39,7 @@ async function load(): Promise<void> {
   loading.value = true;
   failure.value = "";
   try {
-    const [projects, registered] = await Promise.all([
-      api.listProjects(),
-      api.listAllDataSources(),
-    ]);
-    workspaceId.value = projects[0]?.id ?? "";
-    sources.value = registered;
-    if (!workspaceId.value) {
-      failure.value = "The server has no workspace yet. Restart it to create one.";
-    }
+    sources.value = await api.listAllDataSources();
   } catch (error) {
     if (error instanceof UnauthenticatedError) return;
     failure.value = error instanceof Error ? error.message : "Could not load data sources.";
@@ -94,7 +81,7 @@ async function save(): Promise<void> {
       await load();
       return;
     }
-    const source = await api.createDataSource(workspaceId.value, submitted);
+    const source = await api.createDataSource(submitted);
     dialogOpen.value = false;
     toast.add({ severity: "success", summary: `${source.name} registered`, life: 4000 });
     await load();
@@ -134,7 +121,7 @@ async function runScan(source: DataSource): Promise<void> {
   scanning.value = { ...scanning.value, [source.id]: true };
   scanStatus.value = { ...scanStatus.value, [source.id]: "Queueing…" };
   try {
-    const job = await api.startScan(workspaceId.value, source.id, "Full inventory from the console");
+    const job = await api.startScan(source.id, "Full inventory from the console");
     await poll(source.id, job.id);
   } catch (error) {
     scanStatus.value = {
@@ -155,7 +142,7 @@ function wait(ms: number): Promise<void> {
 async function poll(sourceId: string, jobId: string): Promise<void> {
   for (let attempt = 0; attempt < SCAN_POLL_LIMIT; attempt += 1) {
     try {
-      const job = await api.job(workspaceId.value, jobId);
+      const job = await api.job(jobId);
       // The job carries why it stopped, which is the only part worth reading.
       const detail = job.errorCode ? ` · ${job.errorCode}` : "";
       scanStatus.value = { ...scanStatus.value, [sourceId]: `${job.status}${detail}` };
@@ -197,7 +184,6 @@ onUnmounted(() => {
     <Button
       label="Register data source"
       icon="pi pi-plus"
-      :disabled="!workspaceId"
       @click="openDialog"
     />
   </header>

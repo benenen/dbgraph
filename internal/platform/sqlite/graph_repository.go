@@ -152,7 +152,7 @@ WITH RECURSIVE walk(
         CAST(ee.relation_id AS TEXT), '', 1, ee.` + nextColumn + `,
         printf(',%lld,%lld,', ?, ee.` + nextColumn + `),
         ee.` + nextColumn + ` = ?,
-        ee.relation_id, ee.version_id, ee.ee.source_node_id, ee.target_node_id
+        ee.relation_id, ee.version_id, ee.source_node_id, ee.target_node_id
     FROM effective_edges ee
     WHERE ee.` + currentColumn + ` = ?
 
@@ -163,10 +163,10 @@ WITH RECURSIVE walk(
         walk.depth + 1, ee.` + nextColumn + `,
         walk.node_path || printf('%lld,', ee.` + nextColumn + `),
         instr(walk.node_path, printf(',%lld,', ee.` + nextColumn + `)) > 0,
-        ee.relation_id, ee.version_id, ee.ee.source_node_id, ee.target_node_id
+        ee.relation_id, ee.version_id, ee.source_node_id, ee.target_node_id
     FROM walk
     JOIN effective_edges ee
-     AND ee.` + currentColumn + ` = walk.current_node_id
+      ON ee.` + currentColumn + ` = walk.current_node_id
     WHERE walk.cycle = 0
       AND walk.depth < ?
       AND (? = 0 OR walk.current_node_id <> ?)
@@ -175,11 +175,15 @@ WITH RECURSIVE walk(
 )
 SELECT
     walk.state_key, walk.parent_state_key, walk.depth, walk.current_node_id, walk.cycle,
-    walk.relation_id, walk.version_id, walk.walk.source_node_id, walk.target_node_id,
+    walk.relation_id, walk.version_id, walk.source_node_id, walk.target_node_id,
     ee.relation_type, rc.status, rc.proposed_version_id IS NOT NULL,
     ee.guard_json, ee.selector_json, ee.transform_json, ee.confidence_bps
 FROM walk
-JOIN effective_edges ee
+-- CROSS JOIN pins the order: walk drives, and each row probes the edge by its
+-- primary key. Without it the planner scans effective_edges and builds an
+-- automatic index over walk, which is the wrong way round once the walk is no
+-- longer narrowed by another catalog scope.
+CROSS JOIN effective_edges ee
   ON ee.relation_id = walk.relation_id
  AND ee.version_id = walk.version_id
 JOIN relation_current rc ON rc.relation_id = walk.relation_id
@@ -205,7 +209,7 @@ func (r *GraphRepository) LoadEdges(
 	}
 	query := `
 SELECT
-    ee.relation_id, ee.version_id, ee.ee.source_node_id, ee.target_node_id,
+    ee.relation_id, ee.version_id, ee.source_node_id, ee.target_node_id,
     ee.relation_type, rc.status, rc.proposed_version_id IS NOT NULL,
     ee.guard_json, ee.selector_json, ee.transform_json, ee.confidence_bps
 FROM effective_edges ee
@@ -217,7 +221,7 @@ LIMIT ?
 	if direction == graph.DirectionUpstream {
 		query = `
 SELECT
-    ee.relation_id, ee.version_id, ee.ee.source_node_id, ee.target_node_id,
+    ee.relation_id, ee.version_id, ee.source_node_id, ee.target_node_id,
     ee.relation_type, rc.status, rc.proposed_version_id IS NOT NULL,
     ee.guard_json, ee.selector_json, ee.transform_json, ee.confidence_bps
 FROM effective_edges ee

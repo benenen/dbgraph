@@ -29,10 +29,13 @@ func TestBackupCapturesCommittedDataWhileWriterIsRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create IDs: %v", err)
 	}
-	projects := catalog.NewProjectService(dbsqlite.NewProjectRepository(store), ids, time.Now)
-	created, err := projects.Create(ctx, catalog.CreateProject{Name: "Backup proof"})
-	if err != nil {
-		t.Fatalf("create project: %v", err)
+	sources := dbsqlite.NewCatalogRepository(store, ids)
+	created := catalog.DataSource{
+		ID: 42, Name: "backup-proof", Kind: catalog.DataSourceMySQL,
+		DSNEnvironment: "BACKUP_DSN", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := sources.CreateDataSource(ctx, created); err != nil {
+		t.Fatalf("create data source: %v", err)
 	}
 
 	if err := dbsqlite.Backup(ctx, sourcePath, backupPath); err != nil {
@@ -51,9 +54,9 @@ func TestBackupCapturesCommittedDataWhileWriterIsRunning(t *testing.T) {
 		t.Fatalf("open backup: %v", err)
 	}
 	t.Cleanup(func() { _ = backupStore.Close() })
-	restored, err := catalog.NewProjectService(dbsqlite.NewProjectRepository(backupStore), ids, time.Now).Get(ctx, created.ID)
-	if err != nil || restored.Name != created.Name {
-		t.Fatalf("restored project = %#v, error = %v", restored, err)
+	restored, err := dbsqlite.NewCatalogRepository(backupStore, ids).GetDataSource(ctx, 42)
+	if err != nil || restored.Name != "backup-proof" {
+		t.Fatalf("restored data source = %#v, error = %v", restored, err)
 	}
 }
 

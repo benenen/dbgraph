@@ -29,10 +29,6 @@ func (service *runnerCatalog) GetDataSource(context.Context, int64) (catalog.Dat
 	return service.dataSource, service.getError
 }
 
-func (service *runnerCatalog) GetProjectDataSource(ctx context.Context, dataSourceID int64) (catalog.DataSource, error) {
-	return service.GetDataSource(ctx, dataSourceID)
-}
-
 func (service *runnerCatalog) BeginSchemaScan(
 	_ context.Context,
 	dataSourceID int64,
@@ -177,7 +173,7 @@ func TestRunnerPropagatesOpenScanCloseAndPublishFailures(t *testing.T) {
 				t.Fatalf("result = %#v", result)
 			}
 			if test.scanErr == nil && test.closeErr == nil {
-				if service.service.published.DataSourceID != 11 || len(service.published.Nodes) != 1 {
+				if service.published.DataSourceID != 11 || len(service.published.Nodes) != 1 {
 					t.Fatalf("published = %#v", service.published)
 				}
 			}

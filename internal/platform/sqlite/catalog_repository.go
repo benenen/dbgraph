@@ -83,22 +83,10 @@ INSERT INTO data_sources(
 	if err != nil {
 		return err
 	}
-	return linkDataSource(ctx, tx, source.ID, source.CreatedAt)
+	return nil
 }
 
-// linkDataSource records that a project uses a data source. Linking twice is a
-// no-op so a repeated request is harmless.
-func linkDataSource(ctx context.Context, tx *sql.Tx, dataSourceID int64, at time.Time) error {
-	_, err := tx.ExecContext(ctx, `
-INSERT INTO project_data_sources(data_source_id, created_at)
-VALUES (?, ?, ?)
-ON CONFLICT(data_source_id) DO NOTHING
-`, dataSourceID, at.Format(time.RFC3339Nano))
-	return err
-}
-
-// ListAllDataSources returns the shared registry, so a project can adopt a
-// source that already exists instead of registering it twice.
+// ListAllDataSources returns the service-wide registry.
 func (r *CatalogRepository) ListAllDataSources(
 	ctx context.Context,
 	limit int,
@@ -125,43 +113,6 @@ LIMIT ?
 		return nil, fmt.Errorf("iterate data sources: %w", err)
 	}
 	return sources, nil
-}
-
-// LinkDataSource adopts an existing source into a project.
-func (r *CatalogRepository) LinkDataSource(ctx context.Context, dataSourceID int64, at time.Time) error {
-	err := r.store.write(ctx, func(tx *sql.Tx) error {
-		var exists int
-		if err := tx.QueryRowContext(ctx,
-			"SELECT EXISTS(SELECT 1 FROM data_sources WHERE id = ?)", dataSourceID).Scan(&exists); err != nil {
-			return err
-		}
-		if exists != 1 {
-			return catalog.ErrDataSourceNotFound
-		}
-		return linkDataSource(ctx, tx, dataSourceID, at)
-	})
-	if err != nil {
-		if errors.Is(err, catalog.ErrDataSourceNotFound) {
-			return err
-		}
-		return fmt.Errorf("link data source: %w", err)
-	}
-	return nil
-}
-
-// UnlinkDataSource drops the adoption. The source and any catalog the project
-// already scanned from it stay put; only the association goes.
-func (r *CatalogRepository) UnlinkDataSource(ctx context.Context, dataSourceID int64) error {
-	err := r.store.write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx,
-			"DELETE FROM project_data_sources WHERE data_source_id = ?",
-			dataSourceID)
-		return err
-	})
-	if err != nil {
-		return fmt.Errorf("unlink data source: %w", err)
-	}
-	return nil
 }
 
 // UpdateDataSourceWithAudit renames a source and optionally replaces its
@@ -211,8 +162,8 @@ WHERE id = ?
 	return nil
 }
 
-// DeleteDataSource removes a source, every project's link to it, and the scan
-// runs that recorded the attempts to read it. It is refused only while catalog
+// DeleteDataSource removes a source and the scan runs that recorded attempts to
+// read it. It is refused only while catalog
 // nodes exist, because those are the imported data itself and deleting the
 // source would orphan them. A source whose scans all failed imported nothing,
 // and that is exactly the misconfigured source an operator needs to remove.
@@ -246,10 +197,6 @@ func (r *CatalogRepository) DeleteDataSource(ctx context.Context, dataSourceID i
 				return err
 			}
 		}
-		if _, err := tx.ExecContext(ctx,
-			"DELETE FROM project_data_sources WHERE data_source_id = ?", dataSourceID); err != nil {
-			return err
-		}
 		result, err := tx.ExecContext(ctx, "DELETE FROM data_sources WHERE id = ?", dataSourceID)
 		if err != nil {
 			return err
@@ -270,24 +217,6 @@ func (r *CatalogRepository) DeleteDataSource(ctx context.Context, dataSourceID i
 		return fmt.Errorf("delete data source: %w", err)
 	}
 	return nil
-}
-
-// GetProjectDataSource returns a data source only when the project links it,
-// so a scan cannot run against a source the project never adopted.
-func (r *CatalogRepository) GetProjectDataSource(
-	ctx context.Context,
-	dataSourceID int64,
-) (catalog.DataSource, error) {
-	var linked int
-	if err := r.store.db.QueryRowContext(ctx, `
-SELECT EXISTS(SELECT 1 FROM project_data_sources WHERE data_source_id = ?)
-`, dataSourceID).Scan(&linked); err != nil {
-		return catalog.DataSource{}, fmt.Errorf("verify data source link: %w", err)
-	}
-	if linked != 1 {
-		return catalog.DataSource{}, catalog.ErrDataSourceNotFound
-	}
-	return r.GetDataSource(ctx, dataSourceID)
 }
 
 func (r *CatalogRepository) GetDataSource(ctx context.Context, dataSourceID int64) (catalog.DataSource, error) {
@@ -337,7 +266,7 @@ func (r *CatalogRepository) BeginSchemaScan(ctx context.Context, run catalog.Sch
 		_, err := tx.ExecContext(ctx, `
 INSERT INTO schema_scan_runs(
     id, data_source_id, status, started_at
-) VALUES (?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?)
 `, run.ID, run.DataSourceID, scanStatusRunning, run.StartedAt.Format(time.RFC3339Nano))
 		return err
 	})
@@ -417,7 +346,7 @@ func (r *CatalogRepository) publishSnapshot(
 	} else if _, err := tx.ExecContext(ctx, `
 INSERT INTO schema_scan_runs(
     id, data_source_id, status, started_at
-) VALUES (?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?)
 `,
 		publication.ScanRunID,
 		publication.DataSourceID,
@@ -523,7 +452,7 @@ ON CONFLICT(node_id) DO UPDATE SET
 		if record, active := searchRecords[nodeID]; active {
 			if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_search(node_id, name, qualified_name, data_type)
-VALUES (?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?)
 `, nodeID, record.Name, record.QualifiedName, record.DataType); err != nil {
 				return catalog.PublishedSnapshot{}, fmt.Errorf("insert current node search record: %w", err)
 			}
@@ -587,7 +516,7 @@ func (r *CatalogRepository) FindCurrentNode(
 	var versionCreated string
 	err := r.store.db.QueryRowContext(ctx, `
 SELECT
-    n.id, nv.id, n.n.data_source_id, nv.scan_run_id,
+    n.id, nv.id, n.data_source_id, nv.scan_run_id,
     nv.parent_node_id, n.kind, nv.status, n.stable_key, nv.name,
     nv.qualified_name, nv.data_type, nv.nullable, nv.ordinal_position,
     nv.created_at
@@ -655,7 +584,7 @@ WITH matched_nodes(node_id) AS (
     WHERE relation_evidence_search MATCH ?
 )
 SELECT
-    n.id, nv.id, n.n.data_source_id, nv.scan_run_id,
+    n.id, nv.id, n.data_source_id, nv.scan_run_id,
     nv.parent_node_id, n.kind, nv.status, n.stable_key, nv.name,
     nv.qualified_name, nv.data_type, nv.nullable, nv.ordinal_position,
     nv.created_at
@@ -692,7 +621,7 @@ func (r *CatalogRepository) GetCurrentNode(
 ) (catalog.Node, error) {
 	node, err := scanCurrentNode(r.store.db.QueryRowContext(ctx, `
 SELECT
-    n.id, nv.id, n.n.data_source_id, nv.scan_run_id,
+    n.id, nv.id, n.data_source_id, nv.scan_run_id,
     nv.parent_node_id, n.kind, nv.status, n.stable_key, nv.name,
     nv.qualified_name, nv.data_type, nv.nullable, nv.ordinal_position,
     nv.created_at
@@ -805,7 +734,7 @@ WHERE data_source_id = ?
 		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO nodes(id, data_source_id, stable_key, kind, created_at)
-VALUES (?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?)
 `,
 			nodeID,
 			publication.DataSourceID,
@@ -980,8 +909,8 @@ func optionalBlob(value []byte) any {
 }
 
 // translateDataSourceWrite turns the name collision into a client-facing error.
-// Data source names are unique service-wide now that projects share them, so
-// this is a routine mistake rather than an internal fault.
+// Data source names are unique service-wide, so this is a routine mistake
+// rather than an internal fault.
 func translateDataSourceWrite(err error) error {
 	if strings.Contains(err.Error(), "UNIQUE constraint failed: data_sources.name") {
 		return catalog.ErrDataSourceNameTaken

@@ -36,32 +36,34 @@ func TestBoundedWriteQueueRejectsExcessRepositoryWrite(t *testing.T) {
 		t.Fatalf("begin blocker transaction: %v", err)
 	}
 	if _, err := blockerTransaction.ExecContext(ctx, `
-INSERT INTO projects(id, name, description, created_at, updated_at)
-VALUES (900, 'blocker', '', '2026-08-11T12:00:00Z', '2026-08-11T12:00:00Z')
+INSERT INTO data_sources(id, name, source_kind, dsn_environment, created_at, updated_at)
+VALUES (900, 'blocker', 1, 'BLOCKER_DSN', '2026-08-11T12:00:00Z', '2026-08-11T12:00:00Z')
 `); err != nil {
 		t.Fatalf("hold external SQLite write lock: %v", err)
 	}
 
 	type writeResult struct {
-		projectID int64
-		err       error
+		dataSourceID int64
+		err          error
 	}
-	repository := dbsqlite.NewProjectRepository(store)
+	repository := dbsqlite.NewCatalogRepository(store, nil)
 	results := make(chan writeResult, 3)
 	start := make(chan struct{})
 	timestamp := time.Date(2026, time.August, 11, 12, 1, 0, 0, time.UTC)
-	for projectID := int64(1); projectID <= 3; projectID++ {
-		project := catalog.Project{
-			ID:        projectID,
-			Name:      fmt.Sprintf("project-%d"),
-			CreatedAt: timestamp,
-			UpdatedAt: timestamp,
+	for dataSourceID := int64(1); dataSourceID <= 3; dataSourceID++ {
+		source := catalog.DataSource{
+			ID:             dataSourceID,
+			Name:           fmt.Sprintf("source-%d", dataSourceID),
+			Kind:           catalog.DataSourceMySQL,
+			DSNEnvironment: fmt.Sprintf("SOURCE_%d_DSN", dataSourceID),
+			CreatedAt:      timestamp,
+			UpdatedAt:      timestamp,
 		}
 		go func() {
 			<-start
 			results <- writeResult{
-				projectID: project.ID,
-				err:       repository.CreateProject(ctx, project),
+				dataSourceID: source.ID,
+				err:          repository.CreateDataSource(ctx, source),
 			}
 		}()
 	}
@@ -73,7 +75,7 @@ VALUES (900, 'blocker', '', '2026-08-11T12:00:00Z', '2026-08-11T12:00:00Z')
 		if !errors.Is(result.err, dbsqlite.ErrWriteQueueFull) {
 			t.Fatalf("first completed write error = %v, want ErrWriteQueueFull", result.err)
 		}
-		rejectedID = result.projectID
+		rejectedID = result.dataSourceID
 	case <-time.After(2 * time.Second):
 		t.Fatal("excess repository write was not rejected while the queue was full")
 	}
@@ -86,21 +88,21 @@ VALUES (900, 'blocker', '', '2026-08-11T12:00:00Z', '2026-08-11T12:00:00Z')
 		select {
 		case result := <-results:
 			if result.err != nil {
-				t.Fatalf("accepted repository write for project %d: %v", result.projectID, result.err)
+				t.Fatalf("accepted repository write for data source %d: %v", result.dataSourceID, result.err)
 			}
-			acceptedIDs = append(acceptedIDs, result.projectID)
+			acceptedIDs = append(acceptedIDs, result.dataSourceID)
 		case <-time.After(2 * time.Second):
 			t.Fatal("accepted repository write did not complete after releasing the blocker")
 		}
 	}
 
-	for _, projectID := range acceptedIDs {
-		if _, err := repository.GetProject(ctx); err != nil {
-			t.Fatalf("get accepted project %d: %v", err)
+	for _, dataSourceID := range acceptedIDs {
+		if _, err := repository.GetDataSource(ctx, dataSourceID); err != nil {
+			t.Fatalf("get accepted data source %d: %v", dataSourceID, err)
 		}
 	}
-	if _, err := repository.GetProject(ctx, rejectedID); !errors.Is(err, catalog.ErrProjectNotFound) {
-		t.Fatalf("get rejected project %d error = %v, want ErrProjectNotFound", rejectedID, err)
+	if _, err := repository.GetDataSource(ctx, rejectedID); !errors.Is(err, catalog.ErrDataSourceNotFound) {
+		t.Fatalf("get rejected data source %d error = %v, want ErrDataSourceNotFound", rejectedID, err)
 	}
 }
 

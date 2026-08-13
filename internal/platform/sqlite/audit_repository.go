@@ -34,12 +34,9 @@ func insertAuditEvent(ctx context.Context, tx *sql.Tx, event audit.Event) error 
 INSERT INTO audit_events(
     id, actor, origin, action, subject_type, subject_id,
     reason, request_id, expected_revision_no, details_json, occurred_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
 		event.ID,
-		// A data source is shared, so an event about one belongs to no single
-		// project. The column is nullable for exactly that case; writing 0 would
-		// point at a project that cannot exist.
 		event.Actor,
 		event.Origin,
 		event.Action,

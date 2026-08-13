@@ -67,7 +67,7 @@ func getRelation(ctx context.Context, reader relationReader, relationID int64) (
 	var effective int
 	err := reader.QueryRowContext(ctx, `
 SELECT
-    r.id, r.r.relation_type, rc.latest_revision_no,
+    r.id, r.relation_type, rc.latest_revision_no,
     rc.status, rc.active_version_id, rc.proposed_version_id,
     r.created_at,
     EXISTS(SELECT 1 FROM effective_edges ee WHERE ee.relation_id = r.id)

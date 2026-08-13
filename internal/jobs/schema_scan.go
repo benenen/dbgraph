@@ -80,7 +80,7 @@ type SchemaScanStore interface {
 }
 
 type DataSourceCatalog interface {
-	GetProjectDataSource(context.Context, int64) (catalog.DataSource, error)
+	GetDataSource(context.Context, int64) (catalog.DataSource, error)
 }
 
 type SchemaRunner interface {
@@ -129,9 +129,7 @@ func (c *SchemaScanCoordinator) Start(ctx context.Context, command StartSchemaSc
 	if c.store == nil || c.catalog == nil || c.ids == nil {
 		return Job{}, ErrInvalidJob
 	}
-	// The link is the authorization: a project may only scan a source it has
-	// adopted, and GetProjectDataSource fails when it has not.
-	source, err := c.catalog.GetProjectDataSource(ctx, command.DataSourceID)
+	source, err := c.catalog.GetDataSource(ctx, command.DataSourceID)
 	if err != nil {
 		return Job{}, err
 	}

@@ -114,21 +114,21 @@ Every configured access token must be 32 random bytes encoded as exactly 64 hexa
 
 ## Roles and review model
 
-- Viewer: read catalog, relations, traversal, jobs, sessions, unresolved findings, and audit history, plus the project and data source lists.
+- Viewer: read catalog, relations, traversal, jobs, sessions, unresolved findings, audit history, and the data source list.
 - Agent: Viewer access plus individual relation create/revision/tombstone proposals and relation-init sessions.
 - Editor: Web relation create/revision/tombstone proposals.
 - Reviewer: revision proposals plus approve/reject/suppress/restore. Reviewer edits create a new proposed revision; they do not overwrite approved content.
-- Admin: project, evidence-repository, data-source, and full/incremental schema-scan administration; only Admin can list evidence repositories.
+- Admin: evidence-repository, data-source, and full/incremental schema-scan administration; only Admin can list evidence repositories.
 
 An approved revision remains effective while its replacement is pending. Rejection leaves the effective graph unchanged. Tombstone, suppression, restoration, and stale candidates are explicit reviewed state transitions. Historical relation versions, endpoints, references, evidence, events, scan facts, init batches, and audit events are append-only.
 
-`GET /api/v1/projects` lists every project (Viewer and above) and backs the header project picker: a `<select id="project-id">` that replaces typing a project ID by hand and persists the chosen project in the browser's `localStorage` under the `dbgraph.projectId` key. The side menu's `Projects` panel, visible to every role, lists the same projects. Its `Data sources` panel is Admin-only in the menu, but the underlying `GET /api/v1/projects/{projectID}/data-sources` route is Viewer-readable; only Admin responses include the `dsnEnvironment` and `createdAt` fields, so a source database's environment-variable name never reaches a non-Admin role. That panel's evidence-repository list comes from the Admin-only `GET /api/v1/projects/{projectID}/repositories`. Schema Explorer's node search, `GET /api/v1/projects/{projectID}/nodes`, accepts an optional `dataSourceId` filter to scope results to one data source.
+`GET /api/v1/data-sources` lists the service-wide source registry for every signed-in role. Only Admin responses include `dsnEnvironment` and timestamps, so deployment metadata never reaches a non-Admin role. Evidence repositories are listed through the Admin-only `GET /api/v1/repositories`. Catalog node search uses `GET /api/v1/nodes` and accepts an optional `dataSourceId` filter. The console routes and API payloads carry no separate workspace identifier.
 
 ## Agent-driven relation initialization
 
 There is no dbgraph source-code parser and no generic SQL execution tool. An Agent initialization flow is:
 
-1. Register a project, evidence repository, and MySQL data source as Admin.
+1. Register an evidence repository and MySQL data source as Admin.
 2. Run a schema scan and use `dbgraph_search_nodes` / `dbgraph_get_node` to resolve catalog columns.
 3. Call `dbgraph_begin_relation_init` with `FULL`, or `INCREMENTAL` and `scope.relationIds`.
 4. Analyze the source repository outside dbgraph.
@@ -193,4 +193,4 @@ golangci-lint run
 
 `make verify` skips `staticcheck` and `golangci-lint` with a printed notice when they are not installed; run them explicitly before a handoff.
 
-The test suite includes domain unit tests, real file-backed SQLite integration tests, subprocess serve/MCP checks, and a real Chromium workflow covering login, structured relation editing, evidence, review, traversal, and Reviewer state changes. Project coverage must remain at or above 80%.
+The test suite includes domain unit tests, real file-backed SQLite integration tests, subprocess serve/MCP checks, and a real Chromium workflow covering login and data-source administration without exposing stored credentials. Overall coverage must remain at or above 80%.

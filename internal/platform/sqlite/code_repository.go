@@ -53,7 +53,7 @@ func insertCodeRepository(ctx context.Context, tx *sql.Tx, repository catalog.Co
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO repositories(
     id, name, remote_url, default_branch, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?)
 `,
 		repository.ID,
 		repository.Name,

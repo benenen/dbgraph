@@ -111,7 +111,8 @@ func (h *handler) startSchemaScan(response http.ResponseWriter, request *http.Re
 		return
 	}
 	dataSourceID, err := parseID(request.PathValue("dataSourceID"))
-	if !ok {
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid data source ID", nil)
 		return
 	}
 	var input startSchemaScanDTO
@@ -168,10 +169,10 @@ func writeAdminError(response http.ResponseWriter, err error) {
 		writeError(response, http.StatusServiceUnavailable, "QUEUE_FULL", "schema scan queue is full", nil)
 	case errors.Is(err, catalog.ErrDataSourceInUse):
 		writeError(response, http.StatusConflict, "IN_USE",
-			"this data source has an imported catalog; unlink it from every project instead", nil)
+			"this data source has imported catalog content and cannot be deleted", nil)
 	case errors.Is(err, catalog.ErrDataSourceNameTaken):
 		writeError(response, http.StatusConflict, "NAME_TAKEN",
-			"a data source with that name already exists; link it to this project instead", nil)
+			"a data source with that name already exists", nil)
 	case errors.Is(err, catalog.ErrUnusableDSN):
 		// The text names parameters, never the connection string itself, so it
 		// is safe to hand back and is the only way the operator learns what to
@@ -217,8 +218,7 @@ func mapDataSourceForRole(source catalog.DataSource, role relations.Role) map[st
 }
 
 // listAllDataSources serves the shared registry. Any signed-in role may see
-// which sources exist so a project can adopt one; the DSN environment variable
-// stays Admin-only, as it does everywhere else.
+// which sources exist; the DSN environment variable stays Admin-only.
 func (h *handler) listAllDataSources(response http.ResponseWriter, request *http.Request) {
 	if h.services.Catalog == nil {
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)

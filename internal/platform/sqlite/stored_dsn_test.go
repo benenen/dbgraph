@@ -26,11 +26,6 @@ func TestStoredDSNCiphertextNeverLandsInTheDatabaseAsPlaintext(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	createdAt := time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC)
-	if err := dbsqlite.NewProjectRepository(store).CreateProject(ctx, catalog.Project{
-		ID: 10, Name: "orders", CreatedAt: createdAt, UpdatedAt: createdAt,
-	}); err != nil {
-		t.Fatal(err)
-	}
 
 	const password = "TotallySecretPassword123"
 	ciphertext := []byte("sealed-bytes-standing-in-for-aes-gcm-output")
@@ -39,7 +34,7 @@ func TestStoredDSNCiphertextNeverLandsInTheDatabaseAsPlaintext(t *testing.T) {
 		ID: 30, Name: "orders-primary", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "ORDERS_DSN", DSNKeyID: "abcd1234", DSNCiphertext: ciphertext,
 		CreatedAt: createdAt, UpdatedAt: createdAt,
-	}, 10); err != nil {
+	}); err != nil {
 		t.Fatalf("CreateDataSource: %v", err)
 	}
 
@@ -79,16 +74,11 @@ func TestDataSourceWithoutCiphertextKeepsWorking(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	createdAt := time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC)
-	if err := dbsqlite.NewProjectRepository(store).CreateProject(ctx, catalog.Project{
-		ID: 10, Name: "orders", CreatedAt: createdAt, UpdatedAt: createdAt,
-	}); err != nil {
-		t.Fatal(err)
-	}
 	repository := dbsqlite.NewCatalogRepository(store, nil)
 	if err := repository.CreateDataSource(ctx, catalog.DataSource{
 		ID: 31, Name: "legacy", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "LEGACY_DSN", CreatedAt: createdAt, UpdatedAt: createdAt,
-	}, 10); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := repository.GetDataSource(ctx, 31)
