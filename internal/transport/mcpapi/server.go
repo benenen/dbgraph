@@ -32,8 +32,8 @@ type StatusService interface {
 }
 
 type CatalogService interface {
-	FindCurrentNode(context.Context, int64, int64, string) (catalog.Node, error)
-	SearchCurrentNodes(context.Context, int64, int64, string, int) ([]catalog.Node, error)
+	FindCurrentNode(context.Context, int64, string) (catalog.Node, error)
+	SearchCurrentNodes(context.Context, int64, string, int) ([]catalog.Node, error)
 }
 
 type RelationService interface {
@@ -44,7 +44,7 @@ type RelationService interface {
 	Suppress(context.Context, relations.ChangeState) (relations.Relation, error)
 	Restore(context.Context, relations.ChangeState) (relations.Relation, error)
 	Get(context.Context, int64) (relations.Relation, error)
-	ListProposals(context.Context, int64, int) ([]relations.Relation, error)
+	ListProposals(context.Context, int) ([]relations.Relation, error)
 }
 
 type GraphService interface {
@@ -57,7 +57,7 @@ type ReconcileService interface {
 	SubmitBatch(context.Context, reconcile.SubmitBatch) (reconcile.BatchResult, error)
 	Complete(context.Context, reconcile.Complete) (reconcile.Completion, error)
 	Get(context.Context, int64) (reconcile.Session, error)
-	ListUnresolved(context.Context, int64, int) ([]reconcile.Unresolved, error)
+	ListUnresolved(context.Context, int) ([]reconcile.Unresolved, error)
 }
 
 type JobService interface {

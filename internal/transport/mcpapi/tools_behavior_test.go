@@ -67,13 +67,13 @@ func (s *toolBehaviorStub) Status(context.Context) (appstatus.Snapshot, error) {
 	}, nil
 }
 
-func (s *toolBehaviorStub) SearchCurrentNodes(_ context.Context, projectID int64, dataSourceID int64, query string, limit int) ([]catalog.Node, error) {
+func (s *toolBehaviorStub) SearchCurrentNodes(_ context.Context, query string, limit int) ([]catalog.Node, error) {
 	s.searchProjectID, s.searchDataSourceID, s.searchQuery, s.searchLimit = projectID, dataSourceID, query, limit
 	s.searchCalls++
 	return []catalog.Node{testNode()}, nil
 }
 
-func (s *toolBehaviorStub) FindCurrentNode(_ context.Context, projectID int64, dataSourceID int64, qualifiedName string) (catalog.Node, error) {
+func (s *toolBehaviorStub) FindCurrentNode(_ context.Context, qualifiedName string) (catalog.Node, error) {
 	s.findProjectID, s.findDataSource, s.findQualified = projectID, dataSourceID, qualifiedName
 	return testNode(), nil
 }
@@ -118,7 +118,7 @@ func (s *toolBehaviorStub) Get(context.Context, int64) (relations.Relation, erro
 	return testRelation(), nil
 }
 
-func (s *toolBehaviorStub) ListProposals(context.Context, int64, int) ([]relations.Relation, error) {
+func (s *toolBehaviorStub) ListProposals(context.Context, int) ([]relations.Relation, error) {
 	return []relations.Relation{testRelation()}, nil
 }
 
@@ -161,10 +161,10 @@ func (s *toolBehaviorStub) GetInit(_ context.Context, sessionID int64) (reconcil
 	return testInitSession(reconcile.StatusCompleted), nil
 }
 
-func (s *toolBehaviorStub) ListUnresolved(_ context.Context, _ int64, limit int) ([]reconcile.Unresolved, error) {
+func (s *toolBehaviorStub) ListUnresolved(_ context.Context, limit int) ([]reconcile.Unresolved, error) {
 	s.unresolvedLimit = limit
 	return []reconcile.Unresolved{{
-		ID: testSessionID + 20, ProjectID: testProjectID, RepositoryID: 41, SessionID: testSessionID,
+		ID: testSessionID + 20, RepositoryID: 41, SessionID: testSessionID,
 		BatchID: testSessionID + 10, Fingerprint: "sha256:finding", Type: "DYNAMIC_SQL",
 		Summary: "Runtime branch could not be resolved.", Evidence: json.RawMessage(`{"line":9007199254740993}`),
 		Status: 1, Principal: relations.Principal{Actor: "agent", Role: relations.RoleAgent, Origin: audit.OriginAgent},
@@ -192,8 +192,8 @@ func (s reconcileGetStub) Get(ctx context.Context, sessionID int64) (reconcile.S
 	return s.base.GetInit(ctx, sessionID)
 }
 
-func (s reconcileGetStub) ListUnresolved(ctx context.Context, projectID int64, limit int) ([]reconcile.Unresolved, error) {
-	return s.base.ListUnresolved(ctx, projectID, limit)
+func (s reconcileGetStub) ListUnresolved(ctx context.Context, limit int) ([]reconcile.Unresolved, error) {
+	return s.base.ListUnresolved(ctx, limit)
 }
 
 func (s *toolBehaviorStub) Start(_ context.Context, command jobs.StartSchemaScan) (jobs.Job, error) {
@@ -313,7 +313,7 @@ func TestAgentToolsForwardCommandsWithAuthenticatedPrincipal(t *testing.T) {
 	session := connectInMemoryClient(t, testServices(stub), principal)
 
 	callToolOK(t, session, "dbgraph_propose_relation", relationCreateArguments())
-	if stub.createCommand.ProjectID != testProjectID || stub.createCommand.Principal != principal ||
+	if stub.stub.createCommand.Principal != principal ||
 		stub.createCommand.Type != relations.TypeConditionalValueCopy || len(stub.createCommand.Evidence) != 1 ||
 		string(stub.createCommand.Transform.Literal.Value) != "9007199254740993" {
 		t.Fatalf("create command = %#v", stub.createCommand)
@@ -413,7 +413,7 @@ func TestReviewerAndAdminToolsForwardOnlyAuthorizedCommands(t *testing.T) {
 		"mode":"INCREMENTAL","tables":["learn.orders"],
 		"reason":"Refresh source schema","requestId":"scan-1"
 	}`)
-	if adminStub.startJobCommand.ProjectID != testProjectID || adminStub.startJobCommand.DataSourceID != testDataSourceID ||
+	if adminStub.adminStub.startJobCommand.DataSourceID != testDataSourceID ||
 		adminStub.startJobCommand.Mode != jobs.SchemaScanIncremental || len(adminStub.startJobCommand.Tables) != 1 ||
 		adminStub.startJobCommand.Tables[0] != "learn.orders" || adminStub.startJobCommand.Principal != admin ||
 		adminStub.startJobCommand.Reason != "Refresh source schema" || job["id"] != "9007199254740996" {
@@ -673,7 +673,7 @@ func testRelation() relations.Relation {
 	proposed.Kind = relations.ProposalTombstone
 	proposed.Origin = audit.OriginWeb
 	return relations.Relation{
-		ID: testRelationID, ProjectID: testProjectID, Type: relations.TypeConditionalValueCopy,
+		ID: testRelationID, Type: relations.TypeConditionalValueCopy,
 		LatestRevisionNo: 2, Status: relations.StatusApproved, Active: active, Proposed: &proposed,
 		Effective: true, CreatedAt: testMCPTime,
 	}
@@ -704,7 +704,7 @@ func testTraceResult() graph.TraceResult {
 func testInitSession(status reconcile.Status) reconcile.Session {
 	completed := testMCPTime.Add(time.Minute)
 	session := reconcile.Session{
-		ID: testSessionID, ProjectID: testProjectID, RepositoryID: 41, Mode: reconcile.ModeFull,
+		ID: testSessionID, RepositoryID: 41, Mode: reconcile.ModeFull,
 		SourceCommit: "abc123", Scope: json.RawMessage(`{"module":"service"}`), Status: status,
 		Principal: relations.Principal{Actor: "agent", Role: relations.RoleAgent, Origin: audit.OriginAgent},
 		RequestID: "init-1", CreatedAt: testMCPTime,
@@ -719,7 +719,7 @@ func testJob() jobs.Job {
 	started := testMCPTime.Add(time.Second)
 	completed := testMCPTime.Add(2 * time.Second)
 	return jobs.Job{
-		ID: testJobID, ProjectID: testProjectID, Type: jobs.TypeSchemaScan, Status: jobs.StatusSucceeded,
+		ID: testJobID, Type: jobs.TypeSchemaScan, Status: jobs.StatusSucceeded,
 		Payload: json.RawMessage(`{"dataSourceId":"9007199254740997"}`),
 		Result:  json.RawMessage(`{"scanRunId":"9007199254741010"}`), ErrorCode: "",
 		CreatedAt: testMCPTime, StartedAt: &started, CompletedAt: &completed, RevisionNo: 3,

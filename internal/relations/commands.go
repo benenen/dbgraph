@@ -46,7 +46,7 @@ func (c *Commands) PrepareCreate(ctx context.Context, command ProposeCreate) (Pr
 	if !canCreateOrTombstone(command.Principal) {
 		return ProposalRecord{}, ErrForbidden
 	}
-	if command.ProjectID <= 0 || !validType(command.Type) {
+	if !validType(command.Type) {
 		return ProposalRecord{}, ErrInvalidCommand
 	}
 	content, references, err := validateAndCopyContent(
@@ -97,7 +97,6 @@ func (c *Commands) PrepareCreate(ctx context.Context, command ProposeCreate) (Pr
 		VersionID:   versionID,
 		EventID:     eventID,
 		AuditID:     auditID,
-		ProjectID:   command.ProjectID,
 		Type:        command.Type,
 		Fingerprint: fingerprint,
 		Revision:    revision,
@@ -170,7 +169,6 @@ func (c *Commands) ProposeRevision(ctx context.Context, command ProposeRevision)
 		VersionID:   versionID,
 		EventID:     eventID,
 		AuditID:     auditID,
-		ProjectID:   current.ProjectID,
 		Type:        current.Type,
 		Fingerprint: fingerprint,
 		Revision:    revision,
@@ -247,7 +245,6 @@ func (c *Commands) prepareInvalidation(
 		VersionID:   versionID,
 		EventID:     eventID,
 		AuditID:     auditID,
-		ProjectID:   current.ProjectID,
 		Type:        current.Type,
 		Fingerprint: fingerprint,
 		Revision:    revision,
@@ -300,11 +297,11 @@ func (c *Commands) Get(ctx context.Context, relationID int64) (Relation, error) 
 	return c.repository.Get(ctx, relationID)
 }
 
-func (c *Commands) ListProposals(ctx context.Context, projectID int64, limit int) ([]Relation, error) {
-	if projectID <= 0 || limit < 1 || limit > 100 {
+func (c *Commands) ListProposals(ctx context.Context, limit int) ([]Relation, error) {
+	if limit < 1 || limit > 100 {
 		return nil, ErrInvalidCommand
 	}
-	return c.repository.ListProposals(ctx, projectID, limit)
+	return c.repository.ListProposals(ctx, limit)
 }
 
 func (c *Commands) changeState(

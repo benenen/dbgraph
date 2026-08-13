@@ -47,9 +47,9 @@ func (r *ReconcileRepository) Begin(
 		var repositoryExists int
 		if err := tx.QueryRowContext(ctx, `
 SELECT EXISTS(
-    SELECT 1 FROM repositories WHERE id = ? 
+    SELECT 1 FROM repositories WHERE id = ?
 )
-`, session.RepositoryID, session.ProjectID).Scan(&repositoryExists); err != nil {
+`, session.RepositoryID).Scan(&repositoryExists); err != nil {
 			return fmt.Errorf("verify relation init repository: %w", err)
 		}
 		if repositoryExists != 1 {
@@ -169,7 +169,7 @@ WHERE session_id = ?
 			var relationID int64
 			err := tx.QueryRowContext(ctx, `
 SELECT id FROM relations WHERE create_fingerprint = ?
-`, session.ProjectID, proposal.Fingerprint).Scan(&relationID)
+`, proposal.Fingerprint).Scan(&relationID)
 			status := reconcile.ItemDeduplicated
 			if errors.Is(err, sql.ErrNoRows) {
 				created, err := insertCreateProposal(ctx, tx, proposal)
@@ -643,7 +643,6 @@ INSERT INTO audit_events(
 ) VALUES (?, ?, ?, ?, ?, 'RELATION_INIT_SESSION', ?, ?, ?, ?, '{}', ?)
 `,
 		auditID,
-
 		principal.Actor,
 		principal.Origin,
 		action,

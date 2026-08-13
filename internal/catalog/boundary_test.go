@@ -57,7 +57,6 @@ func TestCodeRepositoryServiceCreatesAndRetrievesEvidenceMetadata(t *testing.T) 
 	service := catalog.NewCodeRepositoryService(dbsqlite.NewCodeRepository(store), ids, func() time.Time { return fixedTime })
 
 	created, err := service.Create(ctx, catalog.CreateCodeRepository{
-		ProjectID:     project.ID,
 		Name:          "  learning-service  ",
 		RemoteURL:     "  https://example.test/learning-service.git  ",
 		DefaultBranch: "  main  ",
@@ -102,11 +101,11 @@ func TestCatalogServicesRejectInvalidCreationInputs(t *testing.T) {
 
 	repositoryService := catalog.NewCodeRepositoryService(dbsqlite.NewCodeRepository(store), ids, func() time.Time { return fixedTime })
 	testCases := []catalog.CreateCodeRepository{
-		{ProjectID: 0, Name: "repository"},
-		{ProjectID: 1, Name: " "},
-		{ProjectID: 1, Name: "repository", RemoteURL: "https://user:password@example.test/private.git"},
-		{ProjectID: 1, Name: "repository", RemoteURL: "://invalid"},
-		{ProjectID: 1, Name: strings.Repeat("r", 201)},
+		{Name: "repository"},
+		{Name: " "},
+		{Name: "repository", RemoteURL: "https://user:password@example.test/private.git"},
+		{Name: "repository", RemoteURL: "://invalid"},
+		{Name: strings.Repeat("r", 201)},
 	}
 	for _, command := range testCases {
 		if _, err := repositoryService.Create(ctx, command); !errors.Is(err, catalog.ErrInvalidRepository) {

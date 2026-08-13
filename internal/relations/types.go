@@ -126,7 +126,6 @@ type Revision struct {
 
 type Relation struct {
 	ID               int64
-	ProjectID        int64
 	Type             Type
 	LatestRevisionNo int
 	Status           Status
@@ -137,7 +136,6 @@ type Relation struct {
 }
 
 type ProposeCreate struct {
-	ProjectID    int64
 	Type         Type
 	SourceNodeID int64
 	TargetNodeID int64
@@ -222,7 +220,6 @@ type ProposalRecord struct {
 	VersionID   int64
 	EventID     int64
 	AuditID     int64
-	ProjectID   int64
 	Type        Type
 	Fingerprint string
 	Revision    Revision
@@ -260,7 +257,7 @@ type Repository interface {
 	Suppress(context.Context, StateRecord) (Relation, error)
 	Restore(context.Context, StateRecord) (Relation, error)
 	Get(context.Context, int64) (Relation, error)
-	ListProposals(context.Context, int64, int) ([]Relation, error)
+	ListProposals(context.Context, int) ([]Relation, error)
 }
 
 type IDGenerator interface {

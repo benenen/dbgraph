@@ -44,8 +44,7 @@ func TestGraphRepositoryLoadsRecursivePathsAcrossMultipleDepths(t *testing.T) {
 		dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime },
 	)
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID,
-		Name:      "recursive", Kind: catalog.DataSourceMySQL,
+		Name: "recursive", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "RECURSIVE_GRAPH_MYSQL_DSN",
 	})
 	if err != nil {
@@ -62,7 +61,6 @@ func TestGraphRepositoryLoadsRecursivePathsAcrossMultipleDepths(t *testing.T) {
 		{StableKey: "column:g.c.id", ParentStableKey: "table:g.c", Kind: catalog.NodeColumn, Name: "id", QualifiedName: "g.c.id", DataType: "bigint", Ordinal: 1},
 	}
 	_, err = catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project.ID, DataSourceID: dataSource.ID, Nodes: nodes,
 		ForeignKeys: []catalog.DeclaredForeignKey{
 			{ConstraintSchema: "g", Name: "fk_a_b", SourceColumn: "g.a.id", TargetColumn: "g.b.id", Ordinal: 1},
 			{ConstraintSchema: "g", Name: "fk_b_c", SourceColumn: "g.b.id", TargetColumn: "g.c.id", Ordinal: 1},
@@ -85,7 +83,6 @@ func TestGraphRepositoryLoadsRecursivePathsAcrossMultipleDepths(t *testing.T) {
 	truncated, _, err := dbsqlite.NewGraphRepository(store).LoadRecursiveEdges(
 		ctx,
 		graph.RecursiveTraceRequest{
-			ProjectID: project.ID, StartNodeID: start.ID, TargetNodeID: target.ID,
 			Direction: graph.DirectionDownstream, MaxDepth: 4,
 			MaxEdgeExpansions: 100, MaxLoadedBytes: 1 << 20,
 		},
@@ -109,7 +106,6 @@ func TestGraphRepositoryLoadsRecursivePathsAcrossMultipleDepths(t *testing.T) {
 	upstreamTruncated, _, err := dbsqlite.NewGraphRepository(store).LoadRecursiveEdges(
 		ctx,
 		graph.RecursiveTraceRequest{
-			ProjectID: project.ID, StartNodeID: target.ID, TargetNodeID: start.ID,
 			Direction: graph.DirectionUpstream, MaxDepth: 4,
 			MaxEdgeExpansions: 100, MaxLoadedBytes: 1 << 20,
 		},
@@ -127,7 +123,6 @@ func TestGraphRepositoryLoadsRecursivePathsAcrossMultipleDepths(t *testing.T) {
 	expansionTruncated, _, err := dbsqlite.NewGraphRepository(store).LoadRecursiveEdges(
 		ctx,
 		graph.RecursiveTraceRequest{
-			ProjectID: project.ID, StartNodeID: start.ID, Direction: graph.DirectionDownstream,
 			MaxDepth: 4, MaxEdgeExpansions: 1, MaxLoadedBytes: 1 << 20,
 		},
 		func(graph.RecursiveEdgeState) error { expansionCount++; return nil },
@@ -140,7 +135,6 @@ func TestGraphRepositoryLoadsRecursivePathsAcrossMultipleDepths(t *testing.T) {
 	byteTruncated, consumed, err := dbsqlite.NewGraphRepository(store).LoadRecursiveEdges(
 		ctx,
 		graph.RecursiveTraceRequest{
-			ProjectID: project.ID, StartNodeID: start.ID, Direction: graph.DirectionDownstream,
 			MaxDepth: 4, MaxEdgeExpansions: 100, MaxLoadedBytes: 1,
 		},
 		func(graph.RecursiveEdgeState) error { byteCount++; return nil },
@@ -154,7 +148,6 @@ func TestGraphRepositoryLoadsRecursivePathsAcrossMultipleDepths(t *testing.T) {
 	_, _, err = dbsqlite.NewGraphRepository(store).LoadRecursiveEdges(
 		cancelledContext,
 		graph.RecursiveTraceRequest{
-			ProjectID: project.ID, StartNodeID: start.ID, Direction: graph.DirectionDownstream,
 			MaxDepth: 4, MaxEdgeExpansions: 100, MaxLoadedBytes: 1 << 20,
 		},
 		func(graph.RecursiveEdgeState) error { return nil },
@@ -164,7 +157,6 @@ func TestGraphRepositoryLoadsRecursivePathsAcrossMultipleDepths(t *testing.T) {
 	}
 
 	cycleResult, err := graph.NewService(dbsqlite.NewGraphRepository(store)).Trace(ctx, graph.TraceRequest{
-		ProjectID: project.ID, StartNodeID: start.ID, Direction: graph.DirectionDownstream,
 		Limits: graph.Limits{MaxDepth: 4, MaxNodes: 10, MaxPaths: 10},
 	})
 	if err != nil {
@@ -181,7 +173,6 @@ func TestGraphRepositoryLoadsRecursivePathsAcrossMultipleDepths(t *testing.T) {
 	} {
 		t.Run(name+" limit", func(t *testing.T) {
 			limited, err := graph.NewService(dbsqlite.NewGraphRepository(store)).Trace(ctx, graph.TraceRequest{
-				ProjectID: project.ID, StartNodeID: start.ID, Direction: graph.DirectionDownstream,
 				Limits: limits,
 			})
 			if err != nil {
@@ -216,8 +207,7 @@ func TestGraphRepositoryBoundsDenseCyclicLargeASTTraversal(t *testing.T) {
 		dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime },
 	)
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID,
-		Name:      "dense", Kind: catalog.DataSourceMySQL,
+		Name: "dense", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "DENSE_GRAPH_MYSQL_DSN",
 	})
 	if err != nil {
@@ -237,9 +227,7 @@ func TestGraphRepositoryBoundsDenseCyclicLargeASTTraversal(t *testing.T) {
 			DataType: "varchar", Ordinal: index + 1,
 		})
 	}
-	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project.ID, DataSourceID: dataSource.ID, Nodes: nodeInputs,
-	}); err != nil {
+	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
 		t.Fatal(err)
 	}
 	nodes := make([]catalog.Node, 0, nodeCount)
@@ -266,7 +254,6 @@ func TestGraphRepositoryBoundsDenseCyclicLargeASTTraversal(t *testing.T) {
 				continue
 			}
 			created, err := commands.ProposeCreate(ctx, relations.ProposeCreate{
-				ProjectID: project.ID, Type: relations.TypeConditionalValueCopy,
 				SourceNodeID: source.ID, TargetNodeID: target.ID,
 				Guard: guard, Transform: conditions.Value{Kind: conditions.ValueColumnCopy, NodeID: source.ID},
 				Confidence: 0.9,
@@ -302,7 +289,6 @@ func TestGraphRepositoryBoundsDenseCyclicLargeASTTraversal(t *testing.T) {
 	expansionTruncated, expansionBytes, err := repository.LoadRecursiveEdges(
 		ctx,
 		graph.RecursiveTraceRequest{
-			ProjectID: project.ID, StartNodeID: nodes[0].ID, Direction: graph.DirectionDownstream,
 			MaxDepth: nodeCount, MaxEdgeExpansions: 3, MaxLoadedBytes: 16 << 20,
 		},
 		func(graph.RecursiveEdgeState) error { expansionCallbacks++; return nil },
@@ -318,7 +304,6 @@ func TestGraphRepositoryBoundsDenseCyclicLargeASTTraversal(t *testing.T) {
 	byteTruncated, loadedBytes, err := repository.LoadRecursiveEdges(
 		ctx,
 		graph.RecursiveTraceRequest{
-			ProjectID: project.ID, StartNodeID: nodes[0].ID, Direction: graph.DirectionDownstream,
 			MaxDepth: nodeCount, MaxEdgeExpansions: 300, MaxLoadedBytes: 2 * firstEdgeLoadedBytes,
 		},
 		func(graph.RecursiveEdgeState) error { byteCallbacks++; return nil },

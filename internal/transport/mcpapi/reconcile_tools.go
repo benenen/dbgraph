@@ -12,7 +12,6 @@ import (
 )
 
 type beginRelationInitInput struct {
-	ProjectID    string          `json:"projectId"`
 	RepositoryID string          `json:"repositoryId"`
 	Mode         string          `json:"mode"`
 	SourceCommit string          `json:"sourceCommit"`
@@ -26,7 +25,6 @@ type relationInitIDInput struct {
 
 type initSessionOutput struct {
 	ID           string          `json:"id"`
-	ProjectID    string          `json:"projectId"`
 	RepositoryID string          `json:"repositoryId"`
 	Mode         string          `json:"mode"`
 	SourceCommit string          `json:"sourceCommit"`
@@ -86,13 +84,11 @@ type completionOutput struct {
 }
 
 type listUnresolvedInput struct {
-	ProjectID string `json:"projectId"`
-	Limit     int    `json:"limit,omitempty"`
+	Limit int `json:"limit,omitempty"`
 }
 
 type unresolvedOutput struct {
 	ID           string          `json:"id"`
-	ProjectID    string          `json:"projectId"`
 	RepositoryID string          `json:"repositoryId"`
 	SessionID    string          `json:"sessionId"`
 	BatchID      string          `json:"batchId"`
@@ -129,10 +125,6 @@ func registerReconcileReadTools(server *mcp.Server, services Services) {
 			if services.Reconcile == nil {
 				return nil, unresolvedListOutput{}, errServiceUnavailable
 			}
-			projectID, err := parseID(input.ProjectID)
-			if err != nil {
-				return nil, unresolvedListOutput{}, safeToolError(err)
-			}
 			if input.Limit == 0 {
 				input.Limit = 20
 			}
@@ -140,7 +132,7 @@ func registerReconcileReadTools(server *mcp.Server, services Services) {
 				return nil, unresolvedListOutput{}, errInvalidToolInput
 			}
 			responseLimit := min(input.Limit, maximumMCPListResponseCount)
-			findings, err := services.Reconcile.ListUnresolved(ctx, projectID, responseLimit+1)
+			findings, err := services.Reconcile.ListUnresolved(ctx, responseLimit+1)
 			if err != nil {
 				return nil, unresolvedListOutput{}, safeToolError(err)
 			}
@@ -199,10 +191,6 @@ func registerReconcileWriteTools(server *mcp.Server, services Services, principa
 			if services.Reconcile == nil {
 				return nil, initSessionOutput{}, errServiceUnavailable
 			}
-			projectID, err := parseID(input.ProjectID)
-			if err != nil {
-				return nil, initSessionOutput{}, err
-			}
 			repositoryID, err := parseID(input.RepositoryID)
 			if err != nil {
 				return nil, initSessionOutput{}, err
@@ -216,7 +204,7 @@ func registerReconcileWriteTools(server *mcp.Server, services Services, principa
 				return nil, initSessionOutput{}, err
 			}
 			session, err := services.Reconcile.Begin(ctx, reconcile.Begin{
-				ProjectID: projectID, RepositoryID: repositoryID, Mode: mode, SourceCommit: input.SourceCommit,
+				RepositoryID: repositoryID, Mode: mode, SourceCommit: input.SourceCommit,
 				Scope: scope, Principal: principal, RequestID: input.RequestID,
 			})
 			return nil, mapInitSession(session), safeToolError(err)
@@ -321,7 +309,7 @@ func marshalObject(value json.RawMessage) (json.RawMessage, error) {
 
 func mapInitSession(session reconcile.Session) initSessionOutput {
 	result := initSessionOutput{
-		ID: formatID(session.ID), ProjectID: formatID(session.ProjectID), RepositoryID: formatID(session.RepositoryID),
+		ID: formatID(session.ID), RepositoryID: formatID(session.RepositoryID),
 		Mode: initModeName(session.Mode), SourceCommit: session.SourceCommit,
 		Scope:  append(json.RawMessage(nil), session.Scope...),
 		Status: initStatusName(session.Status), Actor: session.Principal.Actor,
@@ -362,7 +350,7 @@ func mapUnresolved(finding reconcile.Unresolved) unresolvedOutput {
 		status = "RESOLVED"
 	}
 	return unresolvedOutput{
-		ID: formatID(finding.ID), ProjectID: formatID(finding.ProjectID), RepositoryID: formatID(finding.RepositoryID),
+		ID: formatID(finding.ID), RepositoryID: formatID(finding.RepositoryID),
 		SessionID: formatID(finding.SessionID), BatchID: formatID(finding.BatchID), Fingerprint: finding.Fingerprint,
 		Type: finding.Type, Summary: finding.Summary,
 		Evidence: append(json.RawMessage(nil), finding.Evidence...), Status: status,

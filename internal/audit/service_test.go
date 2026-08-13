@@ -29,7 +29,7 @@ func (r *auditCounterRepository) AppendAuditEvent(context.Context, audit.Event) 
 	return nil
 }
 
-func (r *auditCounterRepository) ListAuditEvents(context.Context, int64, int) ([]audit.Event, error) {
+func (r *auditCounterRepository) ListAuditEvents(context.Context, int) ([]audit.Event, error) {
 	return nil, nil
 }
 
@@ -47,7 +47,6 @@ func TestServiceRejectsUnboundedOrNonObjectDetailsBeforeAllocation(t *testing.T)
 			repository := &auditCounterRepository{}
 			service := audit.NewService(repository, ids, time.Now)
 			_, err := service.Record(context.Background(), audit.RecordEvent{
-				ProjectID: 1, Actor: "actor", Origin: audit.OriginWeb, Action: "TEST",
 				SubjectType: "TEST", SubjectID: 1, Reason: "reason", RequestID: "request", Details: details,
 			})
 			if !errors.Is(err, audit.ErrInvalidEvent) {
@@ -98,7 +97,6 @@ func TestServiceRecordsRetrievableEvent(t *testing.T) {
 	)
 	expectedRevision := 2
 	recorded, err := service.Record(ctx, audit.RecordEvent{
-		ProjectID:        project.ID,
 		Actor:            "web-editor@example.test",
 		Origin:           audit.OriginWeb,
 		Action:           "RELATION_REVISION_PROPOSED",

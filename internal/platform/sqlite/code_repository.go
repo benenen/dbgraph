@@ -108,7 +108,7 @@ func (r *CodeRepository) ListCodeRepositories(
 	rows, err := r.store.db.QueryContext(ctx, `
 SELECT id, name, remote_url, default_branch, created_at, updated_at
 FROM repositories
-WHERE 1=1
+WHERE 1 = 1
 ORDER BY name, id
 LIMIT ?
 `, limit)
@@ -122,7 +122,7 @@ LIMIT ?
 		var createdAt string
 		var updatedAt string
 		if err := rows.Scan(
-			&repository.ID, &repository.ProjectID, &repository.Name,
+			&repository.ID, &repository.Name,
 			&repository.RemoteURL, &repository.DefaultBranch, &createdAt, &updatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan code repository: %w", err)

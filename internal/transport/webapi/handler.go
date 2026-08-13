@@ -32,29 +32,19 @@ const (
 
 type CatalogService interface {
 	CreateDataSourceAsAdmin(context.Context, catalog.AdminCreateDataSource) (catalog.DataSource, error)
-	FindCurrentNode(context.Context, int64, int64, string) (catalog.Node, error)
-	GetCurrentNode(context.Context, int64, int64) (catalog.Node, error)
-	SearchCurrentNodes(context.Context, int64, int64, string, int) ([]catalog.Node, error)
-	ListDataSources(context.Context, int64, int) ([]catalog.DataSource, error)
+	FindCurrentNode(context.Context, int64, string) (catalog.Node, error)
+	GetCurrentNode(context.Context, int64) (catalog.Node, error)
+	SearchCurrentNodes(context.Context, int64, string, int) ([]catalog.Node, error)
 	ListAllDataSources(context.Context, int) ([]catalog.DataSource, error)
-	LinkDataSource(context.Context, int64, int64) error
-	UnlinkDataSource(context.Context, int64, int64) error
 	DeleteDataSource(context.Context, int64) error
 	UpdateDataSourceAsAdmin(context.Context, catalog.AdminUpdateDataSource) (catalog.DataSource, error)
-	ListTables(context.Context, int64, int64, string, int) ([]catalog.TableSummary, error)
-	TableDetail(context.Context, int64, int64) (catalog.TableDetail, error)
-}
-
-type ProjectService interface {
-	CreateAsAdmin(context.Context, catalog.AdminCreateProject) (catalog.Project, error)
-	List(context.Context, int) ([]catalog.Project, error)
-	Delete(context.Context, int64) error
-	UpdateAsAdmin(context.Context, catalog.AdminUpdateProject) (catalog.Project, error)
+	ListTables(context.Context, int64, string, int) ([]catalog.TableSummary, error)
+	TableDetail(context.Context, int64) (catalog.TableDetail, error)
 }
 
 type CodeRepositoryService interface {
 	CreateAsAdmin(context.Context, catalog.AdminCreateCodeRepository) (catalog.CodeRepository, error)
-	List(context.Context, int64, int) ([]catalog.CodeRepository, error)
+	List(context.Context, int) ([]catalog.CodeRepository, error)
 }
 
 type RelationService interface {
@@ -65,17 +55,17 @@ type RelationService interface {
 	Suppress(context.Context, relations.ChangeState) (relations.Relation, error)
 	Restore(context.Context, relations.ChangeState) (relations.Relation, error)
 	Get(context.Context, int64) (relations.Relation, error)
-	ListProposals(context.Context, int64, int) ([]relations.Relation, error)
+	ListProposals(context.Context, int) ([]relations.Relation, error)
 }
 
 type GraphService interface {
 	Trace(context.Context, graph.TraceRequest) (graph.TraceResult, error)
-	DataSourceGraph(context.Context, int64, int64) (graph.DataSourceGraph, error)
+	DataSourceGraph(context.Context, int64) (graph.DataSourceGraph, error)
 }
 
 type ReconcileService interface {
 	Get(context.Context, int64) (reconcile.Session, error)
-	ListUnresolved(context.Context, int64, int) ([]reconcile.Unresolved, error)
+	ListUnresolved(context.Context, int) ([]reconcile.Unresolved, error)
 }
 
 type JobService interface {
@@ -84,11 +74,10 @@ type JobService interface {
 }
 
 type AuditService interface {
-	ListProject(context.Context, int64, int) ([]audit.Event, error)
+	ListProject(context.Context, int) ([]audit.Event, error)
 }
 
 type Services struct {
-	Projects         ProjectService
 	CodeRepositories CodeRepositoryService
 	Catalog          CatalogService
 	Relations        RelationService
@@ -139,38 +128,31 @@ func NewHandler(services Services, sessions *appauth.SessionManager, options ...
 	for _, option := range options {
 		option(h)
 	}
-	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/relations", h.proposeRelation)
-	h.mux.HandleFunc("POST /api/v1/projects", h.createProject)
-	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/repositories", h.createCodeRepository)
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/relations/{relationID}", h.getRelation)
-	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/relations/{relationID}/revisions", h.proposeRevision)
-	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/relations/{relationID}/tombstones", h.proposeTombstone)
-	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/relations/{relationID}/reviews", h.reviewRelation)
-	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/relations/{relationID}/suppress", h.suppressRelation)
-	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/relations/{relationID}/restore", h.restoreRelation)
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/relation-proposals", h.listProposals)
-	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/data-sources", h.createDataSource)
-	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/data-sources/{dataSourceID}/schema-scan-jobs", h.startSchemaScan)
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/nodes", h.searchNodes)
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/nodes/{nodeID}", h.getNode)
-	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/graph-traces", h.traceGraph)
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/unresolved-findings", h.listUnresolved)
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/schema-scan-jobs/{jobID}", h.getJob)
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/relation-init-sessions/{sessionID}", h.getInitSession)
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/audit-events", h.listAuditEvents)
-	h.mux.HandleFunc("GET /api/v1/projects", h.listProjects)
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/data-sources", h.listDataSources)
+	h.mux.HandleFunc("POST /api/v1/relations", h.proposeRelation)
+	h.mux.HandleFunc("POST /api/v1/repositories", h.createCodeRepository)
+	h.mux.HandleFunc("GET /api/v1/relations/{relationID}", h.getRelation)
+	h.mux.HandleFunc("POST /api/v1/relations/{relationID}/revisions", h.proposeRevision)
+	h.mux.HandleFunc("POST /api/v1/relations/{relationID}/tombstones", h.proposeTombstone)
+	h.mux.HandleFunc("POST /api/v1/relations/{relationID}/reviews", h.reviewRelation)
+	h.mux.HandleFunc("POST /api/v1/relations/{relationID}/suppress", h.suppressRelation)
+	h.mux.HandleFunc("POST /api/v1/relations/{relationID}/restore", h.restoreRelation)
+	h.mux.HandleFunc("GET /api/v1/relation-proposals", h.listProposals)
+	h.mux.HandleFunc("POST /api/v1/data-sources", h.createDataSource)
+	h.mux.HandleFunc("POST /api/v1/data-sources/{dataSourceID}/schema-scan-jobs", h.startSchemaScan)
+	h.mux.HandleFunc("GET /api/v1/nodes", h.searchNodes)
+	h.mux.HandleFunc("GET /api/v1/nodes/{nodeID}", h.getNode)
+	h.mux.HandleFunc("POST /api/v1/graph-traces", h.traceGraph)
+	h.mux.HandleFunc("GET /api/v1/unresolved-findings", h.listUnresolved)
+	h.mux.HandleFunc("GET /api/v1/schema-scan-jobs/{jobID}", h.getJob)
+	h.mux.HandleFunc("GET /api/v1/relation-init-sessions/{sessionID}", h.getInitSession)
+	h.mux.HandleFunc("GET /api/v1/audit-events", h.listAuditEvents)
 	h.mux.HandleFunc("GET /api/v1/data-sources", h.listAllDataSources)
 	h.mux.HandleFunc("POST /api/v1/data-sources/{dataSourceID}/delete", h.deleteDataSource)
-	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/delete", h.deleteProject)
-	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/update", h.updateProject)
 	h.mux.HandleFunc("POST /api/v1/data-sources/{dataSourceID}/update", h.updateDataSource)
-	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/data-sources/{dataSourceID}/link", h.linkDataSource)
-	h.mux.HandleFunc("POST /api/v1/projects/{projectID}/data-sources/{dataSourceID}/unlink", h.unlinkDataSource)
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/data-sources/{dataSourceID}/tables", h.listTables)
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/data-sources/{dataSourceID}/relation-graph", h.dataSourceGraph)
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/tables/{tableID}", h.tableDetail)
-	h.mux.HandleFunc("GET /api/v1/projects/{projectID}/repositories", h.listRepositories)
+	h.mux.HandleFunc("GET /api/v1/data-sources/{dataSourceID}/tables", h.listTables)
+	h.mux.HandleFunc("GET /api/v1/data-sources/{dataSourceID}/relation-graph", h.dataSourceGraph)
+	h.mux.HandleFunc("GET /api/v1/tables/{tableID}", h.tableDetail)
+	h.mux.HandleFunc("GET /api/v1/repositories", h.listRepositories)
 	h.mux.HandleFunc("GET /api/v1/session", h.getSession)
 	h.mux.HandleFunc("POST /logout", h.logout)
 	protection := http.NewCrossOriginProtection()

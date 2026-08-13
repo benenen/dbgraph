@@ -21,7 +21,7 @@ func TestDeleteDataSourceRemovesOneWhoseScansOnlyFailed(t *testing.T) {
 	ctx, repository, _ := newDeleteFixture(t)
 
 	startedAt := time.Date(2026, 8, 12, 9, 30, 0, 0, time.UTC)
-	run := catalog.SchemaScanRun{ID: 50, ProjectID: 10, DataSourceID: 30, StartedAt: startedAt}
+	run := catalog.SchemaScanRun{ID: 50, DataSourceID: 30, StartedAt: startedAt}
 	if err := repository.BeginSchemaScan(ctx, run); err != nil {
 		t.Fatalf("BeginSchemaScan: %v", err)
 	}
@@ -54,7 +54,6 @@ func TestDeleteDataSourceRefusesOneThatImportedACatalog(t *testing.T) {
 	ctx, repository, service := newDeleteFixture(t)
 
 	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: 10, DataSourceID: 30,
 		Nodes: []catalog.NodeInput{
 			{StableKey: "database:app", Kind: catalog.NodeDatabase, Name: "app", QualifiedName: "mysql://app"},
 		},

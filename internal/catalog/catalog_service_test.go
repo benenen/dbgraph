@@ -39,8 +39,7 @@ func TestAdminCreatesAuditedDataSource(t *testing.T) {
 	}
 	service := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 	command := catalog.AdminCreateDataSource{
-		ProjectID: project.ID,
-		Name:      "primary", Kind: catalog.DataSourceMySQL,
+		Name: "primary", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "PRIMARY_MYSQL_DSN", Reason: "Configure production metadata source", RequestID: "web-1",
 		Principal: relations.Principal{Actor: "viewer", Role: relations.RoleViewer, Origin: audit.OriginWeb},
 	}
@@ -84,8 +83,7 @@ func TestPublishSnapshotPublishesAndReconcilesDeclaredForeignKey(t *testing.T) {
 	}
 	service := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 	source, err := service.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID,
-		Name:      "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "FK_MYSQL_DSN",
+		Name: "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "FK_MYSQL_DSN",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -102,9 +100,7 @@ func TestPublishSnapshotPublishesAndReconcilesDeclaredForeignKey(t *testing.T) {
 		ConstraintSchema: "learn", Name: "fk_classes_student",
 		SourceColumn: "learn.classes.student_id", TargetColumn: "learn.students.id", Ordinal: 1,
 	}
-	first, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project.ID, DataSourceID: source.ID, Nodes: nodes, ForeignKeys: []catalog.DeclaredForeignKey{fk},
-	})
+	first, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{})
 	if err != nil {
 		t.Fatalf("publish snapshot with FK: %v", err)
 	}
@@ -119,7 +115,6 @@ func TestPublishSnapshotPublishesAndReconcilesDeclaredForeignKey(t *testing.T) {
 	graphService := graph.NewService(dbsqlite.NewGraphRepository(store))
 	trace := func() graph.TraceResult {
 		result, err := graphService.Trace(ctx, graph.TraceRequest{
-			ProjectID: project.ID, StartNodeID: from.ID, TargetNodeID: to.ID,
 			Direction: graph.DirectionDownstream, Context: conditions.Context{}, Limits: graph.DefaultLimits(),
 		})
 		if err != nil {
@@ -144,27 +139,21 @@ func TestPublishSnapshotPublishesAndReconcilesDeclaredForeignKey(t *testing.T) {
 		t.Fatalf("declared FK relation = %#v", relation)
 	}
 
-	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project.ID, DataSourceID: source.ID, Nodes: nodes, ForeignKeys: []catalog.DeclaredForeignKey{fk},
-	}); err != nil {
+	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
 		t.Fatal(err)
 	}
 	unchanged, err := relationRepository.Get(ctx, relationID)
 	if err != nil || unchanged.LatestRevisionNo != 1 || len(trace().Paths) != 1 {
 		t.Fatalf("unchanged FK relation = %#v, err=%v", unchanged, err)
 	}
-	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project.ID, DataSourceID: source.ID, Nodes: nodes,
-	}); err != nil {
+	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
 		t.Fatal(err)
 	}
 	removed, err := relationRepository.Get(ctx, relationID)
 	if err != nil || removed.Status != relations.StatusTombstoned || removed.Effective || removed.LatestRevisionNo != 2 || len(trace().Paths) != 0 {
 		t.Fatalf("removed FK relation = %#v, err=%v", removed, err)
 	}
-	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project.ID, DataSourceID: source.ID, Nodes: nodes, ForeignKeys: []catalog.DeclaredForeignKey{fk},
-	}); err != nil {
+	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
 		t.Fatal(err)
 	}
 	reappeared, err := relationRepository.Get(ctx, relationID)
@@ -210,7 +199,6 @@ func TestServicePublishesCurrentSchemaSnapshot(t *testing.T) {
 		func() time.Time { return fixedTime },
 	)
 	dataSource, err := service.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID:      project.ID,
 		Name:           "Primary MySQL",
 		Kind:           catalog.DataSourceMySQL,
 		DSNEnvironment: "DBGRAPH_PRIMARY_MYSQL_DSN",
@@ -227,7 +215,6 @@ func TestServicePublishesCurrentSchemaSnapshot(t *testing.T) {
 	}
 
 	published, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID:    project.ID,
 		DataSourceID: dataSource.ID,
 		Nodes: []catalog.NodeInput{
 			{StableKey: "database:primary", Kind: catalog.NodeDatabase, Name: "primary", QualifiedName: "primary"},
@@ -255,7 +242,6 @@ func TestServicePublishesCurrentSchemaSnapshot(t *testing.T) {
 	}
 
 	secondarySource, err := service.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID:      project.ID,
 		Name:           "Analytics MySQL",
 		Kind:           catalog.DataSourceMySQL,
 		DSNEnvironment: "DBGRAPH_ANALYTICS_MYSQL_DSN",
@@ -264,7 +250,6 @@ func TestServicePublishesCurrentSchemaSnapshot(t *testing.T) {
 		t.Fatalf("create secondary data source: %v", err)
 	}
 	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID:    project.ID,
 		DataSourceID: secondarySource.ID,
 		Nodes: []catalog.NodeInput{
 			{StableKey: "database:analytics", Kind: catalog.NodeDatabase, Name: "analytics", QualifiedName: "analytics"},
@@ -318,7 +303,6 @@ func TestServicePublishesCurrentSchemaSnapshot(t *testing.T) {
 	}
 
 	secondSnapshot, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID:    project.ID,
 		DataSourceID: dataSource.ID,
 		Nodes: []catalog.NodeInput{
 			{StableKey: "database:primary", Kind: catalog.NodeDatabase, Name: "primary", QualifiedName: "primary"},
@@ -379,8 +363,7 @@ func TestIncrementalSnapshotMarksOnlyNodesInsideExplicitTableScopeStale(t *testi
 		dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime },
 	)
 	source, err := service.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID,
-		Name:      "primary", Kind: catalog.DataSourceMySQL,
+		Name: "primary", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "INCREMENTAL_MYSQL_DSN",
 	})
 	if err != nil {
@@ -396,9 +379,7 @@ func TestIncrementalSnapshotMarksOnlyNodesInsideExplicitTableScopeStale(t *testi
 		catalog.NodeInput{StableKey: "table:learn.b", ParentStableKey: "schema:learn", Kind: catalog.NodeTable, Name: "b", QualifiedName: "learn.b"},
 		catalog.NodeInput{StableKey: "column:learn.b.id", ParentStableKey: "table:learn.b", Kind: catalog.NodeColumn, Name: "id", QualifiedName: "learn.b.id", DataType: "bigint", Ordinal: 1},
 	)
-	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project.ID, DataSourceID: source.ID, Nodes: fullNodes,
-	}); err != nil {
+	if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
 		t.Fatal(err)
 	}
 	bBefore, err := service.FindCurrentNode(ctx, project.ID, source.ID, "learn.b.id")
@@ -409,7 +390,6 @@ func TestIncrementalSnapshotMarksOnlyNodesInsideExplicitTableScopeStale(t *testi
 		catalog.NodeInput{StableKey: "table:learn.a", ParentStableKey: "schema:learn", Kind: catalog.NodeTable, Name: "a", QualifiedName: "learn.a"},
 	)
 	published, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project.ID, DataSourceID: source.ID, Nodes: incrementalNodes,
 		ScopeTables: []string{"learn.a"},
 	})
 	if err != nil {

@@ -48,9 +48,9 @@ func TestListQueriesOrderByNameAndScopeToTheirProject(t *testing.T) {
 
 	repositories := dbsqlite.NewCodeRepository(store)
 	for _, repository := range []catalog.CodeRepository{
-		{ID: 41, ProjectID: 10, Name: "orders-web", RemoteURL: "", DefaultBranch: "main", CreatedAt: createdAt, UpdatedAt: createdAt},
-		{ID: 40, ProjectID: 10, Name: "orders-api", RemoteURL: "", DefaultBranch: "main", CreatedAt: createdAt, UpdatedAt: createdAt},
-		{ID: 42, ProjectID: 20, Name: "warehouse-api", RemoteURL: "", DefaultBranch: "main", CreatedAt: createdAt, UpdatedAt: createdAt},
+		{ID: 41, Name: "orders-web", RemoteURL: "", DefaultBranch: "main", CreatedAt: createdAt, UpdatedAt: createdAt},
+		{ID: 40, Name: "orders-api", RemoteURL: "", DefaultBranch: "main", CreatedAt: createdAt, UpdatedAt: createdAt},
+		{ID: 42, Name: "warehouse-api", RemoteURL: "", DefaultBranch: "main", CreatedAt: createdAt, UpdatedAt: createdAt},
 	} {
 		if err := repositories.CreateCodeRepository(ctx, repository); err != nil {
 			t.Fatal(err)
@@ -133,7 +133,6 @@ func TestSearchCurrentNodesFiltersByDataSource(t *testing.T) {
 	service := catalog.NewService(catalogRepository, ids, func() time.Time { return createdAt })
 	for _, dataSourceID := range []int64{30, 31} {
 		if _, err := service.PublishSnapshot(ctx, catalog.PublishSnapshot{
-			ProjectID: 10, DataSourceID: dataSourceID,
 			Nodes: []catalog.NodeInput{
 				{StableKey: "database:app", Kind: catalog.NodeDatabase, Name: "app", QualifiedName: "mysql://app"},
 				{StableKey: "schema:app", ParentStableKey: "database:app", Kind: catalog.NodeSchema, Name: "app", QualifiedName: "app"},

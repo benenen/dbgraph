@@ -120,7 +120,6 @@ func TestSQLiteOmissionListingStopsAtRemainingBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	omissionSession, err := fixture.service.Begin(fixture.ctx, reconcile.Begin{
-		ProjectID: fixture.project.ID, RepositoryID: fixture.repository.ID, Mode: reconcile.ModeFull,
 		SourceCommit: "bounded-omission", Scope: json.RawMessage(`{}`), Principal: fixture.agent,
 		RequestID: "begin-bounded-omission",
 	})

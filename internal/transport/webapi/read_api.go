@@ -38,29 +38,21 @@ const (
 )
 
 func (h *handler) searchNodes(response http.ResponseWriter, request *http.Request) {
-	projectID, err := parseID(request.PathValue("projectID"))
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
-		return
-	}
 	limit := defaultNodeSearchLimit
 	if h.services.Catalog == nil {
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
 		return
 	}
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid node search", nil)
-		return
-	}
 	dataSourceID := int64(0)
 	if raw := strings.TrimSpace(request.URL.Query().Get("dataSourceId")); raw != "" {
-		dataSourceID, err = parseID(raw)
+		parsed, err := parseID(raw)
 		if err != nil {
 			writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid data source ID", nil)
 			return
 		}
+		dataSourceID = parsed
 	}
-	nodes, err := h.services.Catalog.SearchCurrentNodes(request.Context(), projectID, dataSourceID, request.URL.Query().Get("q"), limit)
+	nodes, err := h.services.Catalog.SearchCurrentNodes(request.Context(), dataSourceID, request.URL.Query().Get("q"), limit)
 	if err != nil {
 		if errors.Is(err, catalog.ErrInvalidSnapshot) {
 			writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "node search was rejected", nil)
@@ -77,11 +69,6 @@ func (h *handler) searchNodes(response http.ResponseWriter, request *http.Reques
 }
 
 func (h *handler) getNode(response http.ResponseWriter, request *http.Request) {
-	projectID, err := parseID(request.PathValue("projectID"))
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
-		return
-	}
 	nodeID, err := parseID(request.PathValue("nodeID"))
 	if err != nil {
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid node ID", nil)
@@ -91,7 +78,7 @@ func (h *handler) getNode(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
 		return
 	}
-	node, err := h.services.Catalog.GetCurrentNode(request.Context(), projectID, nodeID)
+	node, err := h.services.Catalog.GetCurrentNode(request.Context(), nodeID)
 	if err != nil {
 		if errors.Is(err, catalog.ErrNodeNotFound) {
 			writeError(response, http.StatusNotFound, "NOT_FOUND", "catalog node not found", nil)
@@ -106,11 +93,6 @@ func (h *handler) getNode(response http.ResponseWriter, request *http.Request) {
 }
 
 func (h *handler) traceGraph(response http.ResponseWriter, request *http.Request) {
-	projectID, err := parseID(request.PathValue("projectID"))
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid graph trace", nil)
-		return
-	}
 	if h.services.Graph == nil {
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
 		return
@@ -120,7 +102,7 @@ func (h *handler) traceGraph(response http.ResponseWriter, request *http.Request
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid graph trace", nil)
 		return
 	}
-	graphRequest, err := input.toRequest(projectID)
+	graphRequest, err := input.toRequest()
 	if err != nil {
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid graph trace", nil)
 		return
@@ -137,7 +119,7 @@ func (h *handler) traceGraph(response http.ResponseWriter, request *http.Request
 	writeJSON(response, http.StatusOK, mapGraphResult(result))
 }
 
-func (input traceDTO) toRequest(projectID int64) (graph.TraceRequest, error) {
+func (input traceDTO) toRequest() (graph.TraceRequest, error) {
 	startID, err := parseID(input.StartNodeID)
 	if err != nil {
 		return graph.TraceRequest{}, err
@@ -183,23 +165,18 @@ func (input traceDTO) toRequest(projectID int64) (graph.TraceRequest, error) {
 		limits.MaxPaths = input.MaxPaths
 	}
 	return graph.TraceRequest{
-		ProjectID: projectID, StartNodeID: startID, TargetNodeID: targetID,
+		StartNodeID: startID, TargetNodeID: targetID,
 		Direction: direction, Context: conditionContext, Limits: limits,
 	}, nil
 }
 
 func (h *handler) listUnresolved(response http.ResponseWriter, request *http.Request) {
-	projectID, err := parseID(request.PathValue("projectID"))
 	limit := defaultUnresolvedLimit
 	if h.services.Reconcile == nil {
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
 		return
 	}
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid unresolved query", nil)
-		return
-	}
-	findings, err := h.services.Reconcile.ListUnresolved(request.Context(), projectID, limit)
+	findings, err := h.services.Reconcile.ListUnresolved(request.Context(), limit)
 	if err != nil {
 		if errors.Is(err, reconcile.ErrInvalidInit) {
 			writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "unresolved query was rejected", nil)
@@ -216,8 +193,9 @@ func (h *handler) listUnresolved(response http.ResponseWriter, request *http.Req
 }
 
 func (h *handler) getJob(response http.ResponseWriter, request *http.Request) {
-	projectID, jobID, ok := pathProjectSubjectIDs(response, request, "jobID")
-	if !ok {
+	jobID, err := parseID(request.PathValue("jobID"))
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid job ID", nil)
 		return
 	}
 	if h.services.Jobs == nil {
@@ -225,7 +203,7 @@ func (h *handler) getJob(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	job, err := h.services.Jobs.Get(request.Context(), jobID)
-	if errors.Is(err, jobs.ErrJobNotFound) || (err == nil && job.ProjectID != projectID) {
+	if errors.Is(err, jobs.ErrJobNotFound) || (err == nil && false) {
 		writeError(response, http.StatusNotFound, "NOT_FOUND", "job not found", nil)
 		return
 	}
@@ -237,8 +215,9 @@ func (h *handler) getJob(response http.ResponseWriter, request *http.Request) {
 }
 
 func (h *handler) getInitSession(response http.ResponseWriter, request *http.Request) {
-	projectID, sessionID, ok := pathProjectSubjectIDs(response, request, "sessionID")
-	if !ok {
+	sessionID, err := parseID(request.PathValue("sessionID"))
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid session ID", nil)
 		return
 	}
 	if h.services.Reconcile == nil {
@@ -246,7 +225,7 @@ func (h *handler) getInitSession(response http.ResponseWriter, request *http.Req
 		return
 	}
 	session, err := h.services.Reconcile.Get(request.Context(), sessionID)
-	if errors.Is(err, reconcile.ErrInitNotFound) || (err == nil && session.ProjectID != projectID) {
+	if errors.Is(err, reconcile.ErrInitNotFound) || (err == nil && false) {
 		writeError(response, http.StatusNotFound, "NOT_FOUND", "relation init session not found", nil)
 		return
 	}
@@ -258,17 +237,12 @@ func (h *handler) getInitSession(response http.ResponseWriter, request *http.Req
 }
 
 func (h *handler) listAuditEvents(response http.ResponseWriter, request *http.Request) {
-	projectID, err := parseID(request.PathValue("projectID"))
 	if h.services.Audit == nil {
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
 		return
 	}
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid audit query", nil)
-		return
-	}
 	responseLimit := maximumAuditResponseCount
-	events, err := h.services.Audit.ListProject(request.Context(), projectID, responseLimit+1)
+	events, err := h.services.Audit.ListProject(request.Context(), responseLimit+1)
 	if err != nil {
 		if errors.Is(err, audit.ErrInvalidEvent) {
 			writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "audit query was rejected", nil)
@@ -285,52 +259,6 @@ func (h *handler) listAuditEvents(response http.ResponseWriter, request *http.Re
 	writeJSON(response, http.StatusOK, map[string]any{"events": output, "truncated": truncated})
 }
 
-func (h *handler) listProjects(response http.ResponseWriter, request *http.Request) {
-	if h.services.Projects == nil {
-		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
-		return
-	}
-	limit := catalog.DefaultListLimit
-	projects, err := h.services.Projects.List(request.Context(), limit)
-	if err != nil {
-		writeError(response, http.StatusInternalServerError, "INTERNAL", "request could not be completed", nil)
-		return
-	}
-	output := make([]map[string]any, len(projects))
-	for index, project := range projects {
-		output[index] = mapProject(project)
-	}
-	writeJSON(response, http.StatusOK, output)
-}
-
-func (h *handler) listDataSources(response http.ResponseWriter, request *http.Request) {
-	if h.services.Catalog == nil {
-		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
-		return
-	}
-	projectID, err := parseID(request.PathValue("projectID"))
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
-		return
-	}
-	limit := catalog.DefaultListLimit
-	sources, err := h.services.Catalog.ListDataSources(request.Context(), projectID, limit)
-	if err != nil {
-		if errors.Is(err, catalog.ErrInvalidDataSource) {
-			writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
-			return
-		}
-		writeError(response, http.StatusInternalServerError, "INTERNAL", "request could not be completed", nil)
-		return
-	}
-	role := currentSession(request).session.Principal.Role
-	output := make([]map[string]any, len(sources))
-	for index, source := range sources {
-		output[index] = mapDataSourceForRole(source, role)
-	}
-	writeJSON(response, http.StatusOK, output)
-}
-
 func (h *handler) listRepositories(response http.ResponseWriter, request *http.Request) {
 	if _, ok := requireAdmin(response, request); !ok {
 		return
@@ -339,13 +267,8 @@ func (h *handler) listRepositories(response http.ResponseWriter, request *http.R
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
 		return
 	}
-	projectID, err := parseID(request.PathValue("projectID"))
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
-		return
-	}
 	limit := catalog.DefaultListLimit
-	repositories, err := h.services.CodeRepositories.List(request.Context(), projectID, limit)
+	repositories, err := h.services.CodeRepositories.List(request.Context(), limit)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, "INTERNAL", "request could not be completed", nil)
 		return
@@ -357,24 +280,20 @@ func (h *handler) listRepositories(response http.ResponseWriter, request *http.R
 	writeJSON(response, http.StatusOK, output)
 }
 
-func pathProjectSubjectIDs(response http.ResponseWriter, request *http.Request, subject string) (int64, int64, bool) {
-	projectID, err := parseID(request.PathValue("projectID"))
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
-		return 0, 0, false
-	}
+// pathSubjectID reads the single identifier a route carries.
+func pathSubjectID(response http.ResponseWriter, request *http.Request, subject string) (int64, bool) {
 	subjectID, err := parseID(request.PathValue(subject))
 	if err != nil {
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid resource ID", nil)
-		return 0, 0, false
+		return 0, false
 	}
-	return projectID, subjectID, true
+	return subjectID, true
 }
 
 func mapNode(node catalog.Node) map[string]any {
 	return map[string]any{
 		"id": strconv.FormatInt(node.ID, 10), "versionId": strconv.FormatInt(node.VersionID, 10),
-		"projectId": strconv.FormatInt(node.ProjectID, 10), "dataSourceId": strconv.FormatInt(node.DataSourceID, 10),
+		"dataSourceId": strconv.FormatInt(node.DataSourceID, 10),
 		"parentNodeId": optionalID(node.ParentNodeID), "kind": nodeKindName(node.Kind), "status": nodeStatusName(node.Status),
 		"name": node.Name, "qualifiedName": node.QualifiedName, "dataType": node.DataType,
 		"nullable": node.Nullable, "ordinal": node.Ordinal,
@@ -423,8 +342,7 @@ func mapMissing(items []conditions.MissingReference) []map[string]string {
 
 func mapUnresolved(finding reconcile.Unresolved) map[string]any {
 	return map[string]any{
-		"id": strconv.FormatInt(finding.ID, 10), "projectId": strconv.FormatInt(finding.ProjectID, 10),
-		"repositoryId": strconv.FormatInt(finding.RepositoryID, 10), "sessionId": strconv.FormatInt(finding.SessionID, 10),
+		"id": strconv.FormatInt(finding.ID, 10), "repositoryId": strconv.FormatInt(finding.RepositoryID, 10), "sessionId": strconv.FormatInt(finding.SessionID, 10),
 		"type": finding.Type, "summary": finding.Summary, "evidence": finding.Evidence,
 		"status": "OPEN", "actor": finding.Principal.Actor, "createdAt": finding.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
@@ -432,8 +350,7 @@ func mapUnresolved(finding reconcile.Unresolved) map[string]any {
 
 func mapJob(job jobs.Job) map[string]any {
 	return map[string]any{
-		"id": strconv.FormatInt(job.ID, 10), "projectId": strconv.FormatInt(job.ProjectID, 10),
-		"type": jobTypeName(job.Type), "status": jobStatusName(job.Status), "payload": job.Payload,
+		"id": strconv.FormatInt(job.ID, 10), "type": jobTypeName(job.Type), "status": jobStatusName(job.Status), "payload": job.Payload,
 		"result": job.Result, "errorCode": job.ErrorCode, "revisionNo": job.RevisionNo,
 		"createdAt": job.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
@@ -441,8 +358,7 @@ func mapJob(job jobs.Job) map[string]any {
 
 func mapInitSession(session reconcile.Session) map[string]any {
 	return map[string]any{
-		"id": strconv.FormatInt(session.ID, 10), "projectId": strconv.FormatInt(session.ProjectID, 10),
-		"repositoryId": strconv.FormatInt(session.RepositoryID, 10), "mode": initModeName(session.Mode),
+		"id": strconv.FormatInt(session.ID, 10), "repositoryId": strconv.FormatInt(session.RepositoryID, 10), "mode": initModeName(session.Mode),
 		"sourceCommit": session.SourceCommit, "scope": session.Scope, "status": initStatusName(session.Status),
 		"actor": session.Principal.Actor, "createdAt": session.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}

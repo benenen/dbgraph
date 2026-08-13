@@ -54,7 +54,7 @@ func TestCompleteValidatesBatchIntegrityBeforeReadingOmissions(t *testing.T) {
 
 	principal := relations.Principal{Actor: "agent", Role: relations.RoleAgent, Origin: audit.OriginAgent}
 	repository := &completionOrderRepository{session: Session{
-		ID: 41, ProjectID: 42, RepositoryID: 43, Mode: ModeFull, Status: StatusOpen,
+		ID: 41, RepositoryID: 43, Mode: ModeFull, Status: StatusOpen,
 		Principal: principal,
 	}, checkError: ErrIncompleteBatches}
 	service := NewService(repository, nil, nil, func() time.Time { return time.Unix(1, 0) })
@@ -76,7 +76,7 @@ func TestCompleteRejectsCombinedCandidateBudgetsBeforeCreatingRevisions(t *testi
 
 	principal := relations.Principal{Actor: "agent", Role: relations.RoleAgent, Origin: audit.OriginAgent}
 	session := Session{
-		ID: 51, ProjectID: 52, RepositoryID: 53, Mode: ModeFull, Status: StatusOpen,
+		ID: 51, RepositoryID: 53, Mode: ModeFull, Status: StatusOpen,
 		Principal: principal,
 	}
 	minimalOmission := relations.Relation{Active: &relations.Revision{

@@ -33,7 +33,6 @@ const (
 
 type Job struct {
 	ID           int64
-	ProjectID    int64
 	Type         Type
 	Status       Status
 	Payload      json.RawMessage
@@ -47,9 +46,8 @@ type Job struct {
 }
 
 type CreateJob struct {
-	ProjectID int64
-	Type      Type
-	Payload   json.RawMessage
+	Type    Type
+	Payload json.RawMessage
 }
 
 type Repository interface {
@@ -75,7 +73,7 @@ func NewService(repository Repository, ids IDGenerator, now func() time.Time) *S
 }
 
 func (s *Service) Create(ctx context.Context, command CreateJob) (Job, error) {
-	if command.ProjectID <= 0 || command.Type != TypeSchemaScan ||
+	if command.Type != TypeSchemaScan ||
 		jsoncheck.ValidateObject(command.Payload, jsoncheck.Limits{MaxBytes: 20_000, MaxDepth: 16}) != nil {
 		return Job{}, ErrInvalidJob
 	}
@@ -85,7 +83,6 @@ func (s *Service) Create(ctx context.Context, command CreateJob) (Job, error) {
 	}
 	job := Job{
 		ID:         jobID,
-		ProjectID:  command.ProjectID,
 		Type:       command.Type,
 		Status:     StatusPending,
 		Payload:    append(json.RawMessage(nil), command.Payload...),

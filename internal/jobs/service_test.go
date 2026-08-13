@@ -49,9 +49,8 @@ func TestServiceCreatesPendingSchemaScanJob(t *testing.T) {
 		func() time.Time { return fixedTime },
 	)
 	created, err := service.Create(ctx, jobs.CreateJob{
-		ProjectID: project.ID,
-		Type:      jobs.TypeSchemaScan,
-		Payload:   []byte(`{"source":"primary"}`),
+		Type:    jobs.TypeSchemaScan,
+		Payload: []byte(`{"source":"primary"}`),
 	})
 	if err != nil {
 		t.Fatalf("create job: %v", err)

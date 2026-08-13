@@ -18,12 +18,12 @@ func (c *resolveCatalog) GetDataSource(context.Context, int64) (catalog.DataSour
 	return c.source, nil
 }
 
-func (c *resolveCatalog) GetProjectDataSource(ctx context.Context, _ int64, dataSourceID int64) (catalog.DataSource, error) {
+func (c *resolveCatalog) GetProjectDataSource(ctx context.Context, dataSourceID int64) (catalog.DataSource, error) {
 	return c.GetDataSource(ctx, dataSourceID)
 }
 
-func (c *resolveCatalog) BeginSchemaScan(_ context.Context, projectID, dataSourceID int64) (catalog.SchemaScanRun, error) {
-	return catalog.SchemaScanRun{ID: 40, ProjectID: projectID, DataSourceID: dataSourceID}, nil
+func (c *resolveCatalog) BeginSchemaScan(_ context.Context, dataSourceID int64) (catalog.SchemaScanRun, error) {
+	return catalog.SchemaScanRun{ID: 40, DataSourceID: dataSourceID}, nil
 }
 
 func (c *resolveCatalog) FailSchemaScan(context.Context, catalog.SchemaScanRun, string) error {
@@ -71,7 +71,7 @@ func TestRunnerPrefersTheSealedDSNOverTheEnvironment(t *testing.T) {
 		}),
 	)
 
-	_, err := runner.Run(context.Background(), 10, 30)
+	_, err := runner.Run(context.Background(), 30)
 	if err == nil {
 		t.Fatal("expected the run to stop at the dial")
 	}
@@ -112,7 +112,7 @@ func TestRunnerFallsBackToTheEnvironmentWithoutCiphertext(t *testing.T) {
 		}),
 	)
 
-	if _, err := runner.Run(context.Background(), 10, 31); err == nil {
+	if _, err := runner.Run(context.Background(), 31); err == nil {
 		t.Fatal("expected the run to stop at the dial")
 	}
 	if dialled != environmentDSN {
@@ -141,7 +141,7 @@ func TestRunnerReportsAnUnreadableSealedDSN(t *testing.T) {
 		}),
 	)
 
-	if _, err := runner.Run(context.Background(), 10, 32); err == nil {
+	if _, err := runner.Run(context.Background(), 32); err == nil {
 		t.Fatal("expected an error for an unreadable stored DSN")
 	}
 }

@@ -16,8 +16,7 @@ type relationIDInput struct {
 }
 
 type listProposalsInput struct {
-	ProjectID string `json:"projectId" jsonschema:"project Snowflake ID as a decimal string"`
-	Limit     int    `json:"limit,omitempty" jsonschema:"maximum number of proposals from 1 to 100; defaults to 20"`
+	Limit int `json:"limit,omitempty" jsonschema:"maximum number of proposals from 1 to 100; defaults to 20"`
 }
 
 type relationsOutput struct {
@@ -41,8 +40,7 @@ type relationContentInput struct {
 }
 
 type proposeRelationInput struct {
-	ProjectID string `json:"projectId"`
-	Type      string `json:"type"`
+	Type string `json:"type"`
 	relationContentInput
 	Reason    string `json:"reason"`
 	RequestID string `json:"requestId"`
@@ -96,10 +94,6 @@ func registerRelationReadTools(server *mcp.Server, services Services) {
 			if services.Relations == nil {
 				return nil, relationsOutput{}, errServiceUnavailable
 			}
-			projectID, err := parseID(input.ProjectID)
-			if err != nil {
-				return nil, relationsOutput{}, err
-			}
 			if input.Limit == 0 {
 				input.Limit = 20
 			}
@@ -107,7 +101,7 @@ func registerRelationReadTools(server *mcp.Server, services Services) {
 				return nil, relationsOutput{}, errInvalidToolInput
 			}
 			responseLimit := min(input.Limit, maximumMCPListResponseCount)
-			relationsFound, err := services.Relations.ListProposals(ctx, projectID, responseLimit+1)
+			relationsFound, err := services.Relations.ListProposals(ctx, responseLimit+1)
 			if err != nil {
 				return nil, relationsOutput{}, err
 			}
@@ -172,12 +166,12 @@ func registerRelationWriteTools(server *mcp.Server, services Services, principal
 			if services.Relations == nil {
 				return nil, relationOutput{}, errServiceUnavailable
 			}
-			projectID, relationType, content, err := parseCreateContent(input)
+			relationType, content, err := parseCreateContent(input)
 			if err != nil {
 				return nil, relationOutput{}, err
 			}
 			relation, err := services.Relations.ProposeCreate(ctx, relations.ProposeCreate{
-				ProjectID: projectID, Type: relationType, SourceNodeID: content.sourceNodeID,
+				Type:         relationType,
 				TargetNodeID: content.targetNodeID, Guard: content.guard, Selector: content.selector,
 				Transform: content.transform, Confidence: input.Confidence, Evidence: content.evidence,
 				Principal: principal, Reason: input.Reason, RequestID: input.RequestID,
@@ -310,17 +304,13 @@ type parsedRelationContent struct {
 	evidence     []relations.EvidenceInput
 }
 
-func parseCreateContent(input proposeRelationInput) (int64, relations.Type, parsedRelationContent, error) {
-	projectID, err := parseID(input.ProjectID)
-	if err != nil {
-		return 0, 0, parsedRelationContent{}, err
-	}
+func parseCreateContent(input proposeRelationInput) (relations.Type, parsedRelationContent, error) {
 	relationType, err := parseRelationType(input.Type)
 	if err != nil {
-		return 0, 0, parsedRelationContent{}, err
+		return 0, parsedRelationContent{}, err
 	}
 	content, err := parseRelationContent(input.relationContentInput)
-	return projectID, relationType, content, err
+	return relationType, content, err
 }
 
 func parseRelationContent(input relationContentInput) (parsedRelationContent, error) {

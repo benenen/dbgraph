@@ -229,7 +229,7 @@ INSERT INTO relation_current(
 `, relationID, versionID, relations.StatusApproved, formatTime(publication.StartedAt)); err != nil {
 		return 0, fmt.Errorf("publish declared foreign key current relation: %w", err)
 	}
-	relation := relations.Relation{ID: relationID, ProjectID: Type: relations.TypeDeclaredForeignKey}
+	relation := relations.Relation{ID: relationID, Type: relations.TypeDeclaredForeignKey}
 	if err := insertEffectiveEdge(ctx, tx, relation, revision, publication.StartedAt); err != nil {
 		return 0, err
 	}
@@ -296,7 +296,7 @@ WHERE relation_id = ?
 `, revision.RevisionNo, versionID, relations.StatusApproved, formatTime(publication.StartedAt), relationID); err != nil {
 		return fmt.Errorf("reactivate declared foreign key relation: %w", err)
 	}
-	relation := relations.Relation{ID: relationID, ProjectID: Type: relations.TypeDeclaredForeignKey}
+	relation := relations.Relation{ID: relationID, Type: relations.TypeDeclaredForeignKey}
 	if err := insertEffectiveEdge(ctx, tx, relation, revision, publication.StartedAt); err != nil {
 		return err
 	}
@@ -405,7 +405,7 @@ func declaredForeignKeyRecord(
 	revision relations.Revision,
 ) relations.ProposalRecord {
 	return relations.ProposalRecord{
-		RelationID: relationID, VersionID: versionID, ProjectID: 
+		RelationID: relationID, VersionID: versionID,
 		Type: relations.TypeDeclaredForeignKey, Fingerprint: declaredForeignKeyContentFingerprint(revision),
 		Revision:   revision,
 		References: []relations.Reference{{NodeID: revision.SourceNodeID, Role: relations.ReferenceTransform}},

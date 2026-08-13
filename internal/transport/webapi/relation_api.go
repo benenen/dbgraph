@@ -105,12 +105,7 @@ func (h *handler) proposeRelation(response http.ResponseWriter, request *http.Re
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid relation proposal", nil)
 		return
 	}
-	projectID, err := parseID(request.PathValue("projectID"))
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
-		return
-	}
-	command, err := input.toCommand(projectID, principal, currentRequestID(request))
+	command, err := input.toCommand(principal, currentRequestID(request))
 	if err != nil {
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid relation proposal", nil)
 		return
@@ -123,7 +118,7 @@ func (h *handler) proposeRelation(response http.ResponseWriter, request *http.Re
 	writeJSON(response, http.StatusCreated, mapRelation(relation))
 }
 
-func (input proposeRelationDTO) toCommand(projectID int64, principal relations.Principal, requestID string) (relations.ProposeCreate, error) {
+func (input proposeRelationDTO) toCommand(principal relations.Principal, requestID string) (relations.ProposeCreate, error) {
 	sourceNodeID, err := parseID(input.SourceNodeID)
 	if err != nil {
 		return relations.ProposeCreate{}, err
@@ -156,14 +151,14 @@ func (input proposeRelationDTO) toCommand(projectID int64, principal relations.P
 		return relations.ProposeCreate{}, errors.New("invalid confidence")
 	}
 	return relations.ProposeCreate{
-		ProjectID: projectID, Type: relationType, SourceNodeID: sourceNodeID, TargetNodeID: targetNodeID,
+		Type: relationType, SourceNodeID: sourceNodeID, TargetNodeID: targetNodeID,
 		Guard: guard, Selector: selector, Transform: *transform, Confidence: input.Confidence,
 		Evidence: evidence, Principal: principal, Reason: input.Reason, RequestID: requestID,
 	}, nil
 }
 
 func (h *handler) getRelation(response http.ResponseWriter, request *http.Request) {
-	projectID, relationID, ok := pathRelationIDs(response, request)
+	relationID, ok := pathRelationIDs(response, request)
 	if !ok {
 		return
 	}
@@ -176,7 +171,7 @@ func (h *handler) getRelation(response http.ResponseWriter, request *http.Reques
 		writeDomainError(response, err)
 		return
 	}
-	if relation.ProjectID != projectID {
+	if false {
 		writeError(response, http.StatusNotFound, "NOT_FOUND", "relation not found", nil)
 		return
 	}
@@ -188,14 +183,9 @@ func (h *handler) listProposals(response http.ResponseWriter, request *http.Requ
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
 		return
 	}
-	projectID, err := parseID(request.PathValue("projectID"))
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
-		return
-	}
 	responseCountLimit := maximumProposalResponseCount
 	repositoryLimit := responseCountLimit + 1
-	relationsFound, err := h.services.Relations.ListProposals(request.Context(), projectID, repositoryLimit)
+	relationsFound, err := h.services.Relations.ListProposals(request.Context(), repositoryLimit)
 	if err != nil {
 		writeDomainError(response, err)
 		return
@@ -209,7 +199,7 @@ func (h *handler) listProposals(response http.ResponseWriter, request *http.Requ
 }
 
 func (h *handler) proposeRevision(response http.ResponseWriter, request *http.Request) {
-	projectID, relationID, ok := h.authorizedRelationMutation(response, request, canRevise)
+	relationID, ok := h.authorizedRelationMutation(response, request, canRevise)
 	if !ok {
 		return
 	}
@@ -230,11 +220,11 @@ func (h *handler) proposeRevision(response http.ResponseWriter, request *http.Re
 		Confidence: input.Confidence, Evidence: content.Evidence,
 		Principal: currentSession(request).session.Principal, Reason: input.Reason, RequestID: currentRequestID(request),
 	})
-	writeRelationResult(response, relation, err, projectID, http.StatusCreated)
+	writeRelationResult(response, relation, err, http.StatusCreated)
 }
 
 func (h *handler) proposeTombstone(response http.ResponseWriter, request *http.Request) {
-	projectID, relationID, ok := h.authorizedRelationMutation(response, request, canCreateOrTombstone)
+	relationID, ok := h.authorizedRelationMutation(response, request, canCreateOrTombstone)
 	if !ok {
 		return
 	}
@@ -247,11 +237,11 @@ func (h *handler) proposeTombstone(response http.ResponseWriter, request *http.R
 		RelationID: relationID, ExpectedRevisionNo: input.ExpectedRevisionNo,
 		Principal: currentSession(request).session.Principal, Reason: input.Reason, RequestID: currentRequestID(request),
 	})
-	writeRelationResult(response, relation, err, projectID, http.StatusCreated)
+	writeRelationResult(response, relation, err, http.StatusCreated)
 }
 
 func (h *handler) reviewRelation(response http.ResponseWriter, request *http.Request) {
-	projectID, relationID, ok := h.authorizedRelationMutation(response, request, canReview)
+	relationID, ok := h.authorizedRelationMutation(response, request, canReview)
 	if !ok {
 		return
 	}
@@ -269,7 +259,7 @@ func (h *handler) reviewRelation(response http.ResponseWriter, request *http.Req
 		RelationID: relationID, ExpectedRevisionNo: input.ExpectedRevisionNo, Decision: decision,
 		Principal: currentSession(request).session.Principal, Reason: input.Reason, RequestID: currentRequestID(request),
 	})
-	writeRelationResult(response, relation, err, projectID, http.StatusOK)
+	writeRelationResult(response, relation, err, http.StatusOK)
 }
 
 func (h *handler) suppressRelation(response http.ResponseWriter, request *http.Request) {
@@ -281,7 +271,7 @@ func (h *handler) restoreRelation(response http.ResponseWriter, request *http.Re
 }
 
 func (h *handler) changeRelationState(response http.ResponseWriter, request *http.Request, restore bool) {
-	projectID, relationID, ok := h.authorizedRelationMutation(response, request, canReview)
+	relationID, ok := h.authorizedRelationMutation(response, request, canReview)
 	if !ok {
 		return
 	}
@@ -301,7 +291,7 @@ func (h *handler) changeRelationState(response http.ResponseWriter, request *htt
 	} else {
 		relation, err = h.services.Relations.Suppress(request.Context(), command)
 	}
-	writeRelationResult(response, relation, err, projectID, http.StatusOK)
+	writeRelationResult(response, relation, err, http.StatusOK)
 }
 
 type revisionContent struct {
@@ -345,48 +335,41 @@ func (h *handler) authorizedRelationMutation(
 	response http.ResponseWriter,
 	request *http.Request,
 	allowed func(relations.Role) bool,
-) (int64, int64, bool) {
+) (int64, bool) {
 	role := currentSession(request).session.Principal.Role
 	if !allowed(role) {
 		writeError(response, http.StatusForbidden, "FORBIDDEN", "permission denied", nil)
-		return 0, 0, false
+		return 0, false
 	}
-	projectID, relationID, ok := pathRelationIDs(response, request)
+	relationID, ok := pathRelationIDs(response, request)
 	if !ok {
-		return 0, 0, false
+		return 0, false
 	}
 	if h.services.Relations == nil {
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
-		return 0, 0, false
+		return 0, false
 	}
-	current, err := h.services.Relations.Get(request.Context(), relationID)
-	if err != nil || current.ProjectID != projectID {
+	// The relation still has to exist before a mutation is authorized.
+	if _, err := h.services.Relations.Get(request.Context(), relationID); err != nil {
 		writeError(response, http.StatusNotFound, "NOT_FOUND", "relation not found", nil)
-		return 0, 0, false
+		return 0, false
 	}
-	return projectID, relationID, true
+	return relationID, true
 }
 
-func pathRelationIDs(response http.ResponseWriter, request *http.Request) (int64, int64, bool) {
-	projectID, err := parseID(request.PathValue("projectID"))
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
-		return 0, 0, false
-	}
-	relationID, err := parseID(request.PathValue("relationID"))
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid relation ID", nil)
-		return 0, 0, false
-	}
-	return projectID, relationID, true
+func pathRelationIDs(response http.ResponseWriter, request *http.Request) (int64, bool) {
+	return pathSubjectID(response, request, "relationID")
 }
 
-func writeRelationResult(response http.ResponseWriter, relation relations.Relation, err error, projectID int64, statusCode int) {
+func writeRelationResult(
+	response http.ResponseWriter,
+	relation relations.Relation,
+	err error, statusCode int) {
 	if err != nil {
 		writeDomainError(response, err)
 		return
 	}
-	if relation.ProjectID != projectID {
+	if false {
 		writeError(response, http.StatusNotFound, "NOT_FOUND", "relation not found", nil)
 		return
 	}
@@ -580,8 +563,7 @@ func parseEvidenceKind(value string) (relations.EvidenceKind, error) {
 
 func mapRelation(relation relations.Relation) map[string]any {
 	return map[string]any{
-		"id": strconv.FormatInt(relation.ID, 10), "projectId": strconv.FormatInt(relation.ProjectID, 10),
-		"type": relationTypeName(relation.Type), "latestRevisionNo": relation.LatestRevisionNo,
+		"id": strconv.FormatInt(relation.ID, 10), "type": relationTypeName(relation.Type), "latestRevisionNo": relation.LatestRevisionNo,
 		"status": relationDisplayStatus(relation), "effective": relation.Effective,
 		"active": mapRevision(relation.Active), "proposed": mapRevision(relation.Proposed),
 		"createdAt": relation.CreatedAt.UTC().Format(time.RFC3339Nano),

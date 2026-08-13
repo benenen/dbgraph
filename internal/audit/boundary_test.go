@@ -18,7 +18,6 @@ func TestServiceRejectsInvalidMetadataBeforeAllocation(t *testing.T) {
 		name   string
 		mutate func(*audit.RecordEvent)
 	}{
-		{name: "missing project", mutate: func(event *audit.RecordEvent) { event.ProjectID = 0 }},
 		{name: "missing subject", mutate: func(event *audit.RecordEvent) { event.SubjectID = 0 }},
 		{name: "invalid origin", mutate: func(event *audit.RecordEvent) { event.Origin = audit.Origin(99) }},
 		{name: "missing actor", mutate: func(event *audit.RecordEvent) { event.Actor = " " }},
@@ -92,11 +91,10 @@ func TestServiceRejectsInvalidAuditListBoundaries(t *testing.T) {
 
 	service := audit.NewService(&auditCounterRepository{}, &auditCounterIDs{}, nil)
 	for _, input := range []struct {
-		projectID int64
-		limit     int
-	}{{0, 1}, {1, 0}, {1, 1001}} {
-		if _, err := service.ListProject(context.Background(), input.projectID, input.limit); !errors.Is(err, audit.ErrInvalidEvent) {
-			t.Fatalf("ListProject(%d, %d) error = %v", input.projectID, input.limit, err)
+		limit int
+	}{{0}, {1001}} {
+		if _, err := service.ListProject(context.Background(), input.limit); !errors.Is(err, audit.ErrInvalidEvent) {
+			t.Fatalf("ListProject(%d) error = %v", input.limit, err)
 		}
 	}
 }
@@ -110,13 +108,12 @@ func (r *recordingAuditRepository) AppendAuditEvent(_ context.Context, event aud
 	return nil
 }
 
-func (r *recordingAuditRepository) ListAuditEvents(context.Context, int64, int) ([]audit.Event, error) {
+func (r *recordingAuditRepository) ListAuditEvents(context.Context, int) ([]audit.Event, error) {
 	return nil, nil
 }
 
 func validAuditRecord() audit.RecordEvent {
 	return audit.RecordEvent{
-		ProjectID: 1, Actor: "actor", Origin: audit.OriginWeb,
 		Action: "RELATION_PROPOSED", SubjectType: "RELATION", SubjectID: 2,
 		Reason: "Evidence supports the relation", RequestID: "request-1", Details: json.RawMessage(`{}`),
 	}

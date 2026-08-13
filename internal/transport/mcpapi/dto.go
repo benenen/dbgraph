@@ -90,7 +90,6 @@ type evidenceOutput struct {
 
 type relationOutput struct {
 	ID               string          `json:"id"`
-	ProjectID        string          `json:"projectId"`
 	Type             string          `json:"type"`
 	LatestRevisionNo int             `json:"latestRevisionNo"`
 	Status           string          `json:"status"`
@@ -249,7 +248,7 @@ func parseEvidenceKind(value string) (relations.EvidenceKind, error) {
 
 func mapRelation(relation relations.Relation) relationOutput {
 	return relationOutput{
-		ID: formatID(relation.ID), ProjectID: formatID(relation.ProjectID), Type: relationTypeName(relation.Type),
+		ID: formatID(relation.ID), Type: relationTypeName(relation.Type),
 		LatestRevisionNo: relation.LatestRevisionNo, Status: relationDisplayStatus(relation),
 		Active: mapRevision(relation.Active), Proposed: mapRevision(relation.Proposed),
 		Effective: relation.Effective, CreatedAt: relation.CreatedAt.UTC().Format(timeFormat),

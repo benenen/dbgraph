@@ -326,6 +326,12 @@ type TableReader interface {
 	LoadTableDetail(ctx context.Context, tableID int64) (TableDetail, error)
 }
 
+// ListDataSources returns every registered source. There is one catalog, so
+// there is one list.
+func (s *Service) ListAllDataSources(ctx context.Context, limit int) ([]DataSource, error) {
+	return s.repository.ListAllDataSources(ctx, clampListLimit(limit))
+}
+
 // TableDetail reads one table's columns and indexes.
 func (s *Service) TableDetail(
 	ctx context.Context,

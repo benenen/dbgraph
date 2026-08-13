@@ -147,10 +147,10 @@ func TestJobServiceRejectsInvalidCommandsBeforeUsingDependencies(t *testing.T) {
 
 	service := jobs.NewService(nil, nil, nil)
 	testCases := []jobs.CreateJob{
-		{ProjectID: 0, Type: jobs.TypeSchemaScan, Payload: json.RawMessage(`{}`)},
-		{ProjectID: 1, Type: jobs.Type(99), Payload: json.RawMessage(`{}`)},
-		{ProjectID: 1, Type: jobs.TypeSchemaScan, Payload: json.RawMessage(`[]`)},
-		{ProjectID: 1, Type: jobs.TypeSchemaScan, Payload: json.RawMessage(`{"source":`)},
+		{Type: jobs.TypeSchemaScan, Payload: json.RawMessage(`{}`)},
+		{Type: jobs.Type(99), Payload: json.RawMessage(`{}`)},
+		{Type: jobs.TypeSchemaScan, Payload: json.RawMessage(`[]`)},
+		{Type: jobs.TypeSchemaScan, Payload: json.RawMessage(`{"source":`)},
 	}
 	for _, command := range testCases {
 		if _, err := service.Create(context.Background(), command); !errors.Is(err, jobs.ErrInvalidJob) {
@@ -191,7 +191,6 @@ func runCoordinatorUntilCompletion(
 
 func validSchemaScanCommand() jobs.StartSchemaScan {
 	return jobs.StartSchemaScan{
-		ProjectID: 7, DataSourceID: 8,
 		Principal: relations.Principal{Actor: "admin", Role: relations.RoleAdmin, Origin: audit.OriginWeb},
 		Reason:    "Refresh source metadata", RequestID: "scan-boundary-1",
 	}

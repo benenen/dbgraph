@@ -20,13 +20,11 @@ type statusOutput struct {
 }
 
 type searchNodesInput struct {
-	ProjectID string `json:"projectId" jsonschema:"project Snowflake ID as a decimal string"`
-	Query     string `json:"query" jsonschema:"catalog search text"`
-	Limit     int    `json:"limit,omitempty" jsonschema:"maximum number of results from 1 to 100; defaults to 20"`
+	Query string `json:"query" jsonschema:"catalog search text"`
+	Limit int    `json:"limit,omitempty" jsonschema:"maximum number of results from 1 to 100; defaults to 20"`
 }
 
 type getNodeInput struct {
-	ProjectID     string `json:"projectId" jsonschema:"project Snowflake ID as a decimal string"`
 	DataSourceID  string `json:"dataSourceId" jsonschema:"data source Snowflake ID as a decimal string"`
 	QualifiedName string `json:"qualifiedName" jsonschema:"source-qualified catalog node name"`
 }
@@ -34,7 +32,6 @@ type getNodeInput struct {
 type nodeOutput struct {
 	ID            string `json:"id"`
 	VersionID     string `json:"versionId"`
-	ProjectID     string `json:"projectId"`
 	DataSourceID  string `json:"dataSourceId"`
 	ScanRunID     string `json:"scanRunId"`
 	ParentNodeID  string `json:"parentNodeId,omitempty"`
@@ -73,14 +70,10 @@ func registerReadTools(server *mcp.Server, services Services) {
 			if services.Catalog == nil {
 				return nil, searchNodesOutput{}, errServiceUnavailable
 			}
-			projectID, err := parseID(input.ProjectID)
-			if err != nil {
-				return nil, searchNodesOutput{}, safeToolError(err)
-			}
 			if input.Limit == 0 {
 				input.Limit = 20
 			}
-			nodes, err := services.Catalog.SearchCurrentNodes(ctx, projectID, 0, input.Query, input.Limit)
+			nodes, err := services.Catalog.SearchCurrentNodes(ctx, 0, input.Query, input.Limit)
 			if err != nil {
 				return nil, searchNodesOutput{}, safeToolError(err)
 			}
@@ -96,15 +89,11 @@ func registerReadTools(server *mcp.Server, services Services) {
 			if services.Catalog == nil {
 				return nil, nodeOutput{}, errServiceUnavailable
 			}
-			projectID, err := parseID(input.ProjectID)
-			if err != nil {
-				return nil, nodeOutput{}, safeToolError(err)
-			}
 			dataSourceID, err := parseID(input.DataSourceID)
 			if err != nil {
 				return nil, nodeOutput{}, err
 			}
-			node, err := services.Catalog.FindCurrentNode(ctx, projectID, dataSourceID, input.QualifiedName)
+			node, err := services.Catalog.FindCurrentNode(ctx, dataSourceID, input.QualifiedName)
 			if err != nil {
 				return nil, nodeOutput{}, safeToolError(err)
 			}
@@ -134,7 +123,7 @@ func formatID(value int64) string {
 
 func mapNode(node catalog.Node) nodeOutput {
 	return nodeOutput{
-		ID: formatID(node.ID), VersionID: formatID(node.VersionID), ProjectID: formatID(node.ProjectID),
+		ID: formatID(node.ID), VersionID: formatID(node.VersionID),
 		DataSourceID: formatID(node.DataSourceID), ScanRunID: formatID(node.ScanRunID),
 		ParentNodeID: formatID(node.ParentNodeID), Kind: nodeKindName(node.Kind), Status: nodeStatusName(node.Status),
 		StableKey: node.StableKey, Name: node.Name, QualifiedName: node.QualifiedName,

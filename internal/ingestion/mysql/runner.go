@@ -27,8 +27,8 @@ type ConnectionPolicy struct {
 }
 
 type catalogService interface {
-	GetProjectDataSource(context.Context, int64, int64) (catalog.DataSource, error)
-	BeginSchemaScan(context.Context, int64, int64) (catalog.SchemaScanRun, error)
+	GetProjectDataSource(context.Context, int64) (catalog.DataSource, error)
+	BeginSchemaScan(context.Context, int64) (catalog.SchemaScanRun, error)
 	FailSchemaScan(context.Context, catalog.SchemaScanRun, string) error
 	PublishStartedSnapshot(
 		context.Context,
@@ -121,15 +121,13 @@ func (r *Runner) resolveDSN(dataSource catalog.DataSource) (string, error) {
 
 func (r *Runner) Run(
 	ctx context.Context,
-	projectID int64,
 	dataSourceID int64,
 ) (catalog.PublishedSnapshot, error) {
-	return r.run(ctx, projectID, dataSourceID, nil)
+	return r.run(ctx, dataSourceID, nil)
 }
 
 func (r *Runner) RunIncremental(
 	ctx context.Context,
-	projectID int64,
 	dataSourceID int64,
 	scopeTables []string,
 ) (catalog.PublishedSnapshot, error) {
@@ -139,16 +137,15 @@ func (r *Runner) RunIncremental(
 	if _, supported := r.scanner.(incrementalSchemaScanner); !supported {
 		return catalog.PublishedSnapshot{}, ErrIncrementalScan
 	}
-	return r.run(ctx, projectID, dataSourceID, append([]string(nil), scopeTables...))
+	return r.run(ctx, dataSourceID, append([]string(nil), scopeTables...))
 }
 
 func (r *Runner) run(
 	ctx context.Context,
-	projectID int64,
 	dataSourceID int64,
 	scopeTables []string,
 ) (catalog.PublishedSnapshot, error) {
-	dataSource, err := r.catalog.GetProjectDataSource(ctx, projectID, dataSourceID)
+	dataSource, err := r.catalog.GetProjectDataSource(ctx, dataSourceID)
 	if err != nil {
 		return catalog.PublishedSnapshot{}, err
 	}
@@ -163,7 +160,7 @@ func (r *Runner) run(
 	if err != nil || strings.TrimSpace(dsnConfig.DBName) == "" {
 		return catalog.PublishedSnapshot{}, ErrInvalidDSN
 	}
-	scanRun, err := r.catalog.BeginSchemaScan(ctx, projectID, dataSource.ID)
+	scanRun, err := r.catalog.BeginSchemaScan(ctx, dataSource.ID)
 	if err != nil {
 		return catalog.PublishedSnapshot{}, err
 	}
@@ -198,7 +195,6 @@ func (r *Runner) run(
 	}
 
 	published, err := r.catalog.PublishStartedSnapshot(ctx, scanRun, catalog.PublishSnapshot{
-		ProjectID:    projectID,
 		DataSourceID: dataSource.ID,
 		Nodes:        snapshot.Nodes,
 		ForeignKeys:  snapshot.ForeignKeys,

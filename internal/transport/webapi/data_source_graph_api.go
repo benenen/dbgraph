@@ -13,8 +13,9 @@ import (
 // scanned catalog is worth reading before any relation has been proposed, which
 // is the state every source is in after its first scan.
 func (h *handler) listTables(response http.ResponseWriter, request *http.Request) {
-	projectID, dataSourceID, ok := pathProjectSubjectIDs(response, request, "dataSourceID")
-	if !ok {
+	dataSourceID, err := parseID(request.PathValue("dataSourceID"))
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid identifier", nil)
 		return
 	}
 	if h.services.Catalog == nil {
@@ -27,7 +28,7 @@ func (h *handler) listTables(response http.ResponseWriter, request *http.Request
 		return
 	}
 	tables, err := h.services.Catalog.ListTables(
-		request.Context(), projectID, dataSourceID, filter, maximumTableListSize,
+		request.Context(), dataSourceID, filter, maximumTableListSize,
 	)
 	if err != nil {
 		writeAdminError(response, err)
@@ -55,15 +56,16 @@ const maximumTableListSize = catalog.MaximumTableListLimit
 // dataSourceGraph returns the approved relations inside one data source, drawn
 // between the tables that own the joined columns.
 func (h *handler) dataSourceGraph(response http.ResponseWriter, request *http.Request) {
-	projectID, dataSourceID, ok := pathProjectSubjectIDs(response, request, "dataSourceID")
-	if !ok {
+	dataSourceID, err := parseID(request.PathValue("dataSourceID"))
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid identifier", nil)
 		return
 	}
 	if h.services.Graph == nil {
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
 		return
 	}
-	result, err := h.services.Graph.DataSourceGraph(request.Context(), projectID, dataSourceID)
+	result, err := h.services.Graph.DataSourceGraph(request.Context(), dataSourceID)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, "INTERNAL", "request could not be completed", nil)
 		return
@@ -79,15 +81,16 @@ func (h *handler) dataSourceGraph(response http.ResponseWriter, request *http.Re
 // the table list because a database here holds 459 tables: carrying every
 // column of every one of them would be most of the catalog, fetched to show one.
 func (h *handler) tableDetail(response http.ResponseWriter, request *http.Request) {
-	projectID, tableID, ok := pathProjectSubjectIDs(response, request, "tableID")
-	if !ok {
+	tableID, err := parseID(request.PathValue("tableID"))
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid identifier", nil)
 		return
 	}
 	if h.services.Catalog == nil {
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
 		return
 	}
-	detail, err := h.services.Catalog.TableDetail(request.Context(), projectID, tableID)
+	detail, err := h.services.Catalog.TableDetail(request.Context(), tableID)
 	if err != nil {
 		if errors.Is(err, catalog.ErrNodeNotFound) {
 			writeError(response, http.StatusNotFound, "NOT_FOUND", "table not found", nil)

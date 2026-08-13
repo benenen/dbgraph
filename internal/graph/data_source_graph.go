@@ -53,7 +53,6 @@ type DataSourceGraph struct {
 type DataSourceGraphRepository interface {
 	LoadDataSourceGraph(
 		ctx context.Context,
-		projectID int64,
 		dataSourceID int64,
 		maximumEdges int,
 	) (DataSourceGraph, error)
@@ -64,15 +63,14 @@ type DataSourceGraphRepository interface {
 // still hold no relations until an agent or a reviewer proposes them.
 func (s *Service) DataSourceGraph(
 	ctx context.Context,
-	projectID int64,
 	dataSourceID int64,
 ) (DataSourceGraph, error) {
-	if projectID <= 0 || dataSourceID <= 0 {
+	if dataSourceID <= 0 {
 		return DataSourceGraph{}, ErrInvalidTrace
 	}
 	repository, ok := s.repository.(DataSourceGraphRepository)
 	if !ok {
 		return DataSourceGraph{}, ErrInvalidTrace
 	}
-	return repository.LoadDataSourceGraph(ctx, projectID, dataSourceID, MaximumDataSourceGraphEdges)
+	return repository.LoadDataSourceGraph(ctx, dataSourceID, MaximumDataSourceGraphEdges)
 }

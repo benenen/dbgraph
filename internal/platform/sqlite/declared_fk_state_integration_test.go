@@ -41,8 +41,7 @@ func TestDeclaredForeignKeyCannotBeRestoredWhileAbsent(t *testing.T) {
 		dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime },
 	)
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID,
-		Name:      "primary", Kind: catalog.DataSourceMySQL,
+		Name: "primary", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "DECLARED_FK_STATE_MYSQL_DSN",
 	})
 	if err != nil {
@@ -61,7 +60,6 @@ func TestDeclaredForeignKeyCannotBeRestoredWhileAbsent(t *testing.T) {
 		SourceColumn: "learn.classes.student_id", TargetColumn: "learn.students.id", Ordinal: 1,
 	}
 	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project.ID, DataSourceID: dataSource.ID, Nodes: nodes,
 		ForeignKeys: []catalog.DeclaredForeignKey{foreignKey},
 	}); err != nil {
 		t.Fatalf("publish declared foreign key: %v", err)
@@ -79,7 +77,6 @@ func TestDeclaredForeignKeyCannotBeRestoredWhileAbsent(t *testing.T) {
 	trace := func() graph.TraceResult {
 		t.Helper()
 		result, err := graphService.Trace(ctx, graph.TraceRequest{
-			ProjectID: project.ID, StartNodeID: sourceNode.ID, TargetNodeID: targetNode.ID,
 			Direction: graph.DirectionDownstream, Context: conditions.Context{}, Limits: graph.DefaultLimits(),
 		})
 		if err != nil {
@@ -107,9 +104,7 @@ func TestDeclaredForeignKeyCannotBeRestoredWhileAbsent(t *testing.T) {
 		t.Fatalf("suppressed declared FK = %#v", suppressed)
 	}
 
-	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project.ID, DataSourceID: dataSource.ID, Nodes: nodes,
-	}); err != nil {
+	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
 		t.Fatalf("publish snapshot without declared FK: %v", err)
 	}
 	_, err = relationCommands.Restore(ctx, relations.ChangeState{
@@ -128,7 +123,6 @@ func TestDeclaredForeignKeyCannotBeRestoredWhileAbsent(t *testing.T) {
 	}
 
 	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project.ID, DataSourceID: dataSource.ID, Nodes: nodes,
 		ForeignKeys: []catalog.DeclaredForeignKey{foreignKey},
 	}); err != nil {
 		t.Fatalf("publish reappeared declared FK: %v", err)

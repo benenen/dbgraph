@@ -26,14 +26,13 @@ func TestTraceKeepsUnknownConditionalPathsAndDetectsCycles(t *testing.T) {
 		}},
 	}
 	repository := &fakeGraphRepository{edges: []graph.Edge{
-		{RelationID: 10, VersionID: 11, ProjectID: 1, SourceNodeID: 1, TargetNodeID: 2, Type: relations.TypeConditionalValueCopy, Guard: &guard},
-		{RelationID: 20, VersionID: 21, ProjectID: 1, SourceNodeID: 2, TargetNodeID: 3, Type: relations.TypeConditionalValueCopy},
-		{RelationID: 30, VersionID: 31, ProjectID: 1, SourceNodeID: 3, TargetNodeID: 1, Type: relations.TypeConditionalValueCopy},
+		{RelationID: 10, VersionID: 11, SourceNodeID: 1, TargetNodeID: 2, Type: relations.TypeConditionalValueCopy, Guard: &guard},
+		{RelationID: 20, VersionID: 21, SourceNodeID: 2, TargetNodeID: 3, Type: relations.TypeConditionalValueCopy},
+		{RelationID: 30, VersionID: 31, SourceNodeID: 3, TargetNodeID: 1, Type: relations.TypeConditionalValueCopy},
 	}}
 	service := graph.NewService(repository)
 
 	unknown, err := service.Trace(context.Background(), graph.TraceRequest{
-		ProjectID:   1,
 		StartNodeID: 1,
 		Direction:   graph.DirectionDownstream,
 		Limits:      graph.Limits{MaxDepth: 5, MaxNodes: 10, MaxPaths: 10},
@@ -53,7 +52,6 @@ func TestTraceKeepsUnknownConditionalPathsAndDetectsCycles(t *testing.T) {
 	}
 
 	falseResult, err := service.Trace(context.Background(), graph.TraceRequest{
-		ProjectID:   1,
 		StartNodeID: 1,
 		Direction:   graph.DirectionDownstream,
 		Context: conditions.Context{
@@ -82,7 +80,6 @@ func TestTraceUsesRecursiveTraversalForEmptyContext(t *testing.T) {
 		}},
 	}
 	result, err := graph.NewService(repository).Trace(context.Background(), graph.TraceRequest{
-		ProjectID: 1, StartNodeID: 1, TargetNodeID: 2,
 		Direction: graph.DirectionDownstream,
 		Limits:    graph.Limits{MaxDepth: 2, MaxNodes: 10, MaxPaths: 10},
 	})
@@ -97,7 +94,6 @@ func TestTraceUsesRecursiveTraversalForEmptyContext(t *testing.T) {
 		t.Fatalf("recursive trace result = %#v", result)
 	}
 	impact, err := graph.NewService(repository).Impact(context.Background(), graph.TraceRequest{
-		ProjectID: 1, StartNodeID: 1, TargetNodeID: 2,
 		Limits: graph.Limits{MaxDepth: 2, MaxNodes: 10, MaxPaths: 10},
 	})
 	if err != nil || len(impact.Paths) != 1 || repository.recursiveCalls != 2 || repository.layerCalls != 0 {
@@ -113,7 +109,6 @@ func TestTraceKeepsLayeredBFSWhenContextIsPresent(t *testing.T) {
 		SourceNodeID: 1, TargetNodeID: 2,
 	}}}
 	result, err := graph.NewService(repository).Trace(context.Background(), graph.TraceRequest{
-		ProjectID: 1, StartNodeID: 1, TargetNodeID: 2,
 		Direction: graph.DirectionDownstream,
 		Context: conditions.Context{
 			Parameters: map[string]json.RawMessage{"tenant": json.RawMessage(`"north"`)},
@@ -150,22 +145,21 @@ func TestRecursiveTraceEvaluatesASTsAndPrunesFalseAncestors(t *testing.T) {
 	repository := &recursiveGraphRepository{states: []graph.RecursiveEdgeState{
 		{
 			StateKey: "1", Depth: 1, NextNodeID: 2,
-			Edge: graph.Edge{RelationID: 1, ProjectID: 1, SourceNodeID: 1, TargetNodeID: 2, Guard: &falseGuard},
+			Edge: graph.Edge{RelationID: 1, SourceNodeID: 1, TargetNodeID: 2, Guard: &falseGuard},
 		},
 		{
 			StateKey: "3", Depth: 1, NextNodeID: 4,
 			Edge: graph.Edge{
-				RelationID: 3, ProjectID: 1, SourceNodeID: 1, TargetNodeID: 4, Guard: &unknownGuard,
+				RelationID: 3, SourceNodeID: 1, TargetNodeID: 4, Guard: &unknownGuard,
 				Transform: conditions.Value{Kind: conditions.ValueColumnCopy, NodeID: 5},
 			},
 		},
 		{
 			StateKey: "1,2", ParentStateKey: "1", Depth: 2, NextNodeID: 3,
-			Edge: graph.Edge{RelationID: 2, ProjectID: 1, SourceNodeID: 2, TargetNodeID: 3},
+			Edge: graph.Edge{RelationID: 2, SourceNodeID: 2, TargetNodeID: 3},
 		},
 	}}
 	result, err := graph.NewService(repository).Trace(context.Background(), graph.TraceRequest{
-		ProjectID: 1, StartNodeID: 1, Direction: graph.DirectionDownstream,
 		Limits: graph.Limits{MaxDepth: 3, MaxNodes: 10, MaxPaths: 10},
 	})
 	if err != nil {
@@ -185,11 +179,10 @@ func TestTraceStopsAtNodeLimit(t *testing.T) {
 	t.Parallel()
 
 	repository := &fakeGraphRepository{edges: []graph.Edge{
-		{RelationID: 10, ProjectID: 1, SourceNodeID: 1, TargetNodeID: 2},
-		{RelationID: 20, ProjectID: 1, SourceNodeID: 2, TargetNodeID: 3},
+		{RelationID: 10, SourceNodeID: 1, TargetNodeID: 2},
+		{RelationID: 20, SourceNodeID: 2, TargetNodeID: 3},
 	}}
 	result, err := graph.NewService(repository).Trace(context.Background(), graph.TraceRequest{
-		ProjectID:   1,
 		StartNodeID: 1,
 		Direction:   graph.DirectionDownstream,
 		Limits:      graph.Limits{MaxDepth: 5, MaxNodes: 2, MaxPaths: 10},
@@ -225,13 +218,12 @@ func TestTraceMarksEdgeUnknownWhenCaseTransformContextIsMissing(t *testing.T) {
 		Else: &fallback,
 	}
 	repository := &fakeGraphRepository{edges: []graph.Edge{{
-		RelationID: 10, ProjectID: 1, SourceNodeID: 1, TargetNodeID: 2,
+		RelationID: 10, SourceNodeID: 1, TargetNodeID: 2,
 		Type: relations.TypeConditionalValueCopy, Transform: transform,
 	}}}
 	service := graph.NewService(repository)
 
 	missingBranch, err := service.Trace(context.Background(), graph.TraceRequest{
-		ProjectID: 1, StartNodeID: 1, TargetNodeID: 2,
 		Direction: graph.DirectionDownstream,
 		Limits:    graph.Limits{MaxDepth: 2, MaxNodes: 10, MaxPaths: 10},
 	})
@@ -245,7 +237,6 @@ func TestTraceMarksEdgeUnknownWhenCaseTransformContextIsMissing(t *testing.T) {
 	}
 
 	missingResult, err := service.Trace(context.Background(), graph.TraceRequest{
-		ProjectID: 1, StartNodeID: 1, TargetNodeID: 2,
 		Direction: graph.DirectionDownstream,
 		Context: conditions.Context{
 			Parameters: map[string]json.RawMessage{"route": json.RawMessage(`"primary"`)},
@@ -268,7 +259,6 @@ func TestTraceStopsWhenContextIsCancelledDuringTraversal(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	repository := cancellingGraphRepository{cancel: cancel}
 	_, err := graph.NewService(repository).Trace(ctx, graph.TraceRequest{
-		ProjectID: 1, StartNodeID: 1, TargetNodeID: 99,
 		Direction: graph.DirectionDownstream,
 		Limits:    graph.Limits{MaxDepth: 8, MaxNodes: 100, MaxPaths: 100},
 	})
@@ -283,7 +273,6 @@ func TestRecursiveTraceStopsWhenContextIsCancelledDuringTraversal(t *testing.T) 
 	ctx, cancel := context.WithCancel(context.Background())
 	repository := cancellingRecursiveRepository{cancel: cancel}
 	_, err := graph.NewService(repository).Trace(ctx, graph.TraceRequest{
-		ProjectID: 1, StartNodeID: 1, TargetNodeID: 99,
 		Direction: graph.DirectionDownstream,
 		Limits:    graph.Limits{MaxDepth: 8, MaxNodes: 100, MaxPaths: 100},
 	})
@@ -307,7 +296,6 @@ func TestTraceAppliesGlobalTraversalWorkBudgets(t *testing.T) {
 		result, err := graph.NewService(repository).Trace(
 			context.Background(),
 			graph.TraceRequest{
-				ProjectID: 1, StartNodeID: 1, TargetNodeID: 1_000_000,
 				Direction: graph.DirectionDownstream,
 				Limits:    graph.Limits{MaxDepth: 2, MaxNodes: 10_000, MaxPaths: 10_000},
 			},
@@ -332,7 +320,6 @@ func TestTraceAppliesGlobalTraversalWorkBudgets(t *testing.T) {
 		result, err := graph.NewService(repository).Trace(
 			context.Background(),
 			graph.TraceRequest{
-				ProjectID: 1, StartNodeID: 1, TargetNodeID: 1_000_000,
 				Direction: graph.DirectionDownstream,
 				Limits:    graph.Limits{MaxDepth: 2, MaxNodes: 10_000, MaxPaths: 10_000},
 			},
@@ -370,7 +357,6 @@ func TestTraceAppliesGlobalTraversalWorkBudgets(t *testing.T) {
 		result, err := graph.NewService(&recursiveGraphRepository{states: states}).Trace(
 			context.Background(),
 			graph.TraceRequest{
-				ProjectID: 1, StartNodeID: 1, TargetNodeID: 2,
 				Direction: graph.DirectionDownstream,
 				Limits:    graph.Limits{MaxDepth: 2, MaxNodes: 10, MaxPaths: 10_000},
 			},
@@ -397,12 +383,11 @@ func TestRecursiveTraceAppliesGlobalTraversalWorkBudgets(t *testing.T) {
 			relationID := int64(index + 1)
 			states[index] = graph.RecursiveEdgeState{
 				StateKey: strconv.FormatInt(relationID, 10), Depth: 1, NextNodeID: relationID + 1,
-				Edge: graph.Edge{RelationID: relationID, ProjectID: 1, SourceNodeID: 1, TargetNodeID: relationID + 1},
+				Edge: graph.Edge{RelationID: relationID, SourceNodeID: 1, TargetNodeID: relationID + 1},
 			}
 		}
 		repository := &recursiveGraphRepository{states: states}
 		result, err := graph.NewService(repository).Trace(context.Background(), graph.TraceRequest{
-			ProjectID: 1, StartNodeID: 1, TargetNodeID: 1_000_000,
 			Direction: graph.DirectionDownstream,
 			Limits:    graph.Limits{MaxDepth: 2, MaxNodes: 10_000, MaxPaths: 10_000},
 		})
@@ -422,20 +407,19 @@ func TestRecursiveTraceAppliesGlobalTraversalWorkBudgets(t *testing.T) {
 			middleNode := int64(index + 2)
 			states = append(states, graph.RecursiveEdgeState{
 				StateKey: firstKey, Depth: 1, NextNodeID: middleNode,
-				Edge: graph.Edge{RelationID: relationID, ProjectID: 1, SourceNodeID: 1, TargetNodeID: middleNode},
+				Edge: graph.Edge{RelationID: relationID, SourceNodeID: 1, TargetNodeID: middleNode},
 			})
 			secondRelationID := int64(index + 5_001)
 			states = append(states, graph.RecursiveEdgeState{
 				StateKey:       firstKey + "," + strconv.FormatInt(secondRelationID, 10),
 				ParentStateKey: firstKey, Depth: 2, NextNodeID: 9_000,
-				Edge: graph.Edge{RelationID: secondRelationID, ProjectID: 1, SourceNodeID: middleNode, TargetNodeID: 9_000},
+				Edge: graph.Edge{RelationID: secondRelationID, SourceNodeID: middleNode, TargetNodeID: 9_000},
 			})
 		}
 		sort.SliceStable(states, func(i, j int) bool { return states[i].Depth < states[j].Depth })
 		result, err := graph.NewService(&recursiveGraphRepository{states: states}).Trace(
 			context.Background(),
 			graph.TraceRequest{
-				ProjectID: 1, StartNodeID: 1, TargetNodeID: 99_999,
 				Direction: graph.DirectionDownstream,
 				Limits:    graph.Limits{MaxDepth: 3, MaxNodes: 10_000, MaxPaths: 10_000},
 			},
@@ -454,12 +438,11 @@ func TestRecursiveTraceAppliesGlobalTraversalWorkBudgets(t *testing.T) {
 			relationID := int64(index + 1)
 			states[index] = graph.RecursiveEdgeState{
 				StateKey: strconv.FormatInt(relationID, 10), Depth: 1, NextNodeID: 1, Cycle: true,
-				Edge: graph.Edge{RelationID: relationID, ProjectID: 1, SourceNodeID: 1, TargetNodeID: 1},
+				Edge: graph.Edge{RelationID: relationID, SourceNodeID: 1, TargetNodeID: 1},
 			}
 		}
 		repository := &recursiveGraphRepository{states: states}
 		result, err := graph.NewService(repository).Trace(context.Background(), graph.TraceRequest{
-			ProjectID: 1, StartNodeID: 1, TargetNodeID: 99,
 			Direction: graph.DirectionDownstream,
 			Limits:    graph.Limits{MaxDepth: 2, MaxNodes: 10_000, MaxPaths: 10_000},
 		})
@@ -500,7 +483,6 @@ func TestTraceBoundsPathStatesForUnreachableTargetInConvergingDAG(t *testing.T) 
 	result, err := graph.NewService(&fakeGraphRepository{edges: edges}).Trace(
 		context.Background(),
 		graph.TraceRequest{
-			ProjectID: 1, StartNodeID: 1, TargetNodeID: 999,
 			Direction: graph.DirectionDownstream,
 			Limits:    graph.Limits{MaxDepth: 32, MaxNodes: 100, MaxPaths: 100},
 		},
@@ -531,7 +513,6 @@ func TestTraceBoundsExpandedResponseBytes(t *testing.T) {
 		}
 	}
 	result, err := graph.NewService(&fakeGraphRepository{edges: edges}).Trace(context.Background(), graph.TraceRequest{
-		ProjectID: 1, StartNodeID: 1, TargetNodeID: 2, Direction: graph.DirectionDownstream,
 		Context: conditions.Context{}, Limits: graph.Limits{MaxDepth: 2, MaxNodes: 10, MaxPaths: 10_000},
 	})
 	if err != nil {
@@ -554,13 +535,12 @@ func TestTraceSharesRawEdgeByteBudgetAcrossDepths(t *testing.T) {
 
 	repository := &fakeGraphRepository{
 		edges: []graph.Edge{
-			{RelationID: 1, ProjectID: 1, SourceNodeID: 1, TargetNodeID: 2},
-			{RelationID: 2, ProjectID: 1, SourceNodeID: 2, TargetNodeID: 3},
+			{RelationID: 1, SourceNodeID: 1, TargetNodeID: 2},
+			{RelationID: 2, SourceNodeID: 2, TargetNodeID: 3},
 		},
 		loadedBytesPerCall: 10 << 20,
 	}
 	result, err := graph.NewService(repository).Trace(context.Background(), graph.TraceRequest{
-		ProjectID: 1, StartNodeID: 1, TargetNodeID: 99, Direction: graph.DirectionDownstream,
 		Limits: graph.Limits{MaxDepth: 8, MaxNodes: 100, MaxPaths: 100},
 	})
 	if err != nil {
@@ -604,7 +584,6 @@ func (r *recursiveGraphRepository) LoadRecursiveEdges(
 
 func (r *recursiveGraphRepository) LoadEdges(
 	_ context.Context,
-	_ int64,
 	_ []int64,
 	_ graph.Direction,
 	_ int,
@@ -630,14 +609,13 @@ func (r cancellingRecursiveRepository) LoadRecursiveEdges(
 	r.cancel()
 	err := visit(graph.RecursiveEdgeState{
 		StateKey: "1", Depth: 1, NextNodeID: 2,
-		Edge: graph.Edge{RelationID: 1, ProjectID: 1, SourceNodeID: 1, TargetNodeID: 2},
+		Edge: graph.Edge{RelationID: 1, SourceNodeID: 1, TargetNodeID: 2},
 	})
 	return false, 128, err
 }
 
 func (cancellingRecursiveRepository) LoadEdges(
 	context.Context,
-	int64,
 	[]int64,
 	graph.Direction,
 	int,
@@ -648,19 +626,17 @@ func (cancellingRecursiveRepository) LoadEdges(
 
 func (r cancellingGraphRepository) LoadEdges(
 	_ context.Context,
-	_ int64,
 	_ []int64,
 	_ graph.Direction,
 	_ int,
 	_ int,
 ) ([]graph.Edge, bool, int, error) {
 	r.cancel()
-	return []graph.Edge{{ProjectID: 1, SourceNodeID: 1, TargetNodeID: 2}}, false, 128, nil
+	return []graph.Edge{{SourceNodeID: 1, TargetNodeID: 2}}, false, 128, nil
 }
 
 func (r *fakeGraphRepository) LoadEdges(
 	_ context.Context,
-	projectID int64,
 	nodeIDs []int64,
 	direction graph.Direction,
 	limit int,

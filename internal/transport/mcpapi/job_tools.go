@@ -15,7 +15,6 @@ type getJobInput struct {
 }
 
 type startSchemaScanInput struct {
-	ProjectID    string   `json:"projectId"`
 	DataSourceID string   `json:"dataSourceId"`
 	Mode         string   `json:"mode"`
 	Tables       []string `json:"tables"`
@@ -25,7 +24,6 @@ type startSchemaScanInput struct {
 
 type jobOutput struct {
 	ID           string `json:"id"`
-	ProjectID    string `json:"projectId"`
 	Type         string `json:"type"`
 	Status       string `json:"status"`
 	Payload      any    `json:"payload"`
@@ -62,10 +60,6 @@ func registerJobWriteTools(server *mcp.Server, services Services, principal rela
 			if services.Jobs == nil {
 				return nil, jobOutput{}, errServiceUnavailable
 			}
-			projectID, err := parseID(input.ProjectID)
-			if err != nil {
-				return nil, jobOutput{}, err
-			}
 			dataSourceID, err := parseID(input.DataSourceID)
 			if err != nil {
 				return nil, jobOutput{}, err
@@ -75,8 +69,8 @@ func registerJobWriteTools(server *mcp.Server, services Services, principal rela
 				return nil, jobOutput{}, err
 			}
 			job, err := services.Jobs.Start(ctx, jobs.StartSchemaScan{
-				ProjectID: projectID, DataSourceID: dataSourceID, Principal: principal,
-				Mode: mode, Tables: append([]string(nil), input.Tables...),
+				DataSourceID: dataSourceID,
+				Mode:         mode, Tables: append([]string(nil), input.Tables...),
 				Reason: input.Reason, RequestID: input.RequestID,
 			})
 			return nil, mapJob(job), safeToolError(err)
@@ -102,7 +96,7 @@ func mapJob(job jobs.Job) jobOutput {
 		_ = json.Unmarshal(job.Result, &result)
 	}
 	output := jobOutput{
-		ID: formatID(job.ID), ProjectID: formatID(job.ProjectID), Type: jobTypeName(job.Type),
+		ID: formatID(job.ID), Type: jobTypeName(job.Type),
 		Status: jobStatusName(job.Status), Payload: payload, Result: result,
 		ErrorCode: job.ErrorCode,
 		CreatedAt: job.CreatedAt.UTC().Format(timeFormat), RevisionNo: job.RevisionNo,

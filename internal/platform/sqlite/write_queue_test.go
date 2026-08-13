@@ -53,7 +53,7 @@ VALUES (900, 'blocker', '', '2026-08-11T12:00:00Z', '2026-08-11T12:00:00Z')
 	for projectID := int64(1); projectID <= 3; projectID++ {
 		project := catalog.Project{
 			ID:        projectID,
-			Name:      fmt.Sprintf("project-%d", projectID),
+			Name:      fmt.Sprintf("project-%d"),
 			CreatedAt: timestamp,
 			UpdatedAt: timestamp,
 		}
@@ -95,8 +95,8 @@ VALUES (900, 'blocker', '', '2026-08-11T12:00:00Z', '2026-08-11T12:00:00Z')
 	}
 
 	for _, projectID := range acceptedIDs {
-		if _, err := repository.GetProject(ctx, projectID); err != nil {
-			t.Fatalf("get accepted project %d: %v", projectID, err)
+		if _, err := repository.GetProject(ctx); err != nil {
+			t.Fatalf("get accepted project %d: %v", err)
 		}
 	}
 	if _, err := repository.GetProject(ctx, rejectedID); !errors.Is(err, catalog.ErrProjectNotFound) {

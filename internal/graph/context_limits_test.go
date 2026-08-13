@@ -39,7 +39,6 @@ func TestTraceRejectsUnboundedOrCompositeContextBeforeLoadingEdges(t *testing.T)
 		t.Run(test.name, func(t *testing.T) {
 			repository := &fakeGraphRepository{}
 			_, err := graph.NewService(repository).Trace(context.Background(), graph.TraceRequest{
-				ProjectID: 1, StartNodeID: 1, Direction: graph.DirectionDownstream,
 				Context: test.context,
 				Limits:  graph.Limits{MaxDepth: 2, MaxNodes: 10, MaxPaths: 10},
 			})
@@ -57,7 +56,6 @@ func TestTracePreparesAnImmutableContextBeforeRepositoryWork(t *testing.T) {
 	raw := json.RawMessage(`1`)
 	repository := &contextMutatingRepository{raw: raw}
 	result, err := graph.NewService(repository).Trace(context.Background(), graph.TraceRequest{
-		ProjectID: 1, StartNodeID: 1, TargetNodeID: 2, Direction: graph.DirectionDownstream,
 		Context: conditions.Context{Columns: map[int64]json.RawMessage{100: raw}},
 		Limits:  graph.Limits{MaxDepth: 2, MaxNodes: 10, MaxPaths: 10},
 	})
@@ -75,7 +73,6 @@ type contextMutatingRepository struct {
 
 func (r *contextMutatingRepository) LoadEdges(
 	context.Context,
-	int64,
 	[]int64,
 	graph.Direction,
 	int,
@@ -90,7 +87,7 @@ func (r *contextMutatingRepository) LoadEdges(
 		Kind: conditions.BooleanCompare, Operator: conditions.CompareEqual, Left: &column, Right: &one,
 	}
 	return []graph.Edge{{
-		RelationID: 1, VersionID: 1, ProjectID: 1, SourceNodeID: 1, TargetNodeID: 2,
+		RelationID: 1, VersionID: 1, SourceNodeID: 1, TargetNodeID: 2,
 		Type: relations.TypeConditionalValueCopy, Guard: &guard,
 	}}, false, 128, nil
 }

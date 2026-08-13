@@ -20,7 +20,6 @@ func TestDataSourceGraphDrawsColumnRelationsBetweenTables(t *testing.T) {
 	ctx, store, project, source, catalogService := newGraphFixture(t, "graph")
 
 	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project, DataSourceID: source,
 		Nodes: sampleTables(),
 		ForeignKeys: []catalog.DeclaredForeignKey{
 			{ConstraintSchema: "shop", Name: "fk_order_user", SourceColumn: "shop.orders.user_id", TargetColumn: "shop.users.id", Ordinal: 1},
@@ -63,9 +62,7 @@ func TestDataSourceGraphIsEmptyForAScanWithoutForeignKeys(t *testing.T) {
 
 	ctx, store, project, source, catalogService := newGraphFixture(t, "no-keys")
 
-	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project, DataSourceID: source, Nodes: sampleTables(),
-	}); err != nil {
+	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
 		t.Fatalf("PublishSnapshot: %v", err)
 	}
 
@@ -84,9 +81,7 @@ func TestListTablesBrowsesAndFiltersLiterally(t *testing.T) {
 	t.Parallel()
 
 	ctx, store, project, source, catalogService := newGraphFixture(t, "browse")
-	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project, DataSourceID: source, Nodes: sampleTables(),
-	}); err != nil {
+	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
 		t.Fatalf("PublishSnapshot: %v", err)
 	}
 	repository := dbsqlite.NewCatalogRepository(store, nil)
@@ -156,7 +151,6 @@ func newGraphFixture(t *testing.T, name string) (
 		dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime },
 	)
 	source, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID, Name: name, Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "GRAPH_FIXTURE_DSN",
 	})
 	if err != nil {
@@ -182,9 +176,7 @@ func TestTableDetailReturnsColumnsAndIndexes(t *testing.T) {
 			{Name: "idx_user_buyer", Columns: []string{"user_id", "buyer_id"}},
 		}
 	}
-	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project, DataSourceID: source, Nodes: nodes,
-	}); err != nil {
+	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{}); err != nil {
 		t.Fatalf("PublishSnapshot: %v", err)
 	}
 	repository := dbsqlite.NewCatalogRepository(store, nil)

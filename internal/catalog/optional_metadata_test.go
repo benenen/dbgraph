@@ -42,7 +42,6 @@ func TestDataSourceAcceptsABlankEnvironmentAndReason(t *testing.T) {
 	service := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 
 	created, err := service.CreateDataSourceAsAdmin(ctx, catalog.AdminCreateDataSource{
-		ProjectID: project.ID, Name: "resource", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "", Reason: "", RequestID: "web-1", Principal: admin,
 	})
 	if err != nil {
@@ -106,7 +105,6 @@ func TestDataSourceStillRejectsAMalformedEnvironmentName(t *testing.T) {
 	service := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 
 	if _, err := service.CreateDataSourceAsAdmin(ctx, catalog.AdminCreateDataSource{
-		ProjectID: project.ID, Name: "resource", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "lower case", Reason: "", RequestID: "web-1",
 		Principal: relations.Principal{Actor: "web", Role: relations.RoleAdmin, Origin: audit.OriginWeb},
 	}); err == nil {

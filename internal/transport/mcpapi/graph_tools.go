@@ -17,7 +17,6 @@ type traceContextInput struct {
 }
 
 type traceInput struct {
-	ProjectID    string            `json:"projectId"`
 	StartNodeID  string            `json:"startNodeId"`
 	TargetNodeID string            `json:"targetNodeId,omitempty"`
 	Direction    string            `json:"direction,omitempty"`
@@ -40,7 +39,6 @@ type graphEvaluationOutput struct {
 type graphEdgeOutput struct {
 	RelationID     string        `json:"relationId"`
 	VersionID      string        `json:"versionId"`
-	ProjectID      string        `json:"projectId"`
 	SourceNodeID   string        `json:"sourceNodeId"`
 	TargetNodeID   string        `json:"targetNodeId"`
 	Type           string        `json:"type"`
@@ -98,10 +96,6 @@ func registerGraphReadTools(server *mcp.Server, services Services) {
 }
 
 func parseTraceInput(input traceInput, forceDownstream bool) (graph.TraceRequest, error) {
-	projectID, err := parseID(input.ProjectID)
-	if err != nil {
-		return graph.TraceRequest{}, err
-	}
 	startNodeID, err := parseID(input.StartNodeID)
 	if err != nil {
 		return graph.TraceRequest{}, err
@@ -139,7 +133,7 @@ func parseTraceInput(input traceInput, forceDownstream bool) (graph.TraceRequest
 		return graph.TraceRequest{}, err
 	}
 	return graph.TraceRequest{
-		ProjectID: projectID, StartNodeID: startNodeID, TargetNodeID: targetNodeID,
+		StartNodeID: startNodeID, TargetNodeID: targetNodeID,
 		Direction: direction, Context: conditionContext, Limits: limits,
 	}, nil
 }
@@ -190,7 +184,6 @@ func mapTrace(result graph.TraceResult) traceOutput {
 			steps[stepIndex] = graphStepOutput{
 				Edge: graphEdgeOutput{
 					RelationID: formatID(step.Edge.RelationID), VersionID: formatID(step.Edge.VersionID),
-					ProjectID: formatID(step.Edge.ProjectID), SourceNodeID: formatID(step.Edge.SourceNodeID),
 					TargetNodeID: formatID(step.Edge.TargetNodeID), Type: relationTypeName(step.Edge.Type),
 					Status: relationStatusName(step.Edge.Status), ProposalStatus: proposalStatus,
 					Guard: mapBoolean(step.Edge.Guard), Selector: mapBoolean(step.Edge.Selector),

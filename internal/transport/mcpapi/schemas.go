@@ -5,19 +5,13 @@ func inputSchema(name string) map[string]any {
 	case "dbgraph_status":
 		return strictObject(nil, nil)
 	case "dbgraph_search_nodes":
-		return strictObject(map[string]any{
-			"projectId": idSchema(), "query": stringSchema(1, 500), "limit": integerSchema(1, 100),
-		}, []string{"projectId", "query"})
+		return strictObject(map[string]any{}, []string{"query"})
 	case "dbgraph_get_node":
-		return strictObject(map[string]any{
-			"projectId": idSchema(), "dataSourceId": idSchema(), "qualifiedName": stringSchema(1, 1000),
-		}, []string{"projectId", "dataSourceId", "qualifiedName"})
+		return strictObject(map[string]any{}, []string{"dataSourceId", "qualifiedName"})
 	case "dbgraph_get_relation", "dbgraph_explain_relation":
 		return strictObject(map[string]any{"relationId": idSchema()}, []string{"relationId"})
 	case "dbgraph_list_proposals":
-		return strictObject(map[string]any{
-			"projectId": idSchema(), "limit": integerSchema(1, 100),
-		}, []string{"projectId"})
+		return strictObject(map[string]any{}, nil)
 	case "dbgraph_trace", "dbgraph_impact":
 		return traceSchema()
 	case "dbgraph_propose_relation":
@@ -44,19 +38,16 @@ func inputSchema(name string) map[string]any {
 	case "dbgraph_get_relation_init":
 		return strictObject(map[string]any{"sessionId": idSchema()}, []string{"sessionId"})
 	case "dbgraph_list_unresolved":
-		return strictObject(map[string]any{
-			"projectId": idSchema(), "limit": integerSchema(1, 100),
-		}, []string{"projectId"})
+		return strictObject(map[string]any{}, nil)
 	case "dbgraph_start_schema_scan":
 		return strictObject(map[string]any{
-			"projectId": idSchema(), "dataSourceId": idSchema(),
 			"mode": enumSchema("FULL", "INCREMENTAL"),
 			"tables": map[string]any{
 				"type": "array", "maxItems": 100,
 				"items": stringSchema(3, 1000),
 			},
 			"reason": stringSchema(1, 2000), "requestId": stringSchema(1, 200),
-		}, []string{"projectId", "dataSourceId", "reason", "requestId"})
+		}, []string{"dataSourceId", "reason", "requestId"})
 	case "dbgraph_get_job":
 		return strictObject(map[string]any{"jobId": idSchema()}, []string{"jobId"})
 	default:
@@ -66,10 +57,9 @@ func inputSchema(name string) map[string]any {
 
 func relationInitBeginSchema() map[string]any {
 	schema := strictObject(map[string]any{
-		"projectId": idSchema(), "repositoryId": idSchema(), "mode": enumSchema("FULL", "INCREMENTAL"),
 		"sourceCommit": stringSchema(1, 200), "scope": map[string]any{"type": "object"},
 		"requestId": stringSchema(1, 200),
-	}, []string{"projectId", "repositoryId", "mode", "sourceCommit", "requestId"})
+	}, []string{"repositoryId", "mode", "sourceCommit", "requestId"})
 	incrementalScope := strictObject(map[string]any{
 		"relationIds": map[string]any{
 			"type": "array", "maxItems": 1000, "uniqueItems": true, "items": idSchema(),
@@ -90,7 +80,6 @@ func relationInitBeginSchema() map[string]any {
 
 func traceSchema() map[string]any {
 	return strictObject(map[string]any{
-		"projectId": idSchema(), "startNodeId": idSchema(), "targetNodeId": idSchema(),
 		"direction": enumSchema("UPSTREAM", "DOWNSTREAM"),
 		"context": strictObject(map[string]any{
 			"columns":    map[string]any{"type": "object", "maxProperties": 1000},
@@ -98,17 +87,16 @@ func traceSchema() map[string]any {
 		}, nil),
 		"maxDepth": integerSchema(1, 64), "maxNodes": integerSchema(1, 10_000),
 		"maxPaths": integerSchema(1, 10_000),
-	}, []string{"projectId", "startNodeId"})
+	}, []string{"startNodeId"})
 }
 
 func relationCreateSchema() map[string]any {
 	properties := relationContentProperties()
-	properties["projectId"] = idSchema()
 	properties["type"] = enumSchema("CONDITIONAL_VALUE_COPY")
 	properties["reason"] = stringSchema(1, 2000)
 	properties["requestId"] = stringSchema(1, 200)
 	root := strictObject(properties, []string{
-		"projectId", "type", "sourceNodeId", "targetNodeId", "transform", "confidence", "evidence", "reason", "requestId",
+		"type", "sourceNodeId", "targetNodeId", "transform", "confidence", "evidence", "reason", "requestId",
 	})
 	root["$defs"] = conditionDefinitions()
 	return root

@@ -232,7 +232,6 @@ func TestRelationInitReproposesStaleFingerprintAfterCompletion(t *testing.T) {
 	}
 
 	omissionSession, err := fixture.service.Begin(fixture.ctx, reconcile.Begin{
-		ProjectID: fixture.project.ID, RepositoryID: fixture.repository.ID, Mode: reconcile.ModeIncremental,
 		SourceCommit: "commit-stale-omission",
 		Scope:        json.RawMessage(fmt.Sprintf(`{"relationIds":["%d"]}`, relationID)),
 		Principal:    fixture.agent, RequestID: "begin-stale-omission",
@@ -326,7 +325,6 @@ func TestRelationInitCompletionLeavesSessionOpenWhenDeferredReproposalConflicts(
 		}},
 	}
 	second, err := fixture.commands.ProposeCreate(fixture.ctx, relations.ProposeCreate{
-		ProjectID: fixture.project.ID, Type: relations.TypeConditionalValueCopy,
 		SourceNodeID: fixture.source.ID, TargetNodeID: fixture.target.ID, Guard: secondGuard,
 		Transform: conditions.Value{Kind: conditions.ValueColumnCopy, NodeID: fixture.source.ID}, Confidence: 0.8,
 		Evidence: []relations.EvidenceInput{{
@@ -346,7 +344,6 @@ func TestRelationInitCompletionLeavesSessionOpenWhenDeferredReproposalConflicts(
 	}
 
 	session, err := fixture.service.Begin(fixture.ctx, reconcile.Begin{
-		ProjectID: fixture.project.ID, RepositoryID: fixture.repository.ID, Mode: reconcile.ModeIncremental,
 		SourceCommit: "conflict-deferred", Scope: json.RawMessage(`{"relationIds":[]}`),
 		Principal: fixture.agent, RequestID: "begin-conflict-deferred",
 	})
@@ -417,7 +414,6 @@ func TestRelationInitCompletionLeavesSessionOpenWhenDeferredReproposalConflicts(
 type reproposalFixture struct {
 	ctx        context.Context
 	store      *dbsqlite.Store
-	project    catalog.Project
 	repository catalog.CodeRepository
 	source     catalog.Node
 	target     catalog.Node
@@ -462,7 +458,6 @@ func (f reproposalFixture) submit(t *testing.T, suffix string) reconcile.BatchRe
 func (f reproposalFixture) beginAndSubmit(t *testing.T, suffix string) (reconcile.Session, reconcile.BatchResult) {
 	t.Helper()
 	session, err := f.service.Begin(f.ctx, reconcile.Begin{
-		ProjectID: f.project.ID, RepositoryID: f.repository.ID, Mode: reconcile.ModeIncremental,
 		SourceCommit: "commit-" + suffix, Scope: json.RawMessage(`{"relationIds":[]}`),
 		Principal: f.agent, RequestID: "begin-" + suffix,
 	})

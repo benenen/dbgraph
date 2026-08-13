@@ -142,15 +142,13 @@ func seedBrowserDatabase(t *testing.T, databasePath string) (int64, int64, int64
 	}
 	catalogService := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return now })
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID,
-		Name:      "browser-fixture", Kind: catalog.DataSourceMySQL,
+		Name: "browser-fixture", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "BROWSER_E2E_MYSQL_DSN",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
-		ProjectID: project.ID, DataSourceID: dataSource.ID,
 		Nodes: []catalog.NodeInput{
 			{StableKey: "database:e2e", Kind: catalog.NodeDatabase, Name: "e2e", QualifiedName: "mysql://e2e"},
 			{StableKey: "schema:e2e", ParentStableKey: "database:e2e", Kind: catalog.NodeSchema, Name: "e2e", QualifiedName: "e2e"},

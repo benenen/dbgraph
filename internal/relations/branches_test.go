@@ -52,7 +52,7 @@ func (repository *repositoryStub) Get(context.Context, int64) (Relation, error) 
 	return repository.relation, repository.err
 }
 
-func (repository *repositoryStub) ListProposals(context.Context, int64, int) ([]Relation, error) {
+func (repository *repositoryStub) ListProposals(context.Context, int) ([]Relation, error) {
 	repository.listCalls++
 	return repository.list, repository.err
 }
@@ -93,14 +93,13 @@ func TestCommandsGetAndListValidateBeforeRepository(t *testing.T) {
 		t.Fatalf("Get result = %#v, error = %v, calls = %d", result, err, repository.getCalls)
 	}
 	for _, input := range []struct {
-		projectID int64
-		limit     int
-	}{{0, 1}, {1, 0}, {1, 101}} {
-		if _, err := commands.ListProposals(context.Background(), input.projectID, input.limit); !errors.Is(err, ErrInvalidCommand) {
-			t.Fatalf("ListProposals(%d,%d) = %v", input.projectID, input.limit, err)
+		limit int
+	}{{0}, {101}} {
+		if _, err := commands.ListProposals(context.Background(), input.limit); !errors.Is(err, ErrInvalidCommand) {
+			t.Fatalf("ListProposals(%d) = %v", input.limit, err)
 		}
 	}
-	listed, err := commands.ListProposals(context.Background(), 1, 100)
+	listed, err := commands.ListProposals(context.Background(), 100)
 	if err != nil || len(listed) != 1 || repository.listCalls != 1 {
 		t.Fatalf("ListProposals = %#v, error = %v, calls = %d", listed, err, repository.listCalls)
 	}
@@ -136,14 +135,13 @@ func TestReviewerMayReviseContentButCannotCreateOrTombstoneRelations(t *testing.
 		Confidence: 1, Evidence: evidence,
 	}
 	repository := &repositoryStub{relation: Relation{
-		ID: 9, ProjectID: 1, Type: TypeConditionalValueCopy,
+		ID: 9, Type: TypeConditionalValueCopy,
 		LatestRevisionNo: 1, Status: StatusApproved, Active: active, Effective: true,
 	}}
 	commands := NewCommands(repository, &idGeneratorStub{next: 100}, time.Now)
 	principal := validPrincipal(RoleReviewer)
 
 	if _, err := commands.ProposeCreate(context.Background(), ProposeCreate{
-		ProjectID: 1, Type: TypeConditionalValueCopy, SourceNodeID: 11, TargetNodeID: 12,
 		Transform: transform, Confidence: 1, Evidence: evidence, Principal: principal,
 		Reason: "Reviewer create", RequestID: "reviewer-create",
 	}); !errors.Is(err, ErrForbidden) {

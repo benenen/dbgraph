@@ -23,7 +23,6 @@ const (
 
 type Event struct {
 	ID               int64
-	ProjectID        int64
 	Actor            string
 	Origin           Origin
 	Action           string
@@ -37,7 +36,6 @@ type Event struct {
 }
 
 type RecordEvent struct {
-	ProjectID        int64
 	Actor            string
 	Origin           Origin
 	Action           string
@@ -51,7 +49,7 @@ type RecordEvent struct {
 
 type Repository interface {
 	AppendAuditEvent(context.Context, Event) error
-	ListAuditEvents(context.Context, int64, int) ([]Event, error)
+	ListAuditEvents(context.Context, int) ([]Event, error)
 }
 
 type IDGenerator interface {
@@ -81,7 +79,6 @@ func (s *Service) Record(ctx context.Context, command RecordEvent) (Event, error
 	}
 	event := Event{
 		ID:               eventID,
-		ProjectID:        command.ProjectID,
 		Actor:            strings.TrimSpace(command.Actor),
 		Origin:           command.Origin,
 		Action:           strings.TrimSpace(command.Action),
@@ -99,15 +96,15 @@ func (s *Service) Record(ctx context.Context, command RecordEvent) (Event, error
 	return event, nil
 }
 
-func (s *Service) ListProject(ctx context.Context, projectID int64, limit int) ([]Event, error) {
-	if projectID <= 0 || limit <= 0 || limit > 1000 {
+func (s *Service) ListProject(ctx context.Context, limit int) ([]Event, error) {
+	if limit <= 0 || limit > 1000 {
 		return nil, ErrInvalidEvent
 	}
-	return s.repository.ListAuditEvents(ctx, projectID, limit)
+	return s.repository.ListAuditEvents(ctx, limit)
 }
 
 func validateRecord(command RecordEvent) error {
-	if command.ProjectID <= 0 || command.SubjectID <= 0 {
+	if command.SubjectID <= 0 {
 		return ErrInvalidEvent
 	}
 	if command.Origin < OriginAgent || command.Origin > OriginSystem {

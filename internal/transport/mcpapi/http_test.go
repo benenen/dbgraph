@@ -77,7 +77,7 @@ func (s *largeWriteOutputStub) ProposeCreate(context.Context, relations.ProposeC
 	return s.result, nil
 }
 
-func (s *proposalListBudgetStub) ListProposals(_ context.Context, _ int64, limit int) ([]relations.Relation, error) {
+func (s *proposalListBudgetStub) ListProposals(_ context.Context, limit int) ([]relations.Relation, error) {
 	s.listLimit = limit
 	s.listCalls++
 	return append([]relations.Relation(nil), s.proposals[:min(limit, len(s.proposals))]...), nil
@@ -87,7 +87,7 @@ func (s *proposalListBudgetStub) Get(context.Context, int64) (relations.Relation
 	return s.proposals[0], nil
 }
 
-func (s *unresolvedListBudgetStub) ListUnresolved(_ context.Context, _ int64, limit int) ([]reconcile.Unresolved, error) {
+func (s *unresolvedListBudgetStub) ListUnresolved(_ context.Context, limit int) ([]reconcile.Unresolved, error) {
 	s.listLimit = limit
 	s.listCalls++
 	return append([]reconcile.Unresolved(nil), s.findings[:min(limit, len(s.findings))]...), nil
@@ -99,7 +99,7 @@ func (s *relationWriteStub) ProposeCreate(_ context.Context, command relations.P
 	if command.Transform.Literal != nil {
 		s.transformLiteral = append(json.RawMessage(nil), command.Transform.Literal.Value...)
 	}
-	return relations.Relation{ID: 9_007_199_254_740_993, ProjectID: command.ProjectID, Type: command.Type}, nil
+	return relations.Relation{ID: 9_007_199_254_740_993, Type: command.Type}, nil
 }
 
 type bearerTransport struct {
@@ -566,14 +566,14 @@ func largeMCPProposal(id int64) relations.Relation {
 		Reason: strings.Repeat("reason", 400), RequestID: "request", CreatedAt: testMCPTime,
 	}
 	return relations.Relation{
-		ID: id, ProjectID: 1, Type: relations.TypeConditionalValueCopy, LatestRevisionNo: 1,
+		ID: id, Type: relations.TypeConditionalValueCopy, LatestRevisionNo: 1,
 		Status: relations.StatusPending, Proposed: revision, CreatedAt: testMCPTime,
 	}
 }
 
 func largeMCPUnresolved(id int64) reconcile.Unresolved {
 	return reconcile.Unresolved{
-		ID: id, ProjectID: 1, RepositoryID: 2, SessionID: 3, BatchID: 4,
+		ID: id, RepositoryID: 2, SessionID: 3, BatchID: 4,
 		Fingerprint: strings.Repeat("f", 200), Type: strings.Repeat("DYNAMIC_SQL", 10),
 		Summary:  strings.Repeat("summary", 300),
 		Evidence: json.RawMessage(`{"payload":"` + strings.Repeat("e", 19_980) + `"}`),

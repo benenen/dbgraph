@@ -125,7 +125,6 @@ func (s dataSourceCatalog) GetDataSource(context.Context, int64) (catalog.DataSo
 // project that owns the fixture.
 func (s dataSourceCatalog) GetProjectDataSource(
 	ctx context.Context,
-	projectID int64,
 	dataSourceID int64,
 ) (catalog.DataSource, error) {
 	if s.linkedProject != 0 && projectID != s.linkedProject {
@@ -140,7 +139,7 @@ type schemaRunner struct {
 	err    error
 }
 
-func (r schemaRunner) Run(_ context.Context, _ int64, dataSourceID int64) (catalog.PublishedSnapshot, error) {
+func (r schemaRunner) Run(_ context.Context, dataSourceID int64) (catalog.PublishedSnapshot, error) {
 	r.called <- dataSourceID
 	return r.result, r.err
 }
@@ -181,7 +180,6 @@ func TestSchemaScanCoordinatorDispatchesIncrementalTableScope(t *testing.T) {
 		func() time.Time { return fixedTime },
 	)
 	if _, err := coordinator.Start(context.Background(), jobs.StartSchemaScan{
-		ProjectID: 7, DataSourceID: 8, Mode: jobs.SchemaScanIncremental,
 		Tables:    []string{"learn.orders"},
 		Principal: relations.Principal{Actor: "admin", Role: relations.RoleAdmin, Origin: audit.OriginAgent},
 		Reason:    "Refresh changed table", RequestID: "scan-incremental-1",
@@ -220,7 +218,6 @@ func TestSchemaScanCoordinatorQueuesAuditsAndCompletesJob(t *testing.T) {
 	)
 
 	created, err := coordinator.Start(context.Background(), jobs.StartSchemaScan{
-		ProjectID: 7, DataSourceID: 8,
 		Principal: relations.Principal{Actor: "admin", Role: relations.RoleAdmin, Origin: audit.OriginAgent},
 		Reason:    "Refresh source metadata", RequestID: "scan-1",
 	})
@@ -282,7 +279,6 @@ func TestSchemaScanCoordinatorRejectsUnauthorizedOrMismatchedProject(t *testing.
 		time.Now,
 	)
 	viewer := jobs.StartSchemaScan{
-		ProjectID: 7, DataSourceID: 8,
 		Principal: relations.Principal{Actor: "viewer", Role: relations.RoleViewer, Origin: audit.OriginWeb},
 		Reason:    "Refresh source metadata", RequestID: "scan-2",
 	}
@@ -319,8 +315,7 @@ func TestSchemaScanCoordinatorPersistsLifecycleAndAudit(t *testing.T) {
 	}
 	catalogService := catalog.NewService(dbsqlite.NewCatalogRepository(store, ids), ids, func() time.Time { return fixedTime })
 	source, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID,
-		Name:      "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "PRIMARY_MYSQL_DSN",
+		Name: "primary", Kind: catalog.DataSourceMySQL, DSNEnvironment: "PRIMARY_MYSQL_DSN",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -332,7 +327,6 @@ func TestSchemaScanCoordinatorPersistsLifecycleAndAudit(t *testing.T) {
 		dbsqlite.NewJobRepository(store), catalogService, runner, ids, func() time.Time { return fixedTime },
 	)
 	job, err := coordinator.Start(ctx, jobs.StartSchemaScan{
-		ProjectID: project.ID, DataSourceID: source.ID,
 		Principal: relations.Principal{Actor: "admin", Role: relations.RoleAdmin, Origin: audit.OriginWeb},
 		Reason:    "Run integration scan", RequestID: "web-request-1",
 	})
@@ -375,7 +369,7 @@ func TestSchemaScanCoordinatorRecoversRunningJobAfterRestart(t *testing.T) {
 	store := &schemaScanStore{
 		completed: make(chan jobs.Job, 1),
 		job: jobs.Job{
-			ID: 41, ProjectID: 7, Type: jobs.TypeSchemaScan, Status: jobs.StatusRunning,
+			ID: 41, Type: jobs.TypeSchemaScan, Status: jobs.StatusRunning,
 			Payload: json.RawMessage(`{"dataSourceId":"8"}`), CreatedAt: fixedTime.Add(-2 * time.Minute),
 			StartedAt: &startedAt, RevisionNo: 2,
 		},
@@ -406,7 +400,7 @@ func TestSchemaScanCoordinatorRetriesTemporaryStoreBackpressure(t *testing.T) {
 		recoveryErrors: []error{jobs.ErrStoreBusy},
 		claimErrors:    []error{jobs.ErrStoreBusy},
 		job: jobs.Job{
-			ID: 42, ProjectID: 7, Type: jobs.TypeSchemaScan, Status: jobs.StatusPending,
+			ID: 42, Type: jobs.TypeSchemaScan, Status: jobs.StatusPending,
 			Payload: json.RawMessage(`{"dataSourceId":"8"}`), CreatedAt: fixedTime, RevisionNo: 1,
 		},
 	}

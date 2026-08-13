@@ -35,7 +35,6 @@ WITH resolved AS (
     FROM nodes n
     JOIN node_current nc ON nc.node_id = n.id
     JOIN node_versions nv ON nv.id = nc.version_id
-    WHERE n.project_id = ?
 )
 SELECT e.relation_id, e.relation_type, e.confidence_bps,
        e.source_node_id, e.target_node_id,
@@ -51,8 +50,7 @@ JOIN node_current sourceCurrent ON sourceCurrent.node_id = source.table_id
 JOIN node_versions sourceTable ON sourceTable.id = sourceCurrent.version_id
 JOIN node_current targetCurrent ON targetCurrent.node_id = target.table_id
 JOIN node_versions targetTable ON targetTable.id = targetCurrent.version_id
-WHERE e.project_id = ?
-  AND source.data_source_id = ?
+WHERE source.data_source_id = ?
   AND target.data_source_id = ?
   AND source.table_id IS NOT NULL
   AND target.table_id IS NOT NULL
@@ -132,8 +130,7 @@ SELECT n.id, nv.name, nv.qualified_name
 FROM nodes n
 JOIN node_current nc ON nc.node_id = n.id
 JOIN node_versions nv ON nv.id = nc.version_id
-WHERE n.project_id = ?
-  AND n.data_source_id = ?
+WHERE n.data_source_id = ?
   AND n.kind = ?
   AND nv.status = ?
   AND nv.qualified_name LIKE ? ESCAPE '\'
@@ -186,7 +183,7 @@ SELECT n.id, nv.name, nv.qualified_name, nv.metadata_json
 FROM nodes n
 JOIN node_current nc ON nc.node_id = n.id
 JOIN node_versions nv ON nv.id = nc.version_id
-WHERE n.id = ? AND n.project_id = ? AND n.kind = ?
+WHERE n.id = ? AND n.kind = ?
 `, tableID, catalog.NodeTable).Scan(
 		&detail.Table.ID, &detail.Table.Name, &detail.Table.QualifiedName, &metadata,
 	)
@@ -203,8 +200,7 @@ SELECT n.id, nv.name, nv.data_type, nv.nullable, nv.ordinal_position
 FROM nodes n
 JOIN node_current nc ON nc.node_id = n.id
 JOIN node_versions nv ON nv.id = nc.version_id
-WHERE n.project_id = ?
-  AND n.kind = ?
+WHERE n.kind = ?
   AND nv.parent_node_id = ?
   AND nv.status = ?
 ORDER BY nv.ordinal_position, nv.name

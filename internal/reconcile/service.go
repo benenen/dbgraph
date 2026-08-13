@@ -40,7 +40,7 @@ func NewService(
 }
 
 func (s *Service) Begin(ctx context.Context, command Begin) (Session, error) {
-	if !canInitialize(command.Principal) || command.ProjectID <= 0 || command.RepositoryID <= 0 ||
+	if !canInitialize(command.Principal) || command.RepositoryID <= 0 ||
 		(command.Mode != ModeFull && command.Mode != ModeIncremental) {
 		return Session{}, ErrInvalidInit
 	}
@@ -68,7 +68,6 @@ func (s *Service) Begin(ctx context.Context, command Begin) (Session, error) {
 	}
 	return s.repository.Begin(ctx, Session{
 		ID:           sessionID,
-		ProjectID:    command.ProjectID,
 		RepositoryID: command.RepositoryID,
 		Mode:         command.Mode,
 		SourceCommit: sourceCommit,
@@ -106,7 +105,6 @@ func (s *Service) SubmitBatch(ctx context.Context, command SubmitBatch) (BatchRe
 	prepared := make([]relations.ProposalRecord, 0, len(command.Proposals))
 	for index, proposal := range command.Proposals {
 		record, err := s.commands.PrepareCreate(ctx, relations.ProposeCreate{
-			ProjectID:    session.ProjectID,
 			Type:         proposal.Type,
 			SourceNodeID: proposal.SourceNodeID,
 			TargetNodeID: proposal.TargetNodeID,
@@ -266,11 +264,11 @@ func (s *Service) Get(ctx context.Context, sessionID int64) (Session, error) {
 	return s.repository.Get(ctx, sessionID)
 }
 
-func (s *Service) ListUnresolved(ctx context.Context, projectID int64, limit int) ([]Unresolved, error) {
-	if projectID <= 0 || limit < 1 || limit > 100 {
+func (s *Service) ListUnresolved(ctx context.Context, limit int) ([]Unresolved, error) {
+	if limit < 1 || limit > 100 {
 		return nil, ErrInvalidInit
 	}
-	return s.repository.ListUnresolved(ctx, projectID, limit)
+	return s.repository.ListUnresolved(ctx, limit)
 }
 
 func (s *Service) prepareUnresolved(
@@ -303,7 +301,6 @@ func (s *Service) prepareUnresolved(
 	}
 	return Unresolved{
 		ID:           findingID,
-		ProjectID:    session.ProjectID,
 		RepositoryID: session.RepositoryID,
 		SessionID:    session.ID,
 		BatchID:      batchID,

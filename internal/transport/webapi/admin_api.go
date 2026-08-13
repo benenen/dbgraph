@@ -22,24 +22,12 @@ type createDataSourceDTO struct {
 	Reason string `json:"reason"`
 }
 
-type updateProjectDTO struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Reason      string `json:"reason"`
-}
-
 type updateDataSourceDTO struct {
 	Name           string `json:"name"`
 	DSNEnvironment string `json:"dsnEnvironment"`
 	// DSN is write-only and optional: empty leaves the stored credential alone.
 	DSN    string `json:"dsn"`
 	Reason string `json:"reason"`
-}
-
-type createProjectDTO struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Reason      string `json:"reason"`
 }
 
 type createCodeRepositoryDTO struct {
@@ -55,32 +43,6 @@ type startSchemaScanDTO struct {
 	Reason string   `json:"reason"`
 }
 
-func (h *handler) createProject(response http.ResponseWriter, request *http.Request) {
-	principal, ok := requireAdmin(response, request)
-	if !ok {
-		return
-	}
-	if h.services.Projects == nil {
-		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
-		return
-	}
-	var input createProjectDTO
-	if err := decodeJSON(response, request, maximumJSONRequestBytes, &input); err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project", nil)
-		return
-	}
-	project, err := h.services.Projects.CreateAsAdmin(request.Context(), catalog.AdminCreateProject{
-		Name: input.Name, Description: input.Description, Principal: principal,
-		Reason: input.Reason, RequestID: currentRequestID(request),
-	})
-	if err != nil {
-		writeAdminError(response, err)
-		return
-	}
-	response.Header().Set("Location", "/api/v1/projects/"+strconv.FormatInt(project.ID, 10))
-	writeJSON(response, http.StatusCreated, mapProject(project))
-}
-
 func (h *handler) createCodeRepository(response http.ResponseWriter, request *http.Request) {
 	principal, ok := requireAdmin(response, request)
 	if !ok {
@@ -90,18 +52,13 @@ func (h *handler) createCodeRepository(response http.ResponseWriter, request *ht
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
 		return
 	}
-	projectID, err := parseID(request.PathValue("projectID"))
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
-		return
-	}
 	var input createCodeRepositoryDTO
 	if err := decodeJSON(response, request, maximumJSONRequestBytes, &input); err != nil {
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid code repository", nil)
 		return
 	}
 	repository, err := h.services.CodeRepositories.CreateAsAdmin(request.Context(), catalog.AdminCreateCodeRepository{
-		ProjectID: projectID, Name: input.Name, RemoteURL: input.RemoteURL,
+		Name: input.Name, RemoteURL: input.RemoteURL,
 		DefaultBranch: input.DefaultBranch, Principal: principal,
 		Reason: input.Reason, RequestID: currentRequestID(request),
 	})
@@ -109,7 +66,7 @@ func (h *handler) createCodeRepository(response http.ResponseWriter, request *ht
 		writeAdminError(response, err)
 		return
 	}
-	response.Header().Set("Location", "/api/v1/projects/"+strconv.FormatInt(projectID, 10)+"/repositories/"+strconv.FormatInt(repository.ID, 10))
+	response.Header().Set("Location", "/api/v1/repositories/"+strconv.FormatInt(repository.ID, 10))
 	writeJSON(response, http.StatusCreated, mapCodeRepository(repository))
 }
 
@@ -122,11 +79,6 @@ func (h *handler) createDataSource(response http.ResponseWriter, request *http.R
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
 		return
 	}
-	projectID, err := parseID(request.PathValue("projectID"))
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
-		return
-	}
 	var input createDataSourceDTO
 	if err := decodeJSON(response, request, maximumJSONRequestBytes, &input); err != nil {
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid data source", nil)
@@ -137,7 +89,7 @@ func (h *handler) createDataSource(response http.ResponseWriter, request *http.R
 		return
 	}
 	source, err := h.services.Catalog.CreateDataSourceAsAdmin(request.Context(), catalog.AdminCreateDataSource{
-		ProjectID: projectID, Name: input.Name, Kind: catalog.DataSourceMySQL,
+		Name: input.Name, Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: input.DSNEnvironment, DSN: input.DSN, Principal: principal,
 		Reason: input.Reason, RequestID: currentRequestID(request),
 	})
@@ -145,7 +97,7 @@ func (h *handler) createDataSource(response http.ResponseWriter, request *http.R
 		writeAdminError(response, err)
 		return
 	}
-	response.Header().Set("Location", "/api/v1/projects/"+strconv.FormatInt(projectID, 10)+"/data-sources/"+strconv.FormatInt(source.ID, 10))
+	response.Header().Set("Location", "/api/v1/data-sources/"+strconv.FormatInt(source.ID, 10))
 	writeJSON(response, http.StatusCreated, mapDataSource(source))
 }
 
@@ -158,7 +110,7 @@ func (h *handler) startSchemaScan(response http.ResponseWriter, request *http.Re
 		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
 		return
 	}
-	projectID, dataSourceID, ok := pathProjectSubjectIDs(response, request, "dataSourceID")
+	dataSourceID, err := parseID(request.PathValue("dataSourceID"))
 	if !ok {
 		return
 	}
@@ -173,7 +125,7 @@ func (h *handler) startSchemaScan(response http.ResponseWriter, request *http.Re
 		return
 	}
 	job, err := h.services.Jobs.Start(request.Context(), jobs.StartSchemaScan{
-		ProjectID: projectID, DataSourceID: dataSourceID, Principal: principal,
+		DataSourceID: dataSourceID, Principal: principal,
 		Mode: mode, Tables: append([]string(nil), input.Tables...),
 		Reason: input.Reason, RequestID: currentRequestID(request),
 	})
@@ -181,7 +133,7 @@ func (h *handler) startSchemaScan(response http.ResponseWriter, request *http.Re
 		writeAdminError(response, err)
 		return
 	}
-	response.Header().Set("Location", "/api/v1/projects/"+strconv.FormatInt(projectID, 10)+"/schema-scan-jobs/"+strconv.FormatInt(job.ID, 10))
+	response.Header().Set("Location", "/api/v1/schema-scan-jobs/"+strconv.FormatInt(job.ID, 10))
 	writeJSON(response, http.StatusCreated, mapJob(job))
 }
 
@@ -209,8 +161,6 @@ func writeAdminError(response http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, catalog.ErrForbidden), errors.Is(err, jobs.ErrForbidden):
 		writeError(response, http.StatusForbidden, "FORBIDDEN", "permission denied", nil)
-	case errors.Is(err, catalog.ErrProjectNotFound):
-		writeError(response, http.StatusNotFound, "NOT_FOUND", "project not found", nil)
 	case errors.Is(err, catalog.ErrDataSourceNotFound):
 		writeError(response, http.StatusNotFound, "NOT_FOUND", "data source not found", nil)
 	case errors.Is(err, jobs.ErrQueueFull):
@@ -230,7 +180,7 @@ func writeAdminError(response http.ResponseWriter, err error) {
 	case errors.Is(err, catalog.ErrSealerUnavailable):
 		writeError(response, http.StatusUnprocessableEntity, "SECRET_KEY_REQUIRED",
 			"storing a DSN requires DBGRAPH_SECRET_KEY on the server", nil)
-	case errors.Is(err, catalog.ErrInvalidProject), errors.Is(err, catalog.ErrInvalidRepository),
+	case errors.Is(err, catalog.ErrInvalidRepository),
 		errors.Is(err, catalog.ErrInvalidDataSource), errors.Is(err, jobs.ErrInvalidJob):
 		writeError(response, http.StatusUnprocessableEntity, "INVALID_COMMAND", "admin command was rejected", nil)
 	default:
@@ -238,17 +188,9 @@ func writeAdminError(response http.ResponseWriter, err error) {
 	}
 }
 
-func mapProject(project catalog.Project) map[string]any {
-	return map[string]any{
-		"id": strconv.FormatInt(project.ID, 10), "name": project.Name, "description": project.Description,
-		"createdAt": project.CreatedAt.UTC().Format(time.RFC3339Nano), "updatedAt": project.UpdatedAt.UTC().Format(time.RFC3339Nano),
-	}
-}
-
 func mapCodeRepository(repository catalog.CodeRepository) map[string]any {
 	return map[string]any{
-		"id": strconv.FormatInt(repository.ID, 10), "projectId": strconv.FormatInt(repository.ProjectID, 10),
-		"name": repository.Name, "defaultBranch": repository.DefaultBranch,
+		"id": strconv.FormatInt(repository.ID, 10), "name": repository.Name, "defaultBranch": repository.DefaultBranch,
 		"createdAt": repository.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
 }
@@ -296,66 +238,6 @@ func (h *handler) listAllDataSources(response http.ResponseWriter, request *http
 	writeJSON(response, http.StatusOK, output)
 }
 
-func (h *handler) linkDataSource(response http.ResponseWriter, request *http.Request) {
-	h.changeDataSourceLink(response, request, true)
-}
-
-func (h *handler) unlinkDataSource(response http.ResponseWriter, request *http.Request) {
-	h.changeDataSourceLink(response, request, false)
-}
-
-// changeDataSourceLink adopts a shared source into a project or drops it.
-// Admin only: it decides which databases a project may scan.
-func (h *handler) changeDataSourceLink(response http.ResponseWriter, request *http.Request, link bool) {
-	if _, ok := requireAdmin(response, request); !ok {
-		return
-	}
-	if h.services.Catalog == nil {
-		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
-		return
-	}
-	projectID, dataSourceID, ok := pathProjectSubjectIDs(response, request, "dataSourceID")
-	if !ok {
-		return
-	}
-	var err error
-	if link {
-		err = h.services.Catalog.LinkDataSource(request.Context(), projectID, dataSourceID)
-	} else {
-		err = h.services.Catalog.UnlinkDataSource(request.Context(), projectID, dataSourceID)
-	}
-	if err != nil {
-		writeAdminError(response, err)
-		return
-	}
-	writeJSON(response, http.StatusOK, map[string]any{
-		"projectId":    strconv.FormatInt(projectID, 10),
-		"dataSourceId": strconv.FormatInt(dataSourceID, 10),
-		"linked":       link,
-	})
-}
-
-// deleteProject removes a project that has produced nothing. Admin only.
-func (h *handler) deleteProject(response http.ResponseWriter, request *http.Request) {
-	if _, ok := requireAdmin(response, request); !ok {
-		return
-	}
-	if h.services.Projects == nil {
-		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
-		return
-	}
-	projectID, err := parseID(request.PathValue("projectID"))
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
-		return
-	}
-	if err := h.services.Projects.Delete(request.Context(), projectID); err != nil {
-		writeAdminError(response, err)
-		return
-	}
-	writeJSON(response, http.StatusOK, map[string]any{"deleted": strconv.FormatInt(projectID, 10)})
-}
-
 // deleteDataSource removes a source that has imported nothing. Admin only.
 func (h *handler) deleteDataSource(response http.ResponseWriter, request *http.Request) {
 	if _, ok := requireAdmin(response, request); !ok {
@@ -375,36 +257,6 @@ func (h *handler) deleteDataSource(response http.ResponseWriter, request *http.R
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"deleted": strconv.FormatInt(dataSourceID, 10)})
-}
-
-func (h *handler) updateProject(response http.ResponseWriter, request *http.Request) {
-	principal, ok := requireAdmin(response, request)
-	if !ok {
-		return
-	}
-	if h.services.Projects == nil {
-		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "service unavailable", nil)
-		return
-	}
-	projectID, err := parseID(request.PathValue("projectID"))
-	if err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project ID", nil)
-		return
-	}
-	var input updateProjectDTO
-	if err := decodeJSON(response, request, maximumJSONRequestBytes, &input); err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "invalid project", nil)
-		return
-	}
-	project, err := h.services.Projects.UpdateAsAdmin(request.Context(), catalog.AdminUpdateProject{
-		ProjectID: projectID, Name: input.Name, Description: input.Description,
-		Principal: principal, Reason: input.Reason, RequestID: currentRequestID(request),
-	})
-	if err != nil {
-		writeAdminError(response, err)
-		return
-	}
-	writeJSON(response, http.StatusOK, mapProject(project))
 }
 
 func (h *handler) updateDataSource(response http.ResponseWriter, request *http.Request) {

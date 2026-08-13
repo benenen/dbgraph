@@ -49,20 +49,20 @@ func insertCreateProposal(
 	var existingID int64
 	err := tx.QueryRowContext(ctx, `
 SELECT id FROM relations WHERE create_fingerprint = ?
-`, record.ProjectID, record.Fingerprint).Scan(&existingID)
+`, record.Fingerprint).Scan(&existingID)
 	if err == nil {
 		return relations.Relation{}, relations.ErrDuplicateRelation
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return relations.Relation{}, fmt.Errorf("check duplicate relation: %w", err)
 	}
-	if err := verifyRelationNodes(ctx, tx, record.ProjectID, record.Revision, record.References); err != nil {
+	if err := verifyRelationNodes(ctx, tx, record.Revision, record.References); err != nil {
 		return relations.Relation{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO relations(id, relation_type, create_fingerprint, created_at)
 VALUES (?, ?, ?, ?, ?)
-`, record.RelationID, record.ProjectID, record.Type, record.Fingerprint, formatTime(record.Revision.CreatedAt)); err != nil {
+`, record.RelationID, record.Type, record.Fingerprint, formatTime(record.Revision.CreatedAt)); err != nil {
 		return relations.Relation{}, fmt.Errorf("insert relation: %w", err)
 	}
 	if err := insertRelationVersion(ctx, tx, record); err != nil {
@@ -143,10 +143,10 @@ func insertRevisionProposal(
 	if current.Proposed != nil {
 		return relations.Relation{}, relations.ErrPendingProposal
 	}
-	if record.Revision.RevisionNo != current.LatestRevisionNo+1 || record.ProjectID != current.ProjectID {
+	if record.Revision.RevisionNo != current.LatestRevisionNo+1 {
 		return relations.Relation{}, relations.ErrInvalidCommand
 	}
-	if err := verifyRelationNodes(ctx, tx, current.ProjectID, record.Revision, record.References); err != nil {
+	if err := verifyRelationNodes(ctx, tx, record.Revision, record.References); err != nil {
 		return relations.Relation{}, err
 	}
 	if err := insertRelationVersion(ctx, tx, record); err != nil {
@@ -578,7 +578,7 @@ SELECT COUNT(*)
 FROM nodes n
 JOIN node_current nc ON nc.node_id = n.id
 JOIN node_versions nv ON nv.id = nc.version_id
-WHERE n.n.kind = ? AND nv.status = ?
+WHERE n.kind = ? AND nv.status = ?
   AND n.id IN (` + strings.Join(placeholders, ",") + `)
 `
 	if err := tx.QueryRowContext(ctx, query, arguments...).Scan(&count); err != nil {
@@ -653,7 +653,6 @@ INSERT INTO relation_events(
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
 		eventID,
-
 		relationID,
 		versionID,
 		eventType,
@@ -696,7 +695,6 @@ INSERT INTO audit_events(
 ) VALUES (?, ?, ?, ?, ?, 'RELATION', ?, ?, ?, ?, ?, ?)
 `,
 		auditID,
-
 		actor,
 		origin,
 		action,

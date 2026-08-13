@@ -42,7 +42,6 @@ const (
 type Edge struct {
 	RelationID         int64
 	VersionID          int64
-	ProjectID          int64
 	SourceNodeID       int64
 	TargetNodeID       int64
 	Type               relations.Type
@@ -65,7 +64,6 @@ type Path struct {
 }
 
 type TraceRequest struct {
-	ProjectID    int64
 	StartNodeID  int64
 	TargetNodeID int64
 	Direction    Direction
@@ -81,11 +79,10 @@ type TraceResult struct {
 }
 
 type Repository interface {
-	LoadEdges(context.Context, int64, []int64, Direction, int, int) ([]Edge, bool, int, error)
+	LoadEdges(context.Context, []int64, Direction, int, int) ([]Edge, bool, int, error)
 }
 
 type RecursiveTraceRequest struct {
-	ProjectID         int64
 	StartNodeID       int64
 	TargetNodeID      int64
 	Direction         Direction
@@ -183,7 +180,7 @@ func (s *Service) Trace(ctx context.Context, request TraceRequest) (TraceResult,
 			return truncatedResult(result, visited), nil
 		}
 		edges, edgesTruncated, consumedBytes, err := s.repository.LoadEdges(
-			ctx, request.ProjectID, frontierNodeIDs, request.Direction,
+			ctx, frontierNodeIDs, request.Direction,
 			remainingEdgeBudget, remainingByteBudget,
 		)
 		if err != nil {
@@ -299,7 +296,6 @@ func (s *Service) traceRecursive(
 	repositoryTruncated, consumedBytes, err := repository.LoadRecursiveEdges(
 		ctx,
 		RecursiveTraceRequest{
-			ProjectID: request.ProjectID, StartNodeID: request.StartNodeID,
 			TargetNodeID: request.TargetNodeID, Direction: request.Direction,
 			MaxDepth: request.Limits.MaxDepth, MaxEdgeExpansions: maximumEdgeExpansions,
 			MaxLoadedBytes: maximumLoadedEdgeBytes,
@@ -328,7 +324,6 @@ func (s *Service) traceRecursive(
 				return nil
 			}
 			if candidate.Depth != len(parent.path.Steps)+1 ||
-				candidate.Edge.ProjectID != request.ProjectID ||
 				candidate.NextNodeID <= 0 || recursiveNextNode(candidate.Edge, request.Direction) != candidate.NextNodeID ||
 				recursiveCurrentNode(candidate.Edge, request.Direction) != parent.current {
 				return errors.New("graph repository returned inconsistent recursive state")
@@ -464,7 +459,7 @@ func (s *Service) Impact(ctx context.Context, request TraceRequest) (TraceResult
 }
 
 func validateTraceRequest(request TraceRequest) error {
-	if request.ProjectID <= 0 || request.StartNodeID <= 0 || request.TargetNodeID < 0 ||
+	if request.StartNodeID <= 0 || request.TargetNodeID < 0 ||
 		(request.Direction != DirectionDownstream && request.Direction != DirectionUpstream) ||
 		request.Limits.MaxDepth < 1 || request.Limits.MaxDepth > 64 ||
 		request.Limits.MaxNodes < 1 || request.Limits.MaxNodes > 10_000 ||

@@ -38,7 +38,7 @@ func TestJobRepositoryRecoveryTerminatesOrphanedSchemaScanRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := catalogRepository.BeginSchemaScan(ctx, catalog.SchemaScanRun{
-		ID: 30, ProjectID: 10, DataSourceID: 20, StartedAt: startedAt,
+		ID: 30, DataSourceID: 20, StartedAt: startedAt,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ WHERE id = ?
 		completedAt.String != recoveredAt.Format(time.RFC3339Nano) {
 		t.Fatalf(
 			"recovered run id=%d project=%d source=%d status=%d code=%q message=%q started=%q completed=%q",
-			runID, projectID, dataSourceID, status, errorCode.String, errorMessage.String,
+			runID, dataSourceID, status, errorCode.String, errorMessage.String,
 			persistedStartedAt, completedAt.String,
 		)
 	}
@@ -110,7 +110,7 @@ func TestJobRepositoryRecoversRunningSchemaScans(t *testing.T) {
 		t.Fatal(err)
 	}
 	job := jobs.Job{
-		ID: 501, ProjectID: 10, Type: jobs.TypeSchemaScan, Status: jobs.StatusPending,
+		ID: 501, Type: jobs.TypeSchemaScan, Status: jobs.StatusPending,
 		Payload: []byte(`{"dataSourceId":"20"}`), CreatedAt: createdAt, RevisionNo: 1,
 	}
 	if err := repository.CreateJob(ctx, job); err != nil {

@@ -51,7 +51,6 @@ func TestRunnerLoadsDSNFromEnvironmentAndPublishesSnapshot(t *testing.T) {
 		func() time.Time { return fixedTime },
 	)
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID:      project.ID,
 		Name:           "primary",
 		Kind:           catalog.DataSourceMySQL,
 		DSNEnvironment: "DBGRAPH_PRIMARY_MYSQL_DSN",
@@ -148,8 +147,7 @@ func TestRunnerIgnoresCrossSchemaForeignKeysThatCatalogCannotRepresent(t *testin
 		dbsqlite.NewCatalogRepository(store, idGenerator), idGenerator, func() time.Time { return fixedTime },
 	)
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID,
-		Name:      "primary", Kind: catalog.DataSourceMySQL,
+		Name: "primary", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "CROSS_SCHEMA_MYSQL_DSN",
 	})
 	if err != nil {
@@ -251,8 +249,7 @@ func TestRunnerPersistsFailedScanRunWhenSourceCannotConnect(t *testing.T) {
 		dbsqlite.NewCatalogRepository(store, idGenerator), idGenerator, func() time.Time { return fixedTime },
 	)
 	dataSource, err := catalogService.CreateDataSource(ctx, catalog.CreateDataSource{
-		ProjectID: project.ID,
-		Name:      "unavailable", Kind: catalog.DataSourceMySQL,
+		Name: "unavailable", Kind: catalog.DataSourceMySQL,
 		DSNEnvironment: "FAILED_SCAN_DSN",
 	})
 	if err != nil {

@@ -98,7 +98,6 @@ func TestAdminBootstrapsAuditedProjectAndEvidenceRepository(t *testing.T) {
 	}
 	repositoryService := catalog.NewCodeRepositoryService(dbsqlite.NewCodeRepository(store), ids, func() time.Time { return fixedTime })
 	repository, err := repositoryService.CreateAsAdmin(ctx, catalog.AdminCreateCodeRepository{
-		ProjectID: project.ID, Name: "service", RemoteURL: "https://example.test/service.git", DefaultBranch: "main",
 		Principal: admin, Reason: "Register Agent evidence source", RequestID: "r-1",
 	})
 	if err != nil {

@@ -46,7 +46,6 @@ const (
 )
 
 type StartSchemaScan struct {
-	ProjectID    int64
 	DataSourceID int64
 	Mode         SchemaScanMode
 	Tables       []string
@@ -81,15 +80,15 @@ type SchemaScanStore interface {
 }
 
 type DataSourceCatalog interface {
-	GetProjectDataSource(context.Context, int64, int64) (catalog.DataSource, error)
+	GetProjectDataSource(context.Context, int64) (catalog.DataSource, error)
 }
 
 type SchemaRunner interface {
-	Run(context.Context, int64, int64) (catalog.PublishedSnapshot, error)
+	Run(context.Context, int64) (catalog.PublishedSnapshot, error)
 }
 
 type incrementalSchemaRunner interface {
-	RunIncremental(context.Context, int64, int64, []string) (catalog.PublishedSnapshot, error)
+	RunIncremental(context.Context, int64, []string) (catalog.PublishedSnapshot, error)
 }
 
 type SchemaScanCoordinator struct {
@@ -132,7 +131,7 @@ func (c *SchemaScanCoordinator) Start(ctx context.Context, command StartSchemaSc
 	}
 	// The link is the authorization: a project may only scan a source it has
 	// adopted, and GetProjectDataSource fails when it has not.
-	source, err := c.catalog.GetProjectDataSource(ctx, command.ProjectID, command.DataSourceID)
+	source, err := c.catalog.GetProjectDataSource(ctx, command.DataSourceID)
 	if err != nil {
 		return Job{}, err
 	}
@@ -156,11 +155,11 @@ func (c *SchemaScanCoordinator) Start(ctx context.Context, command StartSchemaSc
 	}
 	now := c.now().UTC()
 	job := Job{
-		ID: jobID, ProjectID: command.ProjectID, Type: TypeSchemaScan,
+		ID: jobID, Type: TypeSchemaScan,
 		Status: StatusPending, Payload: payload, CreatedAt: now, RevisionNo: 1,
 	}
 	event := audit.Event{
-		ID: auditID, ProjectID: command.ProjectID,
+		ID:    auditID,
 		Actor: strings.TrimSpace(command.Principal.Actor), Origin: command.Principal.Origin,
 		Action: "SCHEMA_SCAN_QUEUED", SubjectType: "SCHEMA_SCAN_JOB", SubjectID: jobID,
 		Reason: strings.TrimSpace(command.Reason), RequestID: strings.TrimSpace(command.RequestID),
@@ -255,9 +254,9 @@ func (c *SchemaScanCoordinator) processNext(ctx context.Context) (bool, error) {
 		if !ok {
 			return true, c.finishFailure(ctx, job, StatusFailed, "INCREMENTAL_SCAN_UNSUPPORTED")
 		}
-		published, runErr = incrementalRunner.RunIncremental(ctx, job.ProjectID, scanRequest.DataSourceID, scanRequest.Tables)
+		published, runErr = incrementalRunner.RunIncremental(ctx, scanRequest.DataSourceID, scanRequest.Tables)
 	} else {
-		published, runErr = c.runner.Run(ctx, job.ProjectID, scanRequest.DataSourceID)
+		published, runErr = c.runner.Run(ctx, scanRequest.DataSourceID)
 	}
 	if runErr != nil {
 		if ctx.Err() != nil {
@@ -348,7 +347,7 @@ func validateStartSchemaScan(command StartSchemaScan) error {
 	actor := strings.TrimSpace(command.Principal.Actor)
 	reason := strings.TrimSpace(command.Reason)
 	requestID := strings.TrimSpace(command.RequestID)
-	if command.ProjectID <= 0 || command.DataSourceID <= 0 ||
+	if command.DataSourceID <= 0 ||
 		(command.Mode != SchemaScanFull && command.Mode != SchemaScanIncremental) ||
 		(command.Mode == SchemaScanFull && len(command.Tables) != 0) ||
 		(command.Mode == SchemaScanIncremental && len(command.Tables) == 0) ||

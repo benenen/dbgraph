@@ -65,7 +65,7 @@ func (r *CatalogRepository) CreateDataSourceWithAudit(
 	return nil
 }
 
-func insertDataSource(ctx context.Context, tx *sql.Tx, source catalog.DataSource int64) error {
+func insertDataSource(ctx context.Context, tx *sql.Tx, source catalog.DataSource) error {
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO data_sources(
     id, name, source_kind, dsn_environment, dsn_key_id, dsn_ciphertext, created_at, updated_at
@@ -88,7 +88,7 @@ INSERT INTO data_sources(
 
 // linkDataSource records that a project uses a data source. Linking twice is a
 // no-op so a repeated request is harmless.
-func linkDataSource(ctx context.Context, tx *sql.Tx int64, dataSourceID int64, at time.Time) error {
+func linkDataSource(ctx context.Context, tx *sql.Tx, dataSourceID int64, at time.Time) error {
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO project_data_sources(data_source_id, created_at)
 VALUES (?, ?, ?)
@@ -352,7 +352,7 @@ func (r *CatalogRepository) FailSchemaScan(ctx context.Context, failure catalog.
 		result, err := tx.ExecContext(ctx, `
 UPDATE schema_scan_runs
 SET status = ?, error_code = ?, error_message = ?, completed_at = ?
-WHERE id = ?  AND data_source_id = ? AND status = ?
+WHERE id = ? AND data_source_id = ? AND status = ?
 `,
 			scanStatusFailed,
 			failure.ErrorCode,
@@ -565,7 +565,7 @@ func verifyRunningSchemaScan(
 SELECT EXISTS(
     SELECT 1
     FROM schema_scan_runs
-    WHERE id = ?  AND data_source_id = ? AND status = ?
+    WHERE id = ? AND data_source_id = ? AND status = ?
 )
 `, publication.ScanRunID, publication.DataSourceID, scanStatusRunning).Scan(&found); err != nil {
 		return fmt.Errorf("verify running schema scan: %w", err)
@@ -594,7 +594,7 @@ SELECT
 FROM nodes n
 JOIN node_current nc ON nc.node_id = n.id
 JOIN node_versions nv ON nv.id = nc.version_id
-WHERE n.n.data_source_id = ? AND nv.qualified_name = ?
+WHERE n.data_source_id = ? AND nv.qualified_name = ?
 ORDER BY n.id
 LIMIT 1
 `, dataSourceID, qualifiedName).Scan(
@@ -648,11 +648,11 @@ func (r *CatalogRepository) SearchCurrentNodes(
 WITH matched_nodes(node_id) AS (
     SELECT node_id
     FROM node_search
-    WHERE node_search MATCH ? 
+    WHERE node_search MATCH ?
     UNION
     SELECT node_id
     FROM relation_evidence_search
-    WHERE relation_evidence_search MATCH ? 
+    WHERE relation_evidence_search MATCH ?
 )
 SELECT
     n.id, nv.id, n.n.data_source_id, nv.scan_run_id,
@@ -699,7 +699,7 @@ SELECT
 FROM nodes n
 JOIN node_current nc ON nc.node_id = n.id
 JOIN node_versions nv ON nv.id = nc.version_id
-WHERE n.n.id = ?
+WHERE n.id = ?
 `, nodeID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return catalog.Node{}, catalog.ErrNodeNotFound
@@ -755,12 +755,10 @@ func scanCurrentNode(scanner auditScanner) (catalog.Node, error) {
 	return node, nil
 }
 
-func verifyDataSource(ctx context.Context, tx *sql.Tx int64, dataSourceID int64) error {
+func verifyDataSource(ctx context.Context, tx *sql.Tx, dataSourceID int64) error {
 	var found int
 	if err := tx.QueryRowContext(ctx, `
-SELECT EXISTS(
-    SELECT 1 FROM project_data_sources WHERE data_source_id = ? 
-)
+SELECT EXISTS(SELECT 1 FROM data_sources WHERE id = ?)
 `, dataSourceID).Scan(&found); err != nil {
 		return fmt.Errorf("verify data source: %w", err)
 	}
@@ -810,7 +808,7 @@ INSERT INTO nodes(id, data_source_id, stable_key, kind, created_at)
 VALUES (?, ?, ?, ?, ?, ?)
 `,
 			nodeID,
-				publication.DataSourceID,
+			publication.DataSourceID,
 			input.StableKey,
 			input.Kind,
 			publication.StartedAt.Format(time.RFC3339Nano),
@@ -965,37 +963,6 @@ func nodeWithinTableScope(kind catalog.NodeKind, qualifiedName string, scopeTabl
 		}
 	}
 	return false
-}
-
-func (r *CatalogRepository) ListDataSources(
-	ctx context.Context,
-	limit int,
-) (sources []catalog.DataSource, returnError error) {
-	rows, err := r.store.db.QueryContext(ctx, `
-SELECT s.id, s.name, s.source_kind, s.dsn_environment, s.dsn_key_id, s.dsn_ciphertext,
-       s.created_at, s.updated_at
-FROM data_sources s
-JOIN project_data_sources link ON link.data_source_id = s.id
-WHERE link.project_id = ?
-ORDER BY s.name, s.id
-LIMIT ?
-`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("select data sources: %w", err)
-	}
-	defer func() { returnError = errors.Join(returnError, rows.Close()) }()
-
-	for rows.Next() {
-		source, err := scanDataSourceRow(rows)
-		if err != nil {
-			return nil, err
-		}
-		sources = append(sources, source)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate data sources: %w", err)
-	}
-	return sources, nil
 }
 
 func optionalText(value string) any {

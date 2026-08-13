@@ -24,7 +24,7 @@ func (r *RelationRepository) ListProposals(
 SELECT r.id
 FROM relations r
 JOIN relation_current rc ON rc.relation_id = r.id
-WHERE r.rc.proposed_version_id IS NOT NULL
+WHERE rc.proposed_version_id IS NOT NULL
 ORDER BY rc.updated_at, r.id
 LIMIT ?
 `, limit)

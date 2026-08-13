@@ -20,7 +20,6 @@ func TestOnlyAgentOrAdminCanBeginRelationInitialization(t *testing.T) {
 		relations.RoleReviewer,
 	} {
 		_, err := service.Begin(context.Background(), Begin{
-			ProjectID: 1, RepositoryID: 2, Mode: ModeFull, SourceCommit: "abc",
 			Scope:     json.RawMessage(`{}`),
 			Principal: relations.Principal{Actor: "user", Role: role, Origin: audit.OriginAgent},
 			RequestID: "begin-1",

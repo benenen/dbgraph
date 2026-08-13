@@ -40,7 +40,6 @@ INSERT INTO audit_events(
 		// A data source is shared, so an event about one belongs to no single
 		// project. The column is nullable for exactly that case; writing 0 would
 		// point at a project that cannot exist.
-		optionalProjectID(event.ProjectID),
 		event.Actor,
 		event.Origin,
 		event.Action,
@@ -64,7 +63,7 @@ SELECT
     id, actor, origin, action, subject_type, subject_id,
     reason, request_id, expected_revision_no, details_json, occurred_at
 FROM audit_events
-WHERE 1=1
+WHERE 1 = 1
 ORDER BY occurred_at DESC, id DESC
 LIMIT ?
 `, limit)
@@ -122,11 +121,4 @@ func scanAuditEvent(scanner auditScanner) (audit.Event, error) {
 	}
 	event.OccurredAt = parsedTime
 	return event, nil
-}
-
-func optionalProjectID(projectID int64) any {
-	if projectID <= 0 {
-		return nil
-	}
-	return projectID
 }

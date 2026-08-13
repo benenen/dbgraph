@@ -44,7 +44,7 @@ func (r *GraphRepository) LoadRecursiveEdges(
 	request graph.RecursiveTraceRequest,
 	visit func(graph.RecursiveEdgeState) error,
 ) (resultTruncated bool, loadedBytes int, returnError error) {
-	if request.ProjectID <= 0 || request.StartNodeID <= 0 || request.TargetNodeID < 0 ||
+	if request.StartNodeID <= 0 || request.TargetNodeID < 0 ||
 		(request.Direction != graph.DirectionDownstream && request.Direction != graph.DirectionUpstream) ||
 		request.MaxDepth < 1 || request.MaxDepth > 64 ||
 		request.MaxEdgeExpansions < 1 || request.MaxEdgeExpansions > 100_000 ||
@@ -97,7 +97,6 @@ func (r *GraphRepository) LoadRecursiveEdges(
 			&cycle,
 			&state.Edge.RelationID,
 			&state.Edge.VersionID,
-			&state.Edge.ProjectID,
 			&state.Edge.SourceNodeID,
 			&state.Edge.TargetNodeID,
 			&state.Edge.Type,
@@ -153,10 +152,9 @@ WITH RECURSIVE walk(
         CAST(ee.relation_id AS TEXT), '', 1, ee.` + nextColumn + `,
         printf(',%lld,%lld,', ?, ee.` + nextColumn + `),
         ee.` + nextColumn + ` = ?,
-        ee.relation_id, ee.version_id, e
-        ee.source_node_id, ee.target_node_id
+        ee.relation_id, ee.version_id, ee.ee.source_node_id, ee.target_node_id
     FROM effective_edges ee
-    WHERE ee.ee.` + currentColumn + ` = ?
+    WHERE ee.` + currentColumn + ` = ?
 
     UNION ALL
 
@@ -165,11 +163,9 @@ WITH RECURSIVE walk(
         walk.depth + 1, ee.` + nextColumn + `,
         walk.node_path || printf('%lld,', ee.` + nextColumn + `),
         instr(walk.node_path, printf(',%lld,', ee.` + nextColumn + `)) > 0,
-        ee.relation_id, ee.version_id, e
-        ee.source_node_id, ee.target_node_id
+        ee.relation_id, ee.version_id, ee.ee.source_node_id, ee.target_node_id
     FROM walk
     JOIN effective_edges ee
-      ON ee.project_id = walk.project_id
      AND ee.` + currentColumn + ` = walk.current_node_id
     WHERE walk.cycle = 0
       AND walk.depth < ?
@@ -186,7 +182,6 @@ FROM walk
 JOIN effective_edges ee
   ON ee.relation_id = walk.relation_id
  AND ee.version_id = walk.version_id
- AND ee.project_id = walk.project_id
 JOIN relation_current rc ON rc.relation_id = walk.relation_id
 `
 }
@@ -215,7 +210,7 @@ SELECT
     ee.guard_json, ee.selector_json, ee.transform_json, ee.confidence_bps
 FROM effective_edges ee
 JOIN relation_current rc ON rc.relation_id = ee.relation_id
-WHERE ee.ee.source_node_id IN (SELECT CAST(value AS INTEGER) FROM json_each(?))
+WHERE ee.source_node_id IN (SELECT CAST(value AS INTEGER) FROM json_each(?))
 ORDER BY ee.source_node_id, ee.target_node_id, ee.relation_id
 LIMIT ?
 `
@@ -227,7 +222,7 @@ SELECT
     ee.guard_json, ee.selector_json, ee.transform_json, ee.confidence_bps
 FROM effective_edges ee
 JOIN relation_current rc ON rc.relation_id = ee.relation_id
-WHERE ee.ee.target_node_id IN (SELECT CAST(value AS INTEGER) FROM json_each(?))
+WHERE ee.target_node_id IN (SELECT CAST(value AS INTEGER) FROM json_each(?))
 ORDER BY ee.target_node_id, ee.target_node_id, ee.source_node_id, ee.relation_id
 LIMIT ?
 `

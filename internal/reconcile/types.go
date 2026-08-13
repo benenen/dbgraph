@@ -47,7 +47,6 @@ const (
 
 type Session struct {
 	ID           int64
-	ProjectID    int64
 	RepositoryID int64
 	Mode         Mode
 	SourceCommit string
@@ -60,7 +59,6 @@ type Session struct {
 }
 
 type Begin struct {
-	ProjectID    int64
 	RepositoryID int64
 	Mode         Mode
 	SourceCommit string
@@ -89,7 +87,6 @@ type UnresolvedInput struct {
 
 type Unresolved struct {
 	ID           int64
-	ProjectID    int64
 	RepositoryID int64
 	SessionID    int64
 	BatchID      int64
@@ -192,7 +189,7 @@ func PrepareReproposal(
 	prepared relations.ProposalRecord,
 ) (relations.ProposalRecord, bool) {
 	if current.ID <= 0 || current.LatestRevisionNo <= 0 || current.Proposed != nil ||
-		current.ProjectID != prepared.ProjectID || current.Type != prepared.Type ||
+		current.Type != prepared.Type ||
 		prepared.Revision.Kind != relations.ProposalContent {
 		return relations.ProposalRecord{}, false
 	}
@@ -224,5 +221,5 @@ type Repository interface {
 	CheckCompletion(context.Context, Session, int) (CompletionCheck, error)
 	ListOmittedRelations(context.Context, Session, CompletionBudget) (OmissionPlan, error)
 	Complete(context.Context, CompletionRecord) (Completion, error)
-	ListUnresolved(context.Context, int64, int) ([]Unresolved, error)
+	ListUnresolved(context.Context, int) ([]Unresolved, error)
 }
