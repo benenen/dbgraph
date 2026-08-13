@@ -23,6 +23,9 @@ const selectedSourceId = ref("");
 
 const tables = ref<TableSummary[]>([]);
 const filter = ref("");
+// The list is a way in, not the subject. Once a reader is following relations
+// the picture wants the width, so the sidebar folds down to a spine.
+const tablesCollapsed = ref(false);
 const graph = ref<RelationGraph>({ tables: [], edges: [], truncated: false });
 const tablesTruncated = ref(false);
 // The whole source's table count, held separately from the filtered list so the
@@ -422,24 +425,48 @@ watch(selectedSourceId, loadSource);
     No data sources registered yet.
   </Message>
 
-  <div v-else class="split">
-    <aside class="tables">
+  <div v-else class="split" :class="{ 'tables-hidden': tablesCollapsed }">
+    <aside class="tables" :class="{ collapsed: tablesCollapsed }">
       <div class="tables-head">
-        <InputText
-          v-model="filter"
-          placeholder="Filter tables"
-          size="small"
-          fluid
-          @keyup.enter="refilter"
-        />
-        <span class="count">
+        <div class="head-row">
+          <InputText
+            v-if="!tablesCollapsed"
+            v-model="filter"
+            placeholder="Filter tables"
+            size="small"
+            fluid
+            @keyup.enter="refilter"
+          />
+          <Button
+            :icon="tablesCollapsed ? 'pi pi-angle-right' : 'pi pi-angle-left'"
+            text
+            size="small"
+            class="tables-toggle"
+            :aria-label="tablesCollapsed ? 'Show the table list' : 'Hide the table list'"
+            :aria-expanded="!tablesCollapsed"
+            @click="tablesCollapsed = !tablesCollapsed"
+          />
+        </div>
+        <span v-if="!tablesCollapsed" class="count">
           <template v-if="tablesTruncated">first </template>{{ tables.length }} table{{
             tables.length === 1 ? "" : "s"
           }}<template v-if="tablesTruncated"> — filter to see the rest</template>
           <template v-if="connected.size">&nbsp;· {{ connected.size }} in the graph</template>
         </span>
       </div>
-      <div v-if="loadingTables" class="loading small">
+
+      <!-- Collapsed, the spine still says what is behind it and reopens on a
+           click, so the list is folded away rather than hidden. -->
+      <button
+        v-if="tablesCollapsed"
+        type="button"
+        class="rail-label"
+        @click="tablesCollapsed = false"
+      >
+        {{ tables.length }} table{{ tables.length === 1 ? "" : "s" }}
+      </button>
+
+      <div v-else-if="loadingTables" class="loading small">
         <ProgressSpinner style="width: 1.5rem; height: 1.5rem" />
       </div>
       <ul v-else class="table-list">
@@ -604,6 +631,7 @@ watch(selectedSourceId, loadSource);
             {{ detail.indexes.length }} index{{ detail.indexes.length === 1 ? "" : "es" }}
           </span>
         </p>
+        <p v-if="detail?.comment" class="table-comment">{{ detail.comment }}</p>
 
         <div v-if="loadingDetail" class="loading small">
           <ProgressSpinner style="width: 1.5rem; height: 1.5rem" />
@@ -620,10 +648,11 @@ watch(selectedSourceId, loadSource);
                   :class="{ joined: joinedColumns.has(column.name) }"
                 >
                   <td class="field-name">{{ column.name }}</td>
-                  <td class="field-type">{{ column.dataType }}</td>
+                  <td class="field-type" :title="column.dataType">{{ column.dataType }}</td>
                   <td class="field-flag">
                     <span v-if="!column.nullable" class="not-null">NOT NULL</span>
                   </td>
+                  <td class="field-comment" :title="column.comment">{{ column.comment }}</td>
                 </tr>
               </tbody>
             </table>
@@ -709,6 +738,12 @@ h1 {
   align-items: start;
 }
 
+/* Folding the list away hands its width to the drawing rather than leaving a
+   gap where it was. */
+.split.tables-hidden {
+  grid-template-columns: auto 1fr;
+}
+
 .tables {
   border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
@@ -720,6 +755,39 @@ h1 {
   gap: 0.4rem;
   padding: 0.6rem;
   border-bottom: 1px solid var(--p-content-border-color);
+}
+
+.tables.collapsed .tables-head {
+  padding: 0.3rem 0.15rem;
+}
+
+.head-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.tables-toggle {
+  flex: none;
+}
+
+/* Vertical, because a collapsed rail has height to spare and no width. */
+.rail-label {
+  writing-mode: vertical-rl;
+  width: 100%;
+  padding: 0.75rem 0;
+  border: 0;
+  background: none;
+  color: var(--p-text-muted-color);
+  font: inherit;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.rail-label:hover {
+  color: var(--p-text-color);
 }
 
 .count {
@@ -992,10 +1060,12 @@ h1 {
   color: var(--p-text-muted-color);
 }
 
+/* Stacked rather than columned: the column table carries names, types, flags
+   and comments, and side-by-side sections squeeze it until every row wraps.
+   Indexes and relations are short lists and read fine underneath it. */
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
-  gap: 1.25rem;
+  gap: 1rem;
   align-items: start;
 }
 
@@ -1023,15 +1093,44 @@ h1 {
   font-family: var(--font-mono, ui-monospace, monospace);
 }
 
+/* A type like "bigint(20) unsigned zerofill" wraps to three lines and drags
+   its whole row out of alignment, so it stays on one line and truncates. */
 .field-type {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--p-text-muted-color);
 }
 
 .field-flag {
-  width: 5rem;
+  width: 5.5rem;
+  white-space: nowrap;
+}
+
+/* A comment is context, not identity: it reads quietly beside the column and
+   truncates rather than pushing the name and type out of alignment. The zero
+   max-width with a full width is the table-cell ellipsis trick — it lets the
+   cell take whatever room the other columns leave and clip to exactly that,
+   instead of clipping at a guessed width or overflowing the panel. */
+.field-comment {
+  width: 100%;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--p-text-muted-color);
+}
+
+.table-comment {
+  margin: -0.2rem 0 0.6rem;
+  max-width: 80ch;
+  font-size: 0.82rem;
+  color: var(--p-text-muted-color);
 }
 
 .not-null {
+  white-space: nowrap;
   font-size: 0.65rem;
   letter-spacing: 0.04em;
   color: var(--p-text-muted-color);
@@ -1076,8 +1175,16 @@ h1 {
 }
 
 @media (max-width: 900px) {
-  .split {
+  .split,
+  .split.tables-hidden {
     grid-template-columns: 1fr;
+  }
+
+  /* One column wide, the rail is a bar across the top, so the label lies flat. */
+  .rail-label {
+    writing-mode: horizontal-tb;
+    padding: 0.4rem 0.6rem;
+    text-align: left;
   }
 }
 </style>

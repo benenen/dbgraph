@@ -23,6 +23,8 @@ export interface TableColumn {
   dataType: string;
   nullable: boolean;
   ordinal: number;
+  /** What the source database records about this column. Often empty. */
+  comment: string;
 }
 
 export interface TableIndex {
@@ -36,6 +38,7 @@ export interface TableDetail {
   id: string;
   name: string;
   qualifiedName: string;
+  comment: string;
   columns: TableColumn[];
   indexes: TableIndex[];
 }
