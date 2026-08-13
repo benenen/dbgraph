@@ -61,7 +61,7 @@ func TestRunnerLoadsDSNFromEnvironmentAndPublishesSnapshot(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"SCHEMA_NAME"}).AddRow("learn"))
 	mock.ExpectQuery("FROM information_schema[.]TABLES").
 		WithArgs("learn").
-		WillReturnRows(sqlmock.NewRows([]string{"TABLE_SCHEMA", "TABLE_NAME"}))
+		WillReturnRows(sqlmock.NewRows([]string{"TABLE_SCHEMA", "TABLE_NAME", "TABLE_COMMENT"}))
 	mock.ExpectQuery("FROM information_schema[.]STATISTICS").
 		WithArgs("learn").
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -72,7 +72,7 @@ func TestRunnerLoadsDSNFromEnvironmentAndPublishesSnapshot(t *testing.T) {
 	mock.ExpectQuery("FROM information_schema[.]COLUMNS").
 		WithArgs("learn").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME", "COLUMN_TYPE", "IS_NULLABLE", "ORDINAL_POSITION",
+			"TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME", "COLUMN_TYPE", "IS_NULLABLE", "ORDINAL_POSITION", "COLUMN_COMMENT",
 		}))
 	mock.ExpectQuery("FROM information_schema[.]KEY_COLUMN_USAGE.*REFERENCED_TABLE_SCHEMA = [?]").
 		WithArgs("learn", "learn").
@@ -148,8 +148,8 @@ func TestRunnerIgnoresCrossSchemaForeignKeysThatCatalogCannotRepresent(t *testin
 		WillReturnRows(sqlmock.NewRows([]string{"SCHEMA_NAME"}).AddRow("learn"))
 	mock.ExpectQuery("FROM information_schema[.]TABLES").
 		WithArgs("learn").
-		WillReturnRows(sqlmock.NewRows([]string{"TABLE_SCHEMA", "TABLE_NAME"}).
-			AddRow("learn", "classes"))
+		WillReturnRows(sqlmock.NewRows([]string{"TABLE_SCHEMA", "TABLE_NAME", "TABLE_COMMENT"}).
+			AddRow("learn", "classes", ""))
 	mock.ExpectQuery("FROM information_schema[.]STATISTICS").
 		WithArgs("learn").
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -160,8 +160,8 @@ func TestRunnerIgnoresCrossSchemaForeignKeysThatCatalogCannotRepresent(t *testin
 	mock.ExpectQuery("FROM information_schema[.]COLUMNS").
 		WithArgs("learn").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME", "COLUMN_TYPE", "IS_NULLABLE", "ORDINAL_POSITION",
-		}).AddRow("learn", "classes", "external_id", "bigint", "NO", 1))
+			"TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME", "COLUMN_TYPE", "IS_NULLABLE", "ORDINAL_POSITION", "COLUMN_COMMENT",
+		}).AddRow("learn", "classes", "external_id", "bigint", "NO", 1, ""))
 	mock.ExpectQuery("FROM information_schema[.]KEY_COLUMN_USAGE.*REFERENCED_TABLE_SCHEMA = [?]").
 		WithArgs("learn", "learn").
 		WillReturnRows(sqlmock.NewRows([]string{

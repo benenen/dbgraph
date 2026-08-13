@@ -368,7 +368,7 @@ INSERT INTO schema_scan_runs(
 			return catalog.PublishedSnapshot{}, fmt.Errorf("generate node version ID: %w", err)
 		}
 		parentNodeID := nullableNodeID(nodeIDs, input.ParentStableKey)
-		metadata, err := catalog.EncodeNodeMetadata(input.Indexes)
+		metadata, err := catalog.EncodeNodeMetadata(input.Indexes, input.Comment)
 		if err != nil {
 			return catalog.PublishedSnapshot{}, fmt.Errorf("encode node metadata: %w", err)
 		}

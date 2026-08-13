@@ -151,6 +151,10 @@ type NodeInput struct {
 	// rather than a node of its own: the graph is about relations, and an index
 	// participates in none of them.
 	Indexes []Index
+	// Comment is what the source database records about this table or column.
+	// It is often the only description of a column that exists anywhere, so it
+	// travels with the node rather than being dropped at the scan boundary.
+	Comment string
 }
 
 // Index is one index the source database declares on a table. Ordered columns
@@ -176,12 +180,23 @@ const (
 // set, and reading it back cannot surface something nothing wrote.
 type nodeMetadata struct {
 	Indexes []Index `json:"indexes,omitempty"`
+	Comment string  `json:"comment,omitempty"`
 }
 
+// MaximumCommentLength bounds untrusted text from a source database. MySQL caps
+// a column comment at 1024 characters and a table comment at 2048; this is
+// generous against both and still keeps one node's metadata small.
+const MaximumCommentLength = 4000
+
 // EncodeNodeMetadata renders a node's metadata for storage. An empty result is
-// the empty object, which is what every node had before indexes were captured.
-func EncodeNodeMetadata(indexes []Index) ([]byte, error) {
-	if len(indexes) == 0 {
+// the empty object, which is what every node had before indexes and comments
+// were captured.
+func EncodeNodeMetadata(indexes []Index, comment string) ([]byte, error) {
+	comment = strings.TrimSpace(comment)
+	if len(comment) > MaximumCommentLength {
+		comment = comment[:MaximumCommentLength]
+	}
+	if len(indexes) == 0 && comment == "" {
 		return []byte("{}"), nil
 	}
 	if len(indexes) > MaximumIndexesPerTable {
@@ -200,21 +215,21 @@ func EncodeNodeMetadata(indexes []Index) ([]byte, error) {
 			}
 		}
 	}
-	return json.Marshal(nodeMetadata{Indexes: indexes})
+	return json.Marshal(nodeMetadata{Indexes: indexes, Comment: comment})
 }
 
 // DecodeNodeMetadata reads indexes back. Metadata written before this existed
 // is the empty object, and unreadable metadata yields no indexes rather than an
 // error: a catalog is still worth showing when one table's extras are garbled.
-func DecodeNodeMetadata(raw string) []Index {
+func DecodeNodeMetadata(raw string) ([]Index, string) {
 	if raw == "" || raw == "{}" {
-		return nil
+		return nil, ""
 	}
 	var metadata nodeMetadata
 	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
-		return nil
+		return nil, ""
 	}
-	return metadata.Indexes
+	return metadata.Indexes, metadata.Comment
 }
 
 type DeclaredForeignKey struct {
@@ -306,6 +321,7 @@ type Column struct {
 	DataType string
 	Nullable bool
 	Ordinal  int
+	Comment  string
 }
 
 // TableDetail is everything the catalog holds about one table. It is read on
@@ -313,6 +329,7 @@ type Column struct {
 // carrying every column of every one of them would be most of the catalog.
 type TableDetail struct {
 	Table   TableSummary
+	Comment string
 	Columns []Column
 	Indexes []Index
 }

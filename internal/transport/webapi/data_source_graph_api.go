@@ -107,6 +107,7 @@ func (h *handler) tableDetail(response http.ResponseWriter, request *http.Reques
 			"dataType": column.DataType,
 			"nullable": column.Nullable,
 			"ordinal":  column.Ordinal,
+			"comment":  column.Comment,
 		}
 	}
 	indexes := make([]map[string]any, len(detail.Indexes))
@@ -122,6 +123,7 @@ func (h *handler) tableDetail(response http.ResponseWriter, request *http.Reques
 		"id":            strconv.FormatInt(detail.Table.ID, 10),
 		"name":          detail.Table.Name,
 		"qualifiedName": detail.Table.QualifiedName,
+		"comment":       detail.Comment,
 		"columns":       columns,
 		"indexes":       indexes,
 	})

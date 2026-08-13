@@ -230,3 +230,50 @@ func TestTableDetailReturnsColumnsAndIndexes(t *testing.T) {
 		t.Fatalf("plain table = %#v", plain)
 	}
 }
+
+// A column comment is often the only description of a column that exists
+// anywhere, so it has to survive the scan boundary and come back on the read.
+func TestTableDetailReturnsTableAndColumnComments(t *testing.T) {
+	t.Parallel()
+
+	ctx, store, source, catalogService := newGraphFixture(t, "comments")
+	nodes := sampleTables()
+	for position := range nodes {
+		switch nodes[position].StableKey {
+		case "table:shop.orders":
+			nodes[position].Comment = "orders placed by a tenant"
+		case "column:shop.orders.user_id":
+			nodes[position].Comment = "buyer, discriminated by type"
+		}
+	}
+	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		DataSourceID: source, Nodes: nodes,
+	}); err != nil {
+		t.Fatalf("PublishSnapshot: %v", err)
+	}
+	repository := dbsqlite.NewCatalogRepository(store, nil)
+	listed, err := repository.ListTables(ctx, source, "orders", 50)
+	if err != nil || len(listed) != 1 {
+		t.Fatalf("ListTables = %#v err = %v", listed, err)
+	}
+
+	detail, err := repository.LoadTableDetail(ctx, listed[0].ID)
+	if err != nil {
+		t.Fatalf("LoadTableDetail: %v", err)
+	}
+	if detail.Comment != "orders placed by a tenant" {
+		t.Fatalf("table comment = %q", detail.Comment)
+	}
+	byName := map[string]string{}
+	for _, column := range detail.Columns {
+		byName[column.Name] = column.Comment
+	}
+	if byName["user_id"] != "buyer, discriminated by type" {
+		t.Fatalf("column comments = %#v", byName)
+	}
+	// A column the source did not describe reads back empty, not as the
+	// table's comment leaking down.
+	if byName["buyer_id"] != "" {
+		t.Fatalf("uncommented column carried %q", byName["buyer_id"])
+	}
+}

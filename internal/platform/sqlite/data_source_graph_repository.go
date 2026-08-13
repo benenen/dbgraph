@@ -193,10 +193,10 @@ WHERE n.id = ? AND n.kind = ?
 	if err != nil {
 		return catalog.TableDetail{}, fmt.Errorf("load table: %w", err)
 	}
-	detail.Indexes = catalog.DecodeNodeMetadata(metadata)
+	detail.Indexes, detail.Comment = catalog.DecodeNodeMetadata(metadata)
 
 	rows, err := r.store.db.QueryContext(ctx, `
-SELECT n.id, nv.name, nv.data_type, nv.nullable, nv.ordinal_position
+SELECT n.id, nv.name, nv.data_type, nv.nullable, nv.ordinal_position, nv.metadata_json
 FROM nodes n
 JOIN node_current nc ON nc.node_id = n.id
 JOIN node_versions nv ON nv.id = nc.version_id
@@ -214,10 +214,14 @@ ORDER BY nv.ordinal_position, nv.name
 	for rows.Next() {
 		var column catalog.Column
 		var nullable int
-		if err := rows.Scan(&column.ID, &column.Name, &column.DataType, &nullable, &column.Ordinal); err != nil {
+		var columnMetadata string
+		if err := rows.Scan(
+			&column.ID, &column.Name, &column.DataType, &nullable, &column.Ordinal, &columnMetadata,
+		); err != nil {
 			return catalog.TableDetail{}, fmt.Errorf("scan table column: %w", err)
 		}
 		column.Nullable = nullable == 1
+		_, column.Comment = catalog.DecodeNodeMetadata(columnMetadata)
 		detail.Columns = append(detail.Columns, column)
 	}
 	if err := rows.Err(); err != nil {

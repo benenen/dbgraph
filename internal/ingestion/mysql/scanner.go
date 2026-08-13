@@ -19,7 +19,7 @@ ORDER BY SCHEMA_NAME
 `
 
 const tablesQuery = `
-SELECT TABLE_SCHEMA, TABLE_NAME
+SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_COMMENT
 FROM information_schema.TABLES
 WHERE TABLE_TYPE = 'BASE TABLE'
   AND TABLE_SCHEMA = ?
@@ -28,7 +28,8 @@ ORDER BY TABLE_SCHEMA, TABLE_NAME
 
 const columnsQuery = `
 SELECT
-    TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, ORDINAL_POSITION
+    TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, ORDINAL_POSITION,
+    COLUMN_COMMENT
 FROM information_schema.COLUMNS
 WHERE TABLE_SCHEMA = ?
 ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
@@ -335,7 +336,8 @@ func readTablesQuery(
 	for rows.Next() {
 		var schemaName string
 		var tableName string
-		if err := rows.Scan(&schemaName, &tableName); err != nil {
+		var comment sql.NullString
+		if err := rows.Scan(&schemaName, &tableName, &comment); err != nil {
 			return nil, fmt.Errorf("scan MySQL table: %w", err)
 		}
 		if err := budget.addNode(schemaName, tableName); err != nil {
@@ -348,6 +350,7 @@ func readTablesQuery(
 			Kind:            catalog.NodeTable,
 			Name:            tableName,
 			QualifiedName:   qualifiedName,
+			Comment:         comment.String,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -473,6 +476,7 @@ func readColumnsQuery(
 		var dataType string
 		var nullable string
 		var ordinal int
+		var comment sql.NullString
 		if err := rows.Scan(
 			&schemaName,
 			&tableName,
@@ -480,6 +484,7 @@ func readColumnsQuery(
 			&dataType,
 			&nullable,
 			&ordinal,
+			&comment,
 		); err != nil {
 			return nil, fmt.Errorf("scan MySQL column: %w", err)
 		}
@@ -497,6 +502,7 @@ func readColumnsQuery(
 			DataType:        dataType,
 			Nullable:        nullable == "YES",
 			Ordinal:         ordinal,
+			Comment:         comment.String,
 		})
 	}
 	if err := rows.Err(); err != nil {
