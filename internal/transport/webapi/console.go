@@ -79,6 +79,15 @@ func serveConsoleIndex(response http.ResponseWriter, files fs.FS) {
 
 const noncePlaceholder = "__CSP_NONCE__"
 
+// 3d-force-graph and its renderer/tooltip dependencies inject these three
+// version-locked CSS blocks when the lazy graph chunk loads. The empty hash
+// covers creation of their initially empty style elements. Exact hashes keep
+// style-src closed: changing any dependency CSS requires an explicit review.
+const graphRuntimeStyleSources = " 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='" +
+	" 'sha256-0/4q5IwejFb2zgHlQwwtwmGHS8ZbXE1kmz/TkRFlZ7M='" +
+	" 'sha256-yfc2FhpkFR0EAy3T+zDsaAFGXSP9B3ELNvaJKDzNhkk='" +
+	" 'sha256-9xjtvxMT1ApHlgn9ohbh2FNfvK5Tqtzy94BjfXBeMSY='"
+
 func newNonce() (string, error) {
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
@@ -91,7 +100,7 @@ func newNonce() (string, error) {
 // hashed bundles, so 'self' covers scripts, styles, and fonts with no inline
 // allowance beyond the style attributes PrimeVue sets on elements.
 func setConsoleSecurityHeaders(response http.ResponseWriter, nonce string) {
-	styleSource := "'self'"
+	styleSource := "'self'" + graphRuntimeStyleSources
 	if nonce != "" {
 		styleSource += " 'nonce-" + nonce + "'"
 	}

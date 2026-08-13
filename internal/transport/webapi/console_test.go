@@ -76,8 +76,23 @@ func requireBuiltConsole(t *testing.T) {
 func assertConsoleSecurityHeaders(t *testing.T, response *httptest.ResponseRecorder) {
 	t.Helper()
 	headers := response.Header()
-	if !strings.Contains(headers.Get("Content-Security-Policy"), "object-src 'none'") ||
-		headers.Get("Referrer-Policy") != "no-referrer" ||
+	csp := headers.Get("Content-Security-Policy")
+	for _, directive := range []string{
+		"object-src 'none'",
+		"'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='",
+		"'sha256-0/4q5IwejFb2zgHlQwwtwmGHS8ZbXE1kmz/TkRFlZ7M='",
+		"'sha256-yfc2FhpkFR0EAy3T+zDsaAFGXSP9B3ELNvaJKDzNhkk='",
+		"'sha256-9xjtvxMT1ApHlgn9ohbh2FNfvK5Tqtzy94BjfXBeMSY='",
+	} {
+		if !strings.Contains(csp, directive) {
+			t.Fatalf("console CSP=%q missing %q", csp, directive)
+		}
+	}
+	if strings.Contains(csp, "style-src 'self' 'unsafe-inline'") ||
+		strings.Contains(csp, "script-src 'self' 'unsafe-inline'") {
+		t.Fatalf("console CSP=%q broadly permits inline code", csp)
+	}
+	if headers.Get("Referrer-Policy") != "no-referrer" ||
 		headers.Get("X-Content-Type-Options") != "nosniff" ||
 		headers.Get("X-Frame-Options") != "DENY" {
 		t.Fatalf("console security headers=%v", headers)

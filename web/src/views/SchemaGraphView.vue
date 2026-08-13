@@ -6,8 +6,14 @@ import InputText from "primevue/inputtext";
 import Message from "primevue/message";
 import ProgressSpinner from "primevue/progressspinner";
 import Select from "primevue/select";
+import Tab from "primevue/tab";
+import TabList from "primevue/tablist";
+import TabPanel from "primevue/tabpanel";
+import TabPanels from "primevue/tabpanels";
+import Tabs from "primevue/tabs";
 import Tag from "primevue/tag";
 
+import RelationSphere from "@/components/RelationSphere.vue";
 import {
   api,
   UnauthenticatedError,
@@ -41,19 +47,23 @@ const failure = ref("");
 const focusedTableId = ref("");
 const detail = ref<TableDetail | null>(null);
 const loadingDetail = ref(false);
-// The columns and indexes panel folds away like the table list does, and the
-// relations it used to hold now live in a drawer over the drawing.
-const detailOpen = ref(true);
-const relationsOpen = ref(false);
+const tableDetailFailure = ref("");
+// Table metadata is a reference sheet rather than part of the drawing. It
+// opens beside the graph so selecting a table never pushes the sphere down.
+const tableDrawerOpen = ref(false);
+const tableDrawerTab = ref<"table" | "index" | "relations">("table");
 
-// Hover is a preview and click is a selection: pointing at something says what
-// it is, clicking keeps it on screen while you read the panel below.
-const hoveredTableId = ref("");
-const hoveredEdgeId = ref("");
 const selectedEdge = ref<RelationEdge | null>(null);
+interface RelationSphereHandle {
+  focusGraph(): void;
+}
+const relationSphere = ref<RelationSphereHandle | null>(null);
 // Guards name columns by id. Resolved on demand when an edge is opened, and
 // kept, because the same columns recur across a source's relations.
 const columnNames = ref<Record<string, string>>({});
+let tableDetailRequestGeneration = 0;
+let sourceLoadGeneration = 0;
+let focusGraphAfterDrawerClose = false;
 
 /** Tables that actually take part in a relation, which is what the graph draws. */
 const connected = computed(() => new Set(graph.value.tables.map((table) => table.id)));
@@ -74,211 +84,60 @@ async function loadWorkspace(): Promise<void> {
 }
 
 async function loadSource(): Promise<void> {
-  if (!selectedSourceId.value) return;
+  const sourceId = selectedSourceId.value;
+  if (!sourceId) return;
+  const requestGeneration = ++sourceLoadGeneration;
   loadingTables.value = true;
   failure.value = "";
+  tables.value = [];
+  graph.value = { tables: [], edges: [], truncated: false };
+  sourceTableCount.value = 0;
   focusedTableId.value = "";
+  selectedEdge.value = null;
+  detail.value = null;
+  tableDetailFailure.value = "";
+  tableDetailRequestGeneration += 1;
+  loadingDetail.value = false;
+  tableDrawerOpen.value = false;
+  tableDrawerTab.value = "table";
+  columnNames.value = {};
   filter.value = "";
   try {
     const [imported, relations] = await Promise.all([
-      api.listTables(selectedSourceId.value, filter.value),
-      api.relationGraph(selectedSourceId.value),
+      api.listTables(sourceId, filter.value),
+      api.relationGraph(sourceId),
     ]);
+    if (requestGeneration !== sourceLoadGeneration || selectedSourceId.value !== sourceId) return;
     tables.value = imported.tables;
     tablesTruncated.value = imported.truncated;
     sourceTableCount.value = imported.tables.length;
     graph.value = relations;
-    layout();
   } catch (error) {
     if (error instanceof UnauthenticatedError) return;
+    if (requestGeneration !== sourceLoadGeneration || selectedSourceId.value !== sourceId) return;
     failure.value = error instanceof Error ? error.message : "Could not load this data source.";
   } finally {
-    loadingTables.value = false;
+    if (requestGeneration === sourceLoadGeneration) loadingTables.value = false;
   }
 }
 
 async function refilter(): Promise<void> {
-  if (!selectedSourceId.value) return;
+  const sourceId = selectedSourceId.value;
+  const sourceGeneration = sourceLoadGeneration;
+  if (!sourceId) return;
   loadingTables.value = true;
   try {
-    const listed = await api.listTables(selectedSourceId.value, filter.value);
+    const listed = await api.listTables(sourceId, filter.value);
+    if (sourceGeneration !== sourceLoadGeneration || selectedSourceId.value !== sourceId) return;
     tables.value = listed.tables;
     tablesTruncated.value = listed.truncated;
   } catch (error) {
     if (error instanceof UnauthenticatedError) return;
+    if (sourceGeneration !== sourceLoadGeneration || selectedSourceId.value !== sourceId) return;
     failure.value = error instanceof Error ? error.message : "Could not filter tables.";
   } finally {
-    loadingTables.value = false;
+    if (sourceGeneration === sourceLoadGeneration) loadingTables.value = false;
   }
-}
-
-// --- Layout -----------------------------------------------------------------
-// A small force simulation, run once per graph rather than animated: edges pull
-// their two tables together, every pair pushes apart, and the result is frozen.
-// Deterministic, because the starting ring is by index rather than random — the
-// same relations always draw the same picture.
-
-// The canvas is wider than it is tall, so the coordinate space is too. A square
-// viewBox letterboxes inside the panel and shrinks the drawing until the labels
-// stop being readable.
-const VIEW_WIDTH = 1400;
-const VIEW_HEIGHT = 800;
-const positions = ref<Record<string, { x: number; y: number }>>({});
-
-function layout(): void {
-  const nodes = graph.value.tables;
-  if (!nodes.length) {
-    positions.value = {};
-    return;
-  }
-  const placed: Record<string, { x: number; y: number }> = {};
-  nodes.forEach((table, index) => {
-    const angle = (2 * Math.PI * index) / nodes.length;
-    placed[table.id] = {
-      x: VIEW_WIDTH / 2 + VIEW_WIDTH * 0.3 * Math.cos(angle),
-      y: VIEW_HEIGHT / 2 + VIEW_HEIGHT * 0.3 * Math.sin(angle),
-    };
-  });
-
-  const ideal = Math.max(120, Math.min(340, 1600 / Math.sqrt(nodes.length)));
-  for (let pass = 0; pass < 220; pass += 1) {
-    const cooling = 1 - pass / 220;
-    const force: Record<string, { x: number; y: number }> = {};
-    for (const table of nodes) force[table.id] = { x: 0, y: 0 };
-
-    for (let a = 0; a < nodes.length; a += 1) {
-      for (let b = a + 1; b < nodes.length; b += 1) {
-        const first = placed[nodes[a].id];
-        const second = placed[nodes[b].id];
-        let dx = first.x - second.x;
-        let dy = first.y - second.y;
-        let distance = Math.hypot(dx, dy) || 0.01;
-        // Two tables landing on the same point have no direction to separate
-        // along, so give them one from their order rather than from a random.
-        if (distance < 0.05) {
-          dx = (a - b) * 0.05;
-          dy = 0.05;
-          distance = Math.hypot(dx, dy);
-        }
-        const push = (ideal * ideal) / distance;
-        force[nodes[a].id].x += (dx / distance) * push;
-        force[nodes[a].id].y += (dy / distance) * push;
-        force[nodes[b].id].x -= (dx / distance) * push;
-        force[nodes[b].id].y -= (dy / distance) * push;
-      }
-    }
-
-    for (const edge of graph.value.edges) {
-      const from = placed[edge.sourceTableId];
-      const to = placed[edge.targetTableId];
-      if (!from || !to || edge.sourceTableId === edge.targetTableId) continue;
-      const dx = to.x - from.x;
-      const dy = to.y - from.y;
-      const distance = Math.hypot(dx, dy) || 0.01;
-      const pull = (distance * distance) / ideal;
-      force[edge.sourceTableId].x += (dx / distance) * pull;
-      force[edge.sourceTableId].y += (dy / distance) * pull;
-      force[edge.targetTableId].x -= (dx / distance) * pull;
-      force[edge.targetTableId].y -= (dy / distance) * pull;
-    }
-
-    for (const table of nodes) {
-      const point = placed[table.id];
-      const shift = force[table.id];
-      const magnitude = Math.hypot(shift.x, shift.y) || 1;
-      const step = Math.min(magnitude, ideal * cooling);
-      point.x = clamp(point.x + (shift.x / magnitude) * step, 80, VIEW_WIDTH - 80);
-      point.y = clamp(point.y + (shift.y / magnitude) * step, 50, VIEW_HEIGHT - 50);
-    }
-  }
-  positions.value = placed;
-}
-
-function clamp(value: number, low: number, high: number): number {
-  return Math.min(high, Math.max(low, value));
-}
-
-// --- Pan and zoom ------------------------------------------------------------
-
-const zoom = ref(1);
-const pan = ref({ x: 0, y: 0 });
-const dragging = ref(false);
-let dragOrigin = { x: 0, y: 0, panX: 0, panY: 0 };
-
-const viewBox = computed(() => {
-  const width = VIEW_WIDTH / zoom.value;
-  const height = VIEW_HEIGHT / zoom.value;
-  return `${pan.value.x} ${pan.value.y} ${width} ${height}`;
-});
-
-function startDrag(event: PointerEvent): void {
-  dragging.value = true;
-  dragOrigin = { x: event.clientX, y: event.clientY, panX: pan.value.x, panY: pan.value.y };
-  (event.currentTarget as Element).setPointerCapture(event.pointerId);
-}
-
-function drag(event: PointerEvent): void {
-  if (!dragging.value) return;
-  const scale = VIEW_WIDTH / zoom.value / 900;
-  pan.value = {
-    x: dragOrigin.panX - (event.clientX - dragOrigin.x) * scale,
-    y: dragOrigin.panY - (event.clientY - dragOrigin.y) * scale,
-  };
-}
-
-function endDrag(event: PointerEvent): void {
-  dragging.value = false;
-  (event.currentTarget as Element).releasePointerCapture(event.pointerId);
-}
-
-function changeZoom(factor: number): void {
-  zoom.value = clamp(zoom.value * factor, 0.4, 4);
-}
-
-function resetView(): void {
-  zoom.value = 1;
-  pan.value = { x: 0, y: 0 };
-}
-
-// --- Reading the graph -------------------------------------------------------
-
-const NODE_RADIUS = 11;
-const ARROW_CLEARANCE = 16;
-
-function edgePath(edge: RelationEdge): string {
-  const from = positions.value[edge.sourceTableId];
-  const to = positions.value[edge.targetTableId];
-  if (!from || !to) return "";
-  // Bow the line so two relations between the same pair stay distinguishable.
-  const controlX = (from.x + to.x) / 2 + (to.y - from.y) * 0.12;
-  const controlY = (from.y + to.y) / 2 - (to.x - from.x) * 0.12;
-  // Stop short of both circles. Centre to centre would bury the arrowhead under
-  // the target, and the edge would lose the one thing it has to show: direction.
-  const start = pullBack(from, { x: controlX, y: controlY }, NODE_RADIUS + 2);
-  const end = pullBack(to, { x: controlX, y: controlY }, NODE_RADIUS + ARROW_CLEARANCE);
-  return `M ${start.x} ${start.y} Q ${controlX} ${controlY} ${end.x} ${end.y}`;
-}
-
-/** Moves an endpoint toward the curve's control point by a fixed distance. */
-function pullBack(
-  point: { x: number; y: number },
-  toward: { x: number; y: number },
-  distance: number,
-): { x: number; y: number } {
-  const dx = toward.x - point.x;
-  const dy = toward.y - point.y;
-  const length = Math.hypot(dx, dy) || 1;
-  return { x: point.x + (dx / length) * distance, y: point.y + (dy / length) * distance };
-}
-
-function isFocused(tableId: string): boolean {
-  if (!focusedTableId.value) return false;
-  if (focusedTableId.value === tableId) return true;
-  return graph.value.edges.some(
-    (edge) =>
-      (edge.sourceTableId === focusedTableId.value && edge.targetTableId === tableId) ||
-      (edge.targetTableId === focusedTableId.value && edge.sourceTableId === tableId),
-  );
 }
 
 function edgeFocused(edge: RelationEdge): boolean {
@@ -291,10 +150,6 @@ function edgeFocused(edge: RelationEdge): boolean {
 function columnName(nodeId: string): string {
   return columnNames.value[nodeId] ?? nodeId;
 }
-
-const selectedGuard = computed(() =>
-  selectedEdge.value?.guard ? describeCondition(selectedEdge.value.guard, columnName) : "",
-);
 
 /** Names the columns a guard mentions, so a condition reads as words not ids. */
 async function resolveColumnNames(ids: Iterable<string>): Promise<void> {
@@ -314,21 +169,52 @@ async function resolveColumnNames(ids: Iterable<string>): Promise<void> {
   columnNames.value = { ...columnNames.value, ...Object.fromEntries(resolved) };
 }
 
-// keepTableFocus is set when the click came from the drawer, which lists one
-// table's relations: dropping the focus there would empty the list the reader
-// is still looking at.
-async function openEdge(edge: RelationEdge, keepTableFocus = false): Promise<void> {
-  if (selectedEdge.value?.relationId === edge.relationId) {
-    selectedEdge.value = null;
-    return;
+/** Loads drawer metadata without allowing an older request to replace a newer table. */
+async function loadTableDetail(tableId: string): Promise<void> {
+  const sourceId = selectedSourceId.value;
+  detail.value = null;
+  tableDetailFailure.value = "";
+  loadingDetail.value = true;
+  const requestGeneration = ++tableDetailRequestGeneration;
+  try {
+    const loaded = await api.tableDetail(tableId);
+    if (
+      requestGeneration !== tableDetailRequestGeneration ||
+      focusedTableId.value !== tableId ||
+      selectedSourceId.value !== sourceId
+    ) return;
+    detail.value = loaded;
+  } catch (error) {
+    if (error instanceof UnauthenticatedError) return;
+    if (
+      requestGeneration !== tableDetailRequestGeneration ||
+      focusedTableId.value !== tableId ||
+      selectedSourceId.value !== sourceId
+    ) return;
+    tableDetailFailure.value = error instanceof Error ? error.message : "Could not read that table.";
+  } finally {
+    if (
+      requestGeneration === tableDetailRequestGeneration &&
+      selectedSourceId.value === sourceId
+    ) loadingDetail.value = false;
   }
+}
+
+/** Opens a graph relation in the drawer and selects it in both views. */
+async function openEdge(edge: RelationEdge): Promise<void> {
   selectedEdge.value = edge;
-  if (!keepTableFocus) {
-    focusedTableId.value = "";
-    detail.value = null;
-    relationsOpen.value = false;
-  }
-  await resolveColumnNames(conditionNodeIds(edge.guard));
+  const endpointIds = [edge.sourceTableId, edge.targetTableId];
+  const tableId = endpointIds.includes(focusedTableId.value)
+    ? focusedTableId.value
+    : edge.sourceTableId;
+  const needsDetail = detail.value?.id !== tableId || Boolean(tableDetailFailure.value);
+  focusedTableId.value = tableId;
+  tableDrawerTab.value = "relations";
+  tableDrawerOpen.value = true;
+  await Promise.all([
+    resolveColumnNames(conditionNodeIds(edge.guard)),
+    needsDetail ? loadTableDetail(tableId) : Promise.resolve(),
+  ]);
 }
 
 /**
@@ -361,65 +247,50 @@ function cardinalityHint(edge: RelationEdge): string {
   }
 }
 
-/** The guard as a sentence, for a relation listed outside the edge panel. */
+/** The guard as a sentence, for a relation listed in the drawer tab. */
 function guardText(edge: RelationEdge): string {
   return edge.guard ? describeCondition(edge.guard, columnName) : "";
 }
 
-/** Picks a relation out of the drawer and lights it in the drawing behind it. */
-function selectFromDrawer(edge: RelationEdge): Promise<void> {
-  return openEdge(edge, true);
+/** Picks a relation out of the drawer tab and lights it in the drawing behind it. */
+async function selectFromDrawer(edge: RelationEdge): Promise<void> {
+  selectedEdge.value = edge;
+  focusGraphAfterDrawerClose = true;
+  tableDrawerOpen.value = false;
+  await resolveColumnNames(conditionNodeIds(edge.guard));
 }
 
-async function openRelations(): Promise<void> {
-  relationsOpen.value = true;
-  await resolveColumnNames(focusedEdges.value.flatMap((edge) => [...conditionNodeIds(edge.guard)]));
+function restoreGraphFocus(): void {
+  if (!focusGraphAfterDrawerClose) return;
+  focusGraphAfterDrawerClose = false;
+  relationSphere.value?.focusGraph();
 }
 
-
-/** True while an edge should be drawn lit: hovered, selected, or on a hovered table. */
-function edgeLit(edge: RelationEdge): boolean {
-  if (hoveredEdgeId.value === edge.relationId) return true;
-  if (selectedEdge.value?.relationId === edge.relationId) return true;
-  if (!hoveredTableId.value) return false;
-  return edge.sourceTableId === hoveredTableId.value || edge.targetTableId === hoveredTableId.value;
+async function selectDrawerTab(value: string | number): Promise<void> {
+  const selected = String(value);
+  if (selected !== "table" && selected !== "index" && selected !== "relations") return;
+  tableDrawerTab.value = selected;
+  if (selected === "relations") {
+    await resolveColumnNames(focusedEdges.value.flatMap((edge) => [...conditionNodeIds(edge.guard)]));
+  }
 }
 
-/**
- * True while a table is lit: the one being pointed at, a table it reaches, or
- * an endpoint of the edge being pointed at. Pointing at a table should answer
- * "what does this connect to", which means lighting the far end too.
- */
-function tableLit(tableId: string): boolean {
-  if (hoveredTableId.value === tableId) return true;
-  const edge = graph.value.edges.find((candidate) => candidate.relationId === hoveredEdgeId.value);
-  if (edge && (edge.sourceTableId === tableId || edge.targetTableId === tableId)) return true;
-  if (!hoveredTableId.value) return false;
-  return graph.value.edges.some(
-    (candidate) =>
-      (candidate.sourceTableId === hoveredTableId.value && candidate.targetTableId === tableId) ||
-      (candidate.targetTableId === hoveredTableId.value && candidate.sourceTableId === tableId),
-  );
-}
 
 async function focusTable(table: TableSummary): Promise<void> {
   selectedEdge.value = null;
-  if (focusedTableId.value === table.id) {
+  if (focusedTableId.value === table.id && tableDrawerOpen.value) {
+    tableDrawerOpen.value = false;
     focusedTableId.value = "";
     detail.value = null;
+    tableDetailFailure.value = "";
+    tableDetailRequestGeneration += 1;
+    loadingDetail.value = false;
     return;
   }
   focusedTableId.value = table.id;
-  detail.value = null;
-  loadingDetail.value = true;
-  try {
-    detail.value = await api.tableDetail(table.id);
-  } catch (error) {
-    if (error instanceof UnauthenticatedError) return;
-    failure.value = error instanceof Error ? error.message : "Could not read that table.";
-  } finally {
-    loadingDetail.value = false;
-  }
+  tableDrawerOpen.value = true;
+  tableDrawerTab.value = "table";
+  await loadTableDetail(table.id);
 }
 
 /** Marks the columns a relation joins on, so they stand out in the column list. */
@@ -438,21 +309,6 @@ const focusedEdges = computed(() =>
 
 function tableName(tableId: string): string {
   return graph.value.tables.find((table) => table.id === tableId)?.name ?? tableId;
-}
-
-/** The midpoint of an edge's curve, where its hover label sits. */
-function edgeLabelPoint(edge: RelationEdge): { x: number; y: number } {
-  const from = positions.value[edge.sourceTableId];
-  const to = positions.value[edge.targetTableId];
-  if (!from || !to) return { x: 0, y: 0 };
-  const controlX = (from.x + to.x) / 2 + (to.y - from.y) * 0.12;
-  const controlY = (from.y + to.y) / 2 - (to.x - from.x) * 0.12;
-  // A quadratic curve at t=0.5 sits midway between its control point and the
-  // straight chord, not on either.
-  return {
-    x: 0.25 * from.x + 0.5 * controlX + 0.25 * to.x,
-    y: 0.25 * from.y + 0.5 * controlY + 0.25 * to.y,
-  };
 }
 
 onMounted(async () => {
@@ -549,20 +405,10 @@ watch(selectedSourceId, loadSource);
     </aside>
 
     <section class="canvas">
-      <div class="canvas-head">
-        <div class="legend">
-          <span><i class="swatch solid" /> unconditional</span>
-          <span><i class="swatch dashed" /> conditional</span>
-        </div>
-        <div class="canvas-actions">
-          <Tag v-if="graph.truncated" value="truncated" severity="warn" />
-          <Button icon="pi pi-search-minus" text size="small" @click="changeZoom(1 / 1.25)" />
-          <Button icon="pi pi-search-plus" text size="small" @click="changeZoom(1.25)" />
-          <Button label="Reset" text size="small" @click="resetView" />
-        </div>
+      <div v-if="loadingTables" class="loading graph-loading">
+        <ProgressSpinner style="width: 2rem; height: 2rem" />
       </div>
-
-      <div v-if="!graph.edges.length" class="empty-graph">
+      <div v-else-if="!graph.edges.length" class="empty-graph">
         <p class="empty-title">No relations yet</p>
         <p class="muted">
           This source has {{ sourceTableCount }} table{{ sourceTableCount === 1 ? "" : "s" }} and no
@@ -572,253 +418,156 @@ watch(selectedSourceId, loadSource);
         </p>
       </div>
 
-      <svg
+      <RelationSphere
         v-else
-        class="graph"
-        :viewBox="viewBox"
-        :class="{ dragging }"
-        role="img"
-        aria-label="Relation graph"
-        @pointerdown="startDrag"
-        @pointermove="drag"
-        @pointerup="endDrag"
-        @pointercancel="endDrag"
-      >
-        <defs>
-          <marker
-            id="arrow"
-            viewBox="0 0 10 10"
-            refX="8"
-            refY="5"
-            markerWidth="5"
-            markerHeight="5"
-            orient="auto-start-reverse"
-          >
-            <path d="M 0 0 L 10 5 L 0 10 z" class="arrow-head" />
-          </marker>
-        </defs>
-
-        <g v-for="edge in graph.edges" :key="edge.relationId" class="edge-group">
-          <path
-            :d="edgePath(edge)"
-            class="edge"
-            :class="{
-              conditional: edge.conditional,
-              dimmed: !edgeFocused(edge),
-              lit: edgeLit(edge),
-              selected: selectedEdge?.relationId === edge.relationId,
-            }"
-            marker-end="url(#arrow)"
-          />
-          <!-- A 2px line is nearly impossible to point at, so the pointer
-               target is a wide invisible stroke following the same curve. -->
-          <path
-            :d="edgePath(edge)"
-            class="edge-hit"
-            @pointerenter="hoveredEdgeId = edge.relationId"
-            @pointerleave="hoveredEdgeId = ''"
-            @pointerdown.stop
-            @click.stop="openEdge(edge)"
-          >
-            <title>
-              {{ tableName(edge.sourceTableId) }}.{{ edge.sourceColumn }} →
-              {{ tableName(edge.targetTableId) }}.{{ edge.targetColumn }}
-            </title>
-          </path>
-          <text
-            v-if="edgeLit(edge)"
-            class="edge-label"
-            :x="edgeLabelPoint(edge).x"
-            :y="edgeLabelPoint(edge).y"
-          >
-            {{ edge.sourceColumn }} → {{ edge.targetColumn }}
-          </text>
-        </g>
-
-        <g
-          v-for="table in graph.tables"
-          :key="table.id"
-          class="node"
-          :class="{ dimmed: focusedTableId && !isFocused(table.id), lit: tableLit(table.id) }"
-          @pointerenter="hoveredTableId = table.id"
-          @pointerleave="hoveredTableId = ''"
-          @pointerdown.stop
-          @click.stop="focusTable(table)"
-        >
-          <circle
-            class="node-hit"
-            :cx="positions[table.id]?.x"
-            :cy="positions[table.id]?.y"
-            r="22"
-          />
-          <circle
-            class="node-dot"
-            :cx="positions[table.id]?.x"
-            :cy="positions[table.id]?.y"
-            r="11"
-          />
-          <text :x="positions[table.id]?.x" :y="(positions[table.id]?.y ?? 0) - 20">
-            {{ table.name }}
-          </text>
-          <title>{{ table.qualifiedName }}</title>
-        </g>
-      </svg>
-
-      <div v-if="selectedEdge" class="detail">
-        <p class="detail-title">
-          <code>{{ tableName(selectedEdge.sourceTableId) }}.{{ selectedEdge.sourceColumn }}</code>
-          <span class="arrow">→</span>
-          <code>{{ tableName(selectedEdge.targetTableId) }}.{{ selectedEdge.targetColumn }}</code>
-          <span class="detail-count">
-            {{ Math.round(selectedEdge.confidence * 100) }}% confident
-          </span>
-        </p>
-        <dl class="edge-clauses">
-          <dt>Cardinality</dt>
-          <dd>
-            <span
-              class="cardinality"
-              :class="{ unknown: selectedEdge.cardinality === 'UNKNOWN' }"
-            >
-              {{ CARDINALITY_LABELS[selectedEdge.cardinality] }}
-            </span>
-            <span class="cardinality-hint">{{ cardinalityHint(selectedEdge) }}</span>
-          </dd>
-          <template v-if="selectedGuard">
-            <dt>Applies when</dt>
-            <dd><code>{{ selectedGuard }}</code></dd>
-          </template>
-          <template v-else>
-            <dt>Applies</dt>
-            <dd>always — this relation carries no guard</dd>
-          </template>
-          <dt>Relation</dt>
-          <dd><code>{{ selectedEdge.relationId }}</code></dd>
-        </dl>
-      </div>
-
-      <div v-else-if="focusedTableId" class="detail">
-        <p class="detail-title">
-          <Button
-            :icon="detailOpen ? 'pi pi-chevron-down' : 'pi pi-chevron-right'"
-            text
-            size="small"
-            class="detail-toggle"
-            :aria-label="detailOpen ? 'Hide this table\'s columns' : 'Show this table\'s columns'"
-            :aria-expanded="detailOpen"
-            @click="detailOpen = !detailOpen"
-          />
-          <span class="detail-name" @click="detailOpen = !detailOpen">
-            {{ detail?.qualifiedName ?? tableName(focusedTableId) }}
-          </span>
-          <span v-if="detail" class="detail-count">
-            {{ detail.columns.length }} column{{ detail.columns.length === 1 ? "" : "s" }} ·
-            {{ detail.indexes.length }} index{{ detail.indexes.length === 1 ? "" : "es" }}
-          </span>
-          <Button
-            v-if="focusedEdges.length"
-            :label="`Relations · ${focusedEdges.length}`"
-            icon="pi pi-sitemap"
-            size="small"
-            outlined
-            class="relations-button"
-            @click="openRelations"
-          />
-        </p>
-        <p v-if="detailOpen && detail?.comment" class="table-comment">{{ detail.comment }}</p>
-
-        <div v-if="detailOpen && loadingDetail" class="loading small">
-          <ProgressSpinner style="width: 1.5rem; height: 1.5rem" />
-        </div>
-
-        <div v-else-if="detailOpen" class="detail-grid">
-          <section>
-            <h3>Columns</h3>
-            <table class="fields">
-              <tbody>
-                <tr
-                  v-for="column in detail?.columns ?? []"
-                  :key="column.id"
-                  :class="{ joined: joinedColumns.has(column.name) }"
-                >
-                  <td class="field-name">{{ column.name }}</td>
-                  <td class="field-type" :title="column.dataType">{{ column.dataType }}</td>
-                  <td class="field-flag">
-                    <span v-if="!column.nullable" class="not-null">NOT NULL</span>
-                  </td>
-                  <td class="field-comment" :title="column.comment">{{ column.comment }}</td>
-                </tr>
-              </tbody>
-            </table>
-            <p v-if="!detail?.columns.length" class="muted small-note">No columns recorded.</p>
-          </section>
-
-          <section>
-            <h3>Indexes</h3>
-            <ul class="indexes">
-              <li v-for="index in detail?.indexes ?? []" :key="index.name">
-                <span class="index-name">{{ index.name }}</span>
-                <Tag v-if="index.primary" value="primary" severity="success" />
-                <Tag v-else-if="index.unique" value="unique" severity="info" />
-                <code>{{ index.columns.join(", ") }}</code>
-              </li>
-            </ul>
-            <p v-if="!detail?.indexes.length" class="muted small-note">
-              No indexes recorded. They arrive with a scan — re-scan this source if it was imported
-              before dbgraph read them.
-            </p>
-          </section>
-
-        </div>
-      </div>
+        ref="relationSphere"
+        :graph="graph"
+        :focused-table-id="focusedTableId"
+        :selected-edge-id="selectedEdge?.relationId ?? ''"
+        :view-key="selectedSourceId"
+        @select-table="focusTable"
+        @select-edge="openEdge"
+      />
     </section>
   </div>
 
-  <!-- Relations get a drawer of their own: they are the reason the page exists,
-       and squeezed into the detail panel there was no room to say more than
-       which columns join. -->
   <Drawer
-    v-model:visible="relationsOpen"
+    v-model:visible="tableDrawerOpen"
     position="right"
-    class="relations-drawer"
-    :header="focusedTableId ? tableName(focusedTableId) : 'Relations'"
+    class="table-detail-drawer"
+    style="width: min(42rem, 92vw)"
+    :header="detail?.qualifiedName ?? tableName(focusedTableId)"
+    :aria-label="detail?.qualifiedName ?? tableName(focusedTableId)"
+    @after-hide="restoreGraphFocus"
   >
-    <p class="drawer-lead muted">
-      {{ focusedEdges.length }} approved relation{{ focusedEdges.length === 1 ? "" : "s" }} touching
-      this table.
-    </p>
-    <ul class="drawer-relations">
-      <li
-        v-for="edge in focusedEdges"
-        :key="edge.relationId"
-        :class="{ current: selectedEdge?.relationId === edge.relationId }"
-      >
-        <button type="button" @click="selectFromDrawer(edge)">
-          <span class="drawer-direction">
-            {{ edge.sourceTableId === focusedTableId ? "out" : "in" }}
-          </span>
-          <span class="drawer-ends">
-            <code>{{ tableName(edge.sourceTableId) }}.{{ edge.sourceColumn }}</code>
-            <span class="arrow">→</span>
-            <code>{{ tableName(edge.targetTableId) }}.{{ edge.targetColumn }}</code>
-          </span>
-          <span class="drawer-tags">
-            <span
-              class="cardinality"
-              :class="{ unknown: edge.cardinality === 'UNKNOWN' }"
-              :title="cardinalityHint(edge)"
-            >
-              {{ CARDINALITY_LABELS[edge.cardinality] }}
-            </span>
-            <Tag v-if="edge.conditional" value="conditional" severity="secondary" />
-            <span class="drawer-confidence">{{ Math.round(edge.confidence * 100) }}%</span>
-          </span>
-          <span v-if="guardText(edge)" class="drawer-guard">
-            when <code>{{ guardText(edge) }}</code>
-          </span>
-        </button>
-      </li>
-    </ul>
+    <div class="table-detail">
+      <div class="table-detail-meta">
+        <span v-if="detail" class="detail-count">
+          {{ detail.columns.length }} column{{ detail.columns.length === 1 ? "" : "s" }} ·
+          {{ detail.indexes.length }} index{{ detail.indexes.length === 1 ? "" : "es" }}
+        </span>
+      </div>
+
+      <Tabs :value="tableDrawerTab" lazy @update:value="selectDrawerTab">
+        <TabList>
+          <Tab value="table">Table</Tab>
+          <Tab value="index">Index</Tab>
+          <Tab value="relations">Relations</Tab>
+        </TabList>
+        <TabPanels class="table-tab-panels">
+          <TabPanel value="table">
+            <p v-if="detail?.comment" class="table-comment">{{ detail.comment }}</p>
+            <div v-if="loadingDetail" class="loading small">
+              <ProgressSpinner style="width: 1.5rem; height: 1.5rem" />
+            </div>
+            <Message v-else-if="tableDetailFailure" severity="error" :closable="false">
+              {{ tableDetailFailure }}
+            </Message>
+            <section v-else-if="detail">
+              <h3>Columns</h3>
+              <table class="fields">
+                <tbody>
+                  <tr
+                    v-for="column in detail.columns"
+                    :key="column.id"
+                    :class="{ joined: joinedColumns.has(column.name) }"
+                  >
+                    <td class="field-name">{{ column.name }}</td>
+                    <td class="field-type" :title="column.dataType">{{ column.dataType }}</td>
+                    <td class="field-flag">
+                      <span v-if="!column.nullable" class="not-null">NOT NULL</span>
+                    </td>
+                    <td class="field-comment" :title="column.comment">{{ column.comment }}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p v-if="!detail.columns.length" class="muted small-note">No columns recorded.</p>
+            </section>
+          </TabPanel>
+
+          <TabPanel value="index">
+            <div v-if="loadingDetail" class="loading small">
+              <ProgressSpinner style="width: 1.5rem; height: 1.5rem" />
+            </div>
+            <Message v-else-if="tableDetailFailure" severity="error" :closable="false">
+              {{ tableDetailFailure }}
+            </Message>
+            <section v-else-if="detail">
+              <h3>Indexes</h3>
+              <ul class="indexes">
+                <li v-for="index in detail.indexes" :key="index.name">
+                  <span class="index-name">{{ index.name }}</span>
+                  <Tag v-if="index.primary" value="primary" severity="success" />
+                  <Tag v-else-if="index.unique" value="unique" severity="info" />
+                  <code>{{ index.columns.join(", ") }}</code>
+                </li>
+              </ul>
+              <p v-if="!detail.indexes.length" class="muted small-note">
+                No indexes recorded. They arrive with a scan — re-scan this source if it was imported
+                before dbgraph read them.
+              </p>
+            </section>
+          </TabPanel>
+
+          <TabPanel value="relations">
+            <p class="drawer-lead muted">
+              {{ focusedEdges.length }} approved relation{{ focusedEdges.length === 1 ? "" : "s" }}
+              touching this table.
+            </p>
+            <ul class="drawer-relations">
+              <li
+                v-for="edge in focusedEdges"
+                :key="edge.relationId"
+                :class="{ current: selectedEdge?.relationId === edge.relationId }"
+              >
+                <button
+                  type="button"
+                  :aria-pressed="selectedEdge?.relationId === edge.relationId"
+                  :aria-expanded="selectedEdge?.relationId === edge.relationId"
+                  :aria-controls="`relation-details-${edge.relationId}`"
+                  @click="selectFromDrawer(edge)"
+                >
+                  <span class="drawer-direction">
+                    {{ edge.sourceTableId === focusedTableId ? "out" : "in" }}
+                  </span>
+                  <span class="drawer-ends">
+                    <code>{{ tableName(edge.sourceTableId) }}.{{ edge.sourceColumn }}</code>
+                    <span class="arrow">→</span>
+                    <code>{{ tableName(edge.targetTableId) }}.{{ edge.targetColumn }}</code>
+                  </span>
+                  <span class="drawer-tags">
+                    <span
+                      class="cardinality"
+                      :class="{ unknown: edge.cardinality === 'UNKNOWN' }"
+                      :title="cardinalityHint(edge)"
+                    >
+                      {{ CARDINALITY_LABELS[edge.cardinality] }}
+                    </span>
+                    <Tag v-if="edge.conditional" value="conditional" severity="secondary" />
+                    <span class="drawer-confidence">{{ Math.round(edge.confidence * 100) }}%</span>
+                  </span>
+                  <span v-if="guardText(edge)" class="drawer-guard">
+                    when <code>{{ guardText(edge) }}</code>
+                  </span>
+                </button>
+                <dl
+                  v-if="selectedEdge?.relationId === edge.relationId"
+                  :id="`relation-details-${edge.relationId}`"
+                  class="drawer-relation-details"
+                  role="region"
+                  aria-label="Selected relation details"
+                >
+                  <dt>Cardinality</dt>
+                  <dd>{{ cardinalityHint(edge) }}</dd>
+                  <dt>Relation ID</dt>
+                  <dd><code>{{ edge.relationId }}</code></dd>
+                </dl>
+              </li>
+            </ul>
+          </TabPanel>
+        </TabPanels>
+      </Tabs>
+    </div>
   </Drawer>
 </template>
 
@@ -980,42 +729,8 @@ h1 {
   overflow: hidden;
 }
 
-.canvas-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid var(--p-content-border-color);
-}
-
-.legend {
-  display: flex;
-  gap: 1rem;
-  font-size: 0.75rem;
-  color: var(--p-text-muted-color);
-}
-
-.legend span {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.swatch {
-  width: 18px;
-  height: 0;
-  border-top: 2px solid var(--p-text-muted-color);
-}
-
-.swatch.dashed {
-  border-top-style: dashed;
-}
-
-.canvas-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.2rem;
+.graph-loading {
+  min-height: 420px;
 }
 
 .empty-graph {
@@ -1038,147 +753,23 @@ h1 {
   line-height: 1.5;
 }
 
-.graph {
-  display: block;
-  width: 100%;
-  height: 60vh;
-  cursor: grab;
-  touch-action: none;
+.table-detail {
+  display: grid;
+  gap: 1rem;
 }
 
-.graph.dragging {
-  cursor: grabbing;
-}
-
-.edge {
-  fill: none;
-  stroke: var(--p-text-muted-color);
-  stroke-width: 2.5;
-  opacity: 0.75;
-  transition:
-    stroke 120ms ease,
-    stroke-width 120ms ease,
-    opacity 120ms ease;
-  pointer-events: none;
-}
-
-/* The pointer target: invisible, wide, and on the same curve. Without it a
-   2.5px line is a pixel-hunt. */
-.edge-hit {
-  fill: none;
-  stroke: transparent;
-  stroke-width: 22;
-  cursor: pointer;
-  pointer-events: stroke;
-}
-
-.edge.lit {
-  stroke: var(--p-primary-color);
-  stroke-width: 3.5;
-  opacity: 1;
-}
-
-.edge.selected {
-  stroke-width: 4.5;
-}
-
-.edge-label {
-  fill: var(--p-text-color);
-  font-size: 18px;
-  font-weight: 500;
-  text-anchor: middle;
-  pointer-events: none;
-  paint-order: stroke;
-  stroke: var(--p-content-background);
-  stroke-width: 6px;
-  stroke-linejoin: round;
-}
-
-.edge.conditional {
-  stroke-dasharray: 10 7;
-}
-
-.edge.dimmed {
-  opacity: 0.12;
-}
-
-.arrow-head {
-  fill: var(--p-text-muted-color);
-}
-
-.node {
-  cursor: pointer;
-}
-
-.node-dot {
-  fill: var(--p-primary-color);
-  stroke: var(--p-content-background);
-  stroke-width: 2;
-  transition:
-    r 120ms ease,
-    stroke-width 120ms ease;
-}
-
-/* Same reason as the edge hit path: the circle a person aims at is bigger
-   than the dot they see. */
-.node-hit {
-  fill: transparent;
-  pointer-events: fill;
-}
-
-.node.lit .node-dot {
-  r: 15;
-  stroke-width: 3;
-}
-
-.node.lit text {
-  font-weight: 700;
-}
-
-.node text {
-  pointer-events: none;
-  fill: var(--p-text-color);
-  font-size: 22px;
-  font-weight: 500;
-  text-anchor: middle;
-  /* The label sits over edges, so outline it in the panel colour rather than
-     boxing it: a stroke behind the glyphs keeps names legible on a crossing. */
-  paint-order: stroke;
-  stroke: var(--p-content-background);
-  stroke-width: 5px;
-  stroke-linejoin: round;
-}
-
-.node.dimmed {
-  opacity: 0.25;
-}
-
-.detail {
-  padding: 0.6rem 0.8rem;
-  border-top: 1px solid var(--p-content-border-color);
-}
-
-.detail-title {
+.table-detail-meta {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  margin: 0 0 0.4rem;
-  font-size: 0.85rem;
-  font-weight: 600;
+  min-height: 2rem;
 }
 
-.detail-name {
-  cursor: pointer;
+.table-detail-meta .detail-count {
+  margin-left: 0;
 }
 
-.detail-toggle {
-  flex: none;
-  margin-left: -0.35rem;
-}
-
-/* Pushed to the far edge: it opens something, the rest of the row describes. */
-.relations-button {
-  margin-left: auto;
+.table-tab-panels {
+  padding: 1rem 0 0;
 }
 
 .drawer-lead {
@@ -1262,35 +853,29 @@ h1 {
   color: var(--p-text-muted-color);
 }
 
-.cardinality-hint {
-  margin-left: 0.5rem;
-  color: var(--p-text-muted-color);
-}
-
 .drawer-guard {
   font-size: 0.75rem;
   line-height: 1.5;
   color: var(--p-text-muted-color);
 }
 
-.edge-clauses {
+.drawer-relation-details {
   display: grid;
-  grid-template-columns: 8rem 1fr;
-  gap: 0.25rem 0.75rem;
-  margin: 0;
-  font-size: 0.82rem;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 0.2rem 0.6rem;
+  margin: 0 0.6rem 0.6rem;
+  padding: 0.5rem 0.6rem 0;
+  border-top: 1px solid var(--p-content-border-color);
+  font-size: 0.75rem;
+  line-height: 1.45;
 }
 
-.edge-clauses dt {
+.drawer-relation-details dt {
   color: var(--p-text-muted-color);
 }
 
-.edge-clauses dd {
+.drawer-relation-details dd {
   margin: 0;
-}
-
-.detail-title .arrow {
-  margin: 0 0.4rem;
 }
 
 .detail-count {
@@ -1299,16 +884,7 @@ h1 {
   color: var(--p-text-muted-color);
 }
 
-/* Stacked rather than columned: the column table carries names, types, flags
-   and comments, and side-by-side sections squeeze it until every row wraps.
-   Indexes and relations are short lists and read fine underneath it. */
-.detail-grid {
-  display: grid;
-  gap: 1rem;
-  align-items: start;
-}
-
-.detail h3 {
+.table-detail h3 {
   margin: 0 0 0.4rem;
   font-size: 0.7rem;
   font-weight: 600;
