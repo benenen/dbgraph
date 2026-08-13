@@ -86,16 +86,10 @@ const pending = computed(() => proposals.value.filter((relation) => relation.pro
 async function decide(relation: Relation, decision: "APPROVE" | "REJECT"): Promise<void> {
   const revision = relation.proposed;
   if (!revision) return;
+  // Blank is allowed: the server records a stated default rather than an empty
+  // audit row. Agreeing with a proposal that already explains itself does not
+  // need a second essay.
   const reason = (reasons.value[relation.id] ?? "").trim();
-  if (!reason) {
-    toast.add({
-      severity: "warn",
-      summary: "A reason is required",
-      detail: "The decision is recorded in the audit log; say why.",
-      life: 5000,
-    });
-    return;
-  }
   deciding.value = relation.id;
   try {
     // expectedRevisionNo is the concurrency check: if someone revised this
@@ -202,7 +196,7 @@ onMounted(load);
           v-model="reasons[relation.id]"
           rows="2"
           maxlength="2000"
-          placeholder="Why you are approving or rejecting — recorded in the audit log"
+          placeholder="Optional — add a reason only if yours differs from the evidence above"
           fluid
         />
         <div class="decision-actions">

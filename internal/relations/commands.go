@@ -260,7 +260,9 @@ func (c *Commands) Review(ctx context.Context, command Review) (Relation, error)
 		(command.Decision != DecisionApprove && command.Decision != DecisionReject) {
 		return Relation{}, ErrInvalidCommand
 	}
-	actor, reason, requestID, err := validateMetadata(command.Principal, command.Reason, command.RequestID)
+	actor, reason, requestID, err := validateMetadata(
+		command.Principal, defaultedReviewReason(command.Decision, command.Reason), command.RequestID,
+	)
 	if err != nil {
 		return Relation{}, err
 	}
@@ -432,6 +434,28 @@ func validateAndCopyEvidence(evidence []EvidenceInput) ([]EvidenceInput, error) 
 		copied[index] = item
 	}
 	return copied, nil
+}
+
+// The reasons recorded for a reviewer who decided without writing one. They are
+// stated defaults rather than an empty column: the audit row keeps saying that
+// a reason was given and what it was, and it never borrows the proposer's words
+// to make a reviewer look like they wrote something.
+const (
+	DefaultApprovalReason  = "Approved from the review queue without a stated reason"
+	DefaultRejectionReason = "Rejected from the review queue without a stated reason"
+)
+
+// defaultedReviewReason fills a blank reviewer reason. Only review does this.
+// Proposing is a claim about source nobody has checked yet, so it keeps its
+// requirement to say why.
+func defaultedReviewReason(decision Decision, reason string) string {
+	if strings.TrimSpace(reason) != "" {
+		return reason
+	}
+	if decision == DecisionReject {
+		return DefaultRejectionReason
+	}
+	return DefaultApprovalReason
 }
 
 func validateMetadata(principal Principal, reason string, requestID string) (string, string, string, error) {
