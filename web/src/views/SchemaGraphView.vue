@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
+import Drawer from "primevue/drawer";
 import InputText from "primevue/inputtext";
 import Message from "primevue/message";
 import ProgressSpinner from "primevue/progressspinner";
@@ -10,6 +11,7 @@ import Tag from "primevue/tag";
 import {
   api,
   UnauthenticatedError,
+  type Cardinality,
   type DataSource,
   type RelationEdge,
   type RelationGraph,
@@ -23,9 +25,10 @@ const selectedSourceId = ref("");
 
 const tables = ref<TableSummary[]>([]);
 const filter = ref("");
-// The list is a way in, not the subject. Once a reader is following relations
-// the picture wants the width, so the sidebar folds down to a spine.
-const tablesCollapsed = ref(false);
+// The list is a way in, not the subject: it starts folded to a spine so the
+// drawing opens at full width, and unfolds when someone goes looking for a
+// table by name.
+const tablesCollapsed = ref(true);
 const graph = ref<RelationGraph>({ tables: [], edges: [], truncated: false });
 const tablesTruncated = ref(false);
 // The whole source's table count, held separately from the filtered list so the
@@ -38,6 +41,10 @@ const failure = ref("");
 const focusedTableId = ref("");
 const detail = ref<TableDetail | null>(null);
 const loadingDetail = ref(false);
+// The columns and indexes panel folds away like the table list does, and the
+// relations it used to hold now live in a drawer over the drawing.
+const detailOpen = ref(true);
+const relationsOpen = ref(false);
 
 // Hover is a preview and click is a selection: pointing at something says what
 // it is, clicking keeps it on screen while you read the panel below.
@@ -289,15 +296,9 @@ const selectedGuard = computed(() =>
   selectedEdge.value?.guard ? describeCondition(selectedEdge.value.guard, columnName) : "",
 );
 
-async function openEdge(edge: RelationEdge): Promise<void> {
-  if (selectedEdge.value?.relationId === edge.relationId) {
-    selectedEdge.value = null;
-    return;
-  }
-  selectedEdge.value = edge;
-  focusedTableId.value = "";
-  detail.value = null;
-  const wanted = [...conditionNodeIds(edge.guard)].filter((id) => !(id in columnNames.value));
+/** Names the columns a guard mentions, so a condition reads as words not ids. */
+async function resolveColumnNames(ids: Iterable<string>): Promise<void> {
+  const wanted = [...new Set(ids)].filter((id) => !(id in columnNames.value));
   if (!wanted.length) return;
   const resolved = await Promise.all(
     wanted.map(async (id) => {
@@ -312,6 +313,69 @@ async function openEdge(edge: RelationEdge): Promise<void> {
   );
   columnNames.value = { ...columnNames.value, ...Object.fromEntries(resolved) };
 }
+
+// keepTableFocus is set when the click came from the drawer, which lists one
+// table's relations: dropping the focus there would empty the list the reader
+// is still looking at.
+async function openEdge(edge: RelationEdge, keepTableFocus = false): Promise<void> {
+  if (selectedEdge.value?.relationId === edge.relationId) {
+    selectedEdge.value = null;
+    return;
+  }
+  selectedEdge.value = edge;
+  if (!keepTableFocus) {
+    focusedTableId.value = "";
+    detail.value = null;
+    relationsOpen.value = false;
+  }
+  await resolveColumnNames(conditionNodeIds(edge.guard));
+}
+
+/**
+ * The cardinality as the notation people write on a schema diagram. Unknown
+ * stays a word rather than a symbol: it is the absence of an answer, and "?:?"
+ * would read as one.
+ */
+const CARDINALITY_LABELS: Record<Cardinality, string> = {
+  ONE_TO_ONE: "1:1",
+  ONE_TO_MANY: "1:N",
+  MANY_TO_ONE: "N:1",
+  MANY_TO_MANY: "N:N",
+  UNKNOWN: "unknown",
+};
+
+/** Says what the notation is based on, since it is inferred and not measured. */
+function cardinalityHint(edge: RelationEdge): string {
+  const ends = `${edge.sourceColumn} → ${edge.targetColumn}`;
+  switch (edge.cardinality) {
+    case "ONE_TO_ONE":
+      return `One to one: a unique index covers each side (${ends}).`;
+    case "ONE_TO_MANY":
+      return `One to many: ${edge.sourceColumn} is unique, ${edge.targetColumn} repeats.`;
+    case "MANY_TO_ONE":
+      return `Many to one: ${edge.sourceColumn} repeats, ${edge.targetColumn} is unique.`;
+    case "MANY_TO_MANY":
+      return `Many to many: no unique index covers either column on its own.`;
+    default:
+      return "Unknown: one of these tables was scanned without index metadata. Re-scan the source to find out.";
+  }
+}
+
+/** The guard as a sentence, for a relation listed outside the edge panel. */
+function guardText(edge: RelationEdge): string {
+  return edge.guard ? describeCondition(edge.guard, columnName) : "";
+}
+
+/** Picks a relation out of the drawer and lights it in the drawing behind it. */
+function selectFromDrawer(edge: RelationEdge): Promise<void> {
+  return openEdge(edge, true);
+}
+
+async function openRelations(): Promise<void> {
+  relationsOpen.value = true;
+  await resolveColumnNames(focusedEdges.value.flatMap((edge) => [...conditionNodeIds(edge.guard)]));
+}
+
 
 /** True while an edge should be drawn lit: hovered, selected, or on a hovered table. */
 function edgeLit(edge: RelationEdge): boolean {
@@ -610,6 +674,16 @@ watch(selectedSourceId, loadSource);
           </span>
         </p>
         <dl class="edge-clauses">
+          <dt>Cardinality</dt>
+          <dd>
+            <span
+              class="cardinality"
+              :class="{ unknown: selectedEdge.cardinality === 'UNKNOWN' }"
+            >
+              {{ CARDINALITY_LABELS[selectedEdge.cardinality] }}
+            </span>
+            <span class="cardinality-hint">{{ cardinalityHint(selectedEdge) }}</span>
+          </dd>
           <template v-if="selectedGuard">
             <dt>Applies when</dt>
             <dd><code>{{ selectedGuard }}</code></dd>
@@ -625,19 +699,39 @@ watch(selectedSourceId, loadSource);
 
       <div v-else-if="focusedTableId" class="detail">
         <p class="detail-title">
-          {{ detail?.qualifiedName ?? tableName(focusedTableId) }}
+          <Button
+            :icon="detailOpen ? 'pi pi-chevron-down' : 'pi pi-chevron-right'"
+            text
+            size="small"
+            class="detail-toggle"
+            :aria-label="detailOpen ? 'Hide this table\'s columns' : 'Show this table\'s columns'"
+            :aria-expanded="detailOpen"
+            @click="detailOpen = !detailOpen"
+          />
+          <span class="detail-name" @click="detailOpen = !detailOpen">
+            {{ detail?.qualifiedName ?? tableName(focusedTableId) }}
+          </span>
           <span v-if="detail" class="detail-count">
             {{ detail.columns.length }} column{{ detail.columns.length === 1 ? "" : "s" }} ·
             {{ detail.indexes.length }} index{{ detail.indexes.length === 1 ? "" : "es" }}
           </span>
+          <Button
+            v-if="focusedEdges.length"
+            :label="`Relations · ${focusedEdges.length}`"
+            icon="pi pi-sitemap"
+            size="small"
+            outlined
+            class="relations-button"
+            @click="openRelations"
+          />
         </p>
-        <p v-if="detail?.comment" class="table-comment">{{ detail.comment }}</p>
+        <p v-if="detailOpen && detail?.comment" class="table-comment">{{ detail.comment }}</p>
 
-        <div v-if="loadingDetail" class="loading small">
+        <div v-if="detailOpen && loadingDetail" class="loading small">
           <ProgressSpinner style="width: 1.5rem; height: 1.5rem" />
         </div>
 
-        <div v-else class="detail-grid">
+        <div v-else-if="detailOpen" class="detail-grid">
           <section>
             <h3>Columns</h3>
             <table class="fields">
@@ -675,21 +769,57 @@ watch(selectedSourceId, loadSource);
             </p>
           </section>
 
-          <section v-if="focusedEdges.length">
-            <h3>Relations</h3>
-            <ul class="relations">
-              <li v-for="edge in focusedEdges" :key="edge.relationId">
-                <code>{{ tableName(edge.sourceTableId) }}.{{ edge.sourceColumn }}</code>
-                <span class="arrow">→</span>
-                <code>{{ tableName(edge.targetTableId) }}.{{ edge.targetColumn }}</code>
-                <Tag v-if="edge.conditional" value="conditional" severity="secondary" />
-              </li>
-            </ul>
-          </section>
         </div>
       </div>
     </section>
   </div>
+
+  <!-- Relations get a drawer of their own: they are the reason the page exists,
+       and squeezed into the detail panel there was no room to say more than
+       which columns join. -->
+  <Drawer
+    v-model:visible="relationsOpen"
+    position="right"
+    class="relations-drawer"
+    :header="focusedTableId ? tableName(focusedTableId) : 'Relations'"
+  >
+    <p class="drawer-lead muted">
+      {{ focusedEdges.length }} approved relation{{ focusedEdges.length === 1 ? "" : "s" }} touching
+      this table.
+    </p>
+    <ul class="drawer-relations">
+      <li
+        v-for="edge in focusedEdges"
+        :key="edge.relationId"
+        :class="{ current: selectedEdge?.relationId === edge.relationId }"
+      >
+        <button type="button" @click="selectFromDrawer(edge)">
+          <span class="drawer-direction">
+            {{ edge.sourceTableId === focusedTableId ? "out" : "in" }}
+          </span>
+          <span class="drawer-ends">
+            <code>{{ tableName(edge.sourceTableId) }}.{{ edge.sourceColumn }}</code>
+            <span class="arrow">→</span>
+            <code>{{ tableName(edge.targetTableId) }}.{{ edge.targetColumn }}</code>
+          </span>
+          <span class="drawer-tags">
+            <span
+              class="cardinality"
+              :class="{ unknown: edge.cardinality === 'UNKNOWN' }"
+              :title="cardinalityHint(edge)"
+            >
+              {{ CARDINALITY_LABELS[edge.cardinality] }}
+            </span>
+            <Tag v-if="edge.conditional" value="conditional" severity="secondary" />
+            <span class="drawer-confidence">{{ Math.round(edge.confidence * 100) }}%</span>
+          </span>
+          <span v-if="guardText(edge)" class="drawer-guard">
+            when <code>{{ guardText(edge) }}</code>
+          </span>
+        </button>
+      </li>
+    </ul>
+  </Drawer>
 </template>
 
 <style scoped>
@@ -1029,9 +1159,118 @@ h1 {
 }
 
 .detail-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   margin: 0 0 0.4rem;
   font-size: 0.85rem;
   font-weight: 600;
+}
+
+.detail-name {
+  cursor: pointer;
+}
+
+.detail-toggle {
+  flex: none;
+  margin-left: -0.35rem;
+}
+
+/* Pushed to the far edge: it opens something, the rest of the row describes. */
+.relations-button {
+  margin-left: auto;
+}
+
+.drawer-lead {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+}
+
+.drawer-relations {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.drawer-relations button {
+  display: grid;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.drawer-relations button:hover {
+  background: var(--p-content-hover-background);
+}
+
+.drawer-relations li.current button {
+  border-color: var(--p-primary-color);
+}
+
+/* Which way the relation points, from this table's side of it. */
+.drawer-direction {
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--p-text-muted-color);
+}
+
+.drawer-ends {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+}
+
+.drawer-tags {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.drawer-confidence {
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+}
+
+/* Read as notation, so it stays monospaced and tight rather than becoming a
+   third badge competing with the tags beside it. */
+.cardinality {
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 4px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cardinality.unknown {
+  font-family: inherit;
+  font-weight: 400;
+  font-style: italic;
+  color: var(--p-text-muted-color);
+}
+
+.cardinality-hint {
+  margin-left: 0.5rem;
+  color: var(--p-text-muted-color);
+}
+
+.drawer-guard {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--p-text-muted-color);
 }
 
 .edge-clauses {
@@ -1142,8 +1381,7 @@ h1 {
   color: var(--p-primary-color);
 }
 
-.indexes,
-.relations {
+.indexes {
   display: grid;
   gap: 0.3rem;
   margin: 0;
@@ -1151,8 +1389,7 @@ h1 {
   list-style: none;
 }
 
-.indexes li,
-.relations li {
+.indexes li {
   display: flex;
   align-items: center;
   flex-wrap: wrap;

@@ -108,6 +108,18 @@ export interface CatalogNode {
   dataType: string;
 }
 
+/**
+ * How many rows each end holds for one row of the other, inferred from the
+ * indexes a scan recorded. UNKNOWN means the scan stored no indexes for one of
+ * the tables, not that the relation is unconstrained.
+ */
+export type Cardinality =
+  | "ONE_TO_ONE"
+  | "ONE_TO_MANY"
+  | "MANY_TO_ONE"
+  | "MANY_TO_MANY"
+  | "UNKNOWN";
+
 export interface RelationEdge {
   relationId: string;
   sourceTableId: string;
@@ -116,6 +128,7 @@ export interface RelationEdge {
   targetColumn: string;
   conditional: boolean;
   confidence: number;
+  cardinality: Cardinality;
   guard?: ConditionNode;
 }
 
