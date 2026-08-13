@@ -2,8 +2,8 @@ package graph
 
 import (
 	"context"
-	"encoding/json"
 
+	"github.com/benenen/dbgraph/internal/conditions"
 	"github.com/benenen/dbgraph/internal/relations"
 )
 
@@ -34,9 +34,15 @@ type TableEdge struct {
 	TargetColumn  string         `json:"targetColumn"`
 	Conditional   bool           `json:"conditional"`
 	Confidence    float64        `json:"confidence"`
-	// Guard is the stored condition AST. A reader clicking an edge wants to
-	// know when the relation applies, and "conditional" alone does not say.
-	Guard json.RawMessage `json:"guard,omitempty"`
+	// Cardinality is inferred from the two tables' indexes, so a reader can see
+	// whether an edge is a lookup or a fan-out without opening both tables.
+	Cardinality Cardinality `json:"cardinality"`
+	// Guard is the stored condition AST, parsed rather than raw. A reader
+	// clicking an edge wants to know when the relation applies, and
+	// "conditional" alone does not say. It is parsed here so that every
+	// adapter renders node ids through the same mapping instead of forwarding
+	// bytes whose numbers no longer survive the trip.
+	Guard *conditions.Boolean `json:"guard,omitempty"`
 }
 
 // DataSourceGraph is every approved relation inside one data source, with the

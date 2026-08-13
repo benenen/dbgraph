@@ -152,9 +152,12 @@ func mapGraphEdges(edges []graph.TableEdge) []map[string]any {
 			"targetColumn":  edge.TargetColumn,
 			"conditional":   edge.Conditional,
 			"confidence":    edge.Confidence,
+			"cardinality":   string(edge.Cardinality),
 		}
-		if len(edge.Guard) > 0 {
-			output[index]["guard"] = edge.Guard
+		// Through the shared mapper, so a guard's node ids cross the wire as
+		// strings like every other id here.
+		if edge.Guard != nil {
+			output[index]["guard"] = mapBoolean(edge.Guard)
 		}
 	}
 	return output

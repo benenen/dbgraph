@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/benenen/dbgraph/internal/catalog"
+	"github.com/benenen/dbgraph/internal/graph"
 	"github.com/benenen/dbgraph/internal/id"
 	dbsqlite "github.com/benenen/dbgraph/internal/platform/sqlite"
 )
@@ -53,6 +54,82 @@ func TestDataSourceGraphDrawsColumnRelationsBetweenTables(t *testing.T) {
 	}
 	if result.Truncated {
 		t.Fatal("two edges under a limit of 100 reported truncation")
+	}
+}
+
+// Cardinality is read off the indexes the scan stored on each table, so the
+// graph can say whether an edge is a lookup or a fan-out. A table whose scan
+// recorded no indexes reports unknown rather than guessing.
+func TestDataSourceGraphInfersCardinalityFromStoredIndexes(t *testing.T) {
+	t.Parallel()
+
+	ctx, store, source, catalogService := newGraphFixture(t, "cardinality")
+
+	nodes := sampleTables()
+	for index := range nodes {
+		switch nodes[index].StableKey {
+		case "table:shop.orders":
+			// user_id repeats: many orders per user. buyer_id is unique.
+			nodes[index].Indexes = []catalog.Index{
+				{Name: "idx_user", Columns: []string{"user_id"}},
+				{Name: "uq_buyer", Unique: true, Columns: []string{"buyer_id"}},
+			}
+		case "table:shop.users":
+			nodes[index].Indexes = []catalog.Index{
+				{Name: "PRIMARY", Unique: true, Primary: true, Columns: []string{"id"}},
+			}
+		}
+	}
+	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		DataSourceID: source,
+		Nodes:        nodes,
+		ForeignKeys: []catalog.DeclaredForeignKey{
+			{ConstraintSchema: "shop", Name: "fk_order_user", SourceColumn: "shop.orders.user_id", TargetColumn: "shop.users.id", Ordinal: 1},
+			{ConstraintSchema: "shop", Name: "fk_order_buyer", SourceColumn: "shop.orders.buyer_id", TargetColumn: "shop.users.id", Ordinal: 1},
+		},
+	}); err != nil {
+		t.Fatalf("PublishSnapshot: %v", err)
+	}
+
+	result, err := dbsqlite.NewGraphRepository(store).LoadDataSourceGraph(ctx, source, 100)
+	if err != nil {
+		t.Fatalf("LoadDataSourceGraph: %v", err)
+	}
+	got := map[string]graph.Cardinality{}
+	for _, edge := range result.Edges {
+		got[edge.SourceColumn] = edge.Cardinality
+	}
+	if got["user_id"] != graph.CardinalityManyToOne {
+		t.Fatalf("user_id cardinality = %q, want MANY_TO_ONE", got["user_id"])
+	}
+	if got["buyer_id"] != graph.CardinalityOneToOne {
+		t.Fatalf("buyer_id cardinality = %q, want ONE_TO_ONE", got["buyer_id"])
+	}
+}
+
+// A catalog imported before dbgraph read indexes cannot support the inference,
+// and saying N:N there would read as a finding rather than as a gap.
+func TestDataSourceGraphReportsUnknownCardinalityWithoutIndexes(t *testing.T) {
+	t.Parallel()
+
+	ctx, store, source, catalogService := newGraphFixture(t, "no-indexes")
+
+	if _, err := catalogService.PublishSnapshot(ctx, catalog.PublishSnapshot{
+		DataSourceID: source,
+		Nodes:        sampleTables(),
+		ForeignKeys: []catalog.DeclaredForeignKey{
+			{ConstraintSchema: "shop", Name: "fk_order_user", SourceColumn: "shop.orders.user_id", TargetColumn: "shop.users.id", Ordinal: 1},
+		},
+	}); err != nil {
+		t.Fatalf("PublishSnapshot: %v", err)
+	}
+
+	result, err := dbsqlite.NewGraphRepository(store).LoadDataSourceGraph(ctx, source, 100)
+	if err != nil {
+		t.Fatalf("LoadDataSourceGraph: %v", err)
+	}
+	if len(result.Edges) != 1 || result.Edges[0].Cardinality != graph.CardinalityUnknown {
+		t.Fatalf("edges = %#v, want one edge of unknown cardinality", result.Edges)
 	}
 }
 

@@ -1,11 +1,13 @@
 package webapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/benenen/dbgraph/internal/catalog"
+	"github.com/benenen/dbgraph/internal/conditions"
 	"github.com/benenen/dbgraph/internal/graph"
 	"github.com/benenen/dbgraph/internal/relations"
 )
@@ -143,6 +145,42 @@ func TestDataSourceGraphReturnsTableEdges(t *testing.T) {
 	}
 	if data["truncated"] != false {
 		t.Fatalf("truncated = %#v, want false", data["truncated"])
+	}
+}
+
+// A guard names the column it tests by node id, and a Snowflake id does not
+// survive a JavaScript number: 81261463313846976 parses as 81261463313846980,
+// which in a real catalog is a different column of the same table. The browser
+// would then print a guard on a column the relation never mentions, with no
+// error anywhere. Every other id on this endpoint crosses as a string; the
+// guard has to as well.
+func TestDataSourceGraphSendsGuardNodeIDsAsStrings(t *testing.T) {
+	t.Parallel()
+
+	service := &graphHTTPStub{dataSourceGraph: graph.DataSourceGraph{
+		Tables: []graph.Table{{ID: 91, Name: "aia_schedule", QualifiedName: "resource.aia_schedule"}},
+		Edges: []graph.TableEdge{{
+			RelationID: 71, SourceTableID: 91, TargetTableID: 91,
+			SourceColumn: "BusinessID", TargetColumn: "ObjectID", Conditional: true, Confidence: 0.97,
+			Guard: &conditions.Boolean{
+				Kind:     conditions.BooleanCompare,
+				Operator: conditions.CompareEqual,
+				Left:     &conditions.Value{Kind: conditions.ValueColumn, NodeID: 81261463313846976},
+				Right: &conditions.Value{
+					Kind:    conditions.ValueLiteral,
+					Literal: &conditions.Literal{Type: conditions.LiteralInteger, Value: json.RawMessage(`0`)},
+				},
+			},
+		}},
+	}}
+	client := newWebTestClient(t, Services{Graph: service}, relations.RoleViewer)
+
+	response := client.request(http.MethodGet, "/api/v1/data-sources/30/relation-graph", "", false)
+	assertWebStatus(t, response, http.StatusOK, "")
+	// Read the id out of the raw body: decoding into any would lose the very
+	// precision this test is about.
+	if !strings.Contains(response.Body.String(), `"nodeId":"81261463313846976"`) {
+		t.Fatalf("guard node id is not a string in %s", response.Body.String())
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"github.com/benenen/dbgraph/internal/catalog"
+	"github.com/benenen/dbgraph/internal/conditions"
 	"github.com/benenen/dbgraph/internal/graph"
 	"github.com/benenen/dbgraph/internal/relations"
 )
@@ -42,6 +43,7 @@ SELECT e.relation_id, e.relation_type, e.confidence_bps,
        source.name, target.name,
        sourceTable.name, sourceTable.qualified_name,
        targetTable.name, targetTable.qualified_name,
+       sourceTable.metadata_json, targetTable.metadata_json,
        e.guard_json IS NOT NULL, e.guard_json
 FROM effective_edges e
 JOIN resolved source ON source.node_id = e.source_node_id
@@ -74,6 +76,7 @@ LIMIT ?
 		var confidenceBasisPoints int
 		var sourceName, sourceQualified string
 		var targetName, targetQualified string
+		var sourceMetadata, targetMetadata string
 		var guard sql.NullString
 		if err := rows.Scan(
 			&edge.RelationID, &relationType, &confidenceBasisPoints,
@@ -82,13 +85,23 @@ LIMIT ?
 			&edge.SourceColumn, &edge.TargetColumn,
 			&sourceName, &sourceQualified,
 			&targetName, &targetQualified,
+			&sourceMetadata, &targetMetadata,
 			&edge.Conditional,
 			&guard,
 		); err != nil {
 			return graph.DataSourceGraph{}, fmt.Errorf("scan data source graph: %w", err)
 		}
+		sourceIndexes, _ := catalog.DecodeNodeMetadata(sourceMetadata)
+		targetIndexes, _ := catalog.DecodeNodeMetadata(targetMetadata)
+		edge.Cardinality = graph.EdgeCardinality(
+			sourceIndexes, edge.SourceColumn, targetIndexes, edge.TargetColumn,
+		)
 		if guard.Valid {
-			edge.Guard = json.RawMessage(guard.String)
+			parsed := &conditions.Boolean{}
+			if err := json.Unmarshal([]byte(guard.String), parsed); err != nil {
+				return graph.DataSourceGraph{}, fmt.Errorf("parse edge guard: %w", err)
+			}
+			edge.Guard = parsed
 		}
 		edge.Type = relations.Type(relationType)
 		edge.Confidence = float64(confidenceBasisPoints) / 10_000
