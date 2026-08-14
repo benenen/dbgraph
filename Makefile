@@ -91,7 +91,7 @@ SERVER_URL ?= $(SCHEME)://$(LISTEN)
 SERVE_FLAGS := serve --database $(DATABASE) --listen $(LISTEN) $(TLS_FLAGS) $(MYSQL_FLAGS)
 
 .PHONY: help build console run watch dev-env ensure-secret-key certs tokens rotate-tokens rotate-certs \
-	test test-race vet fmt lint verify cover tidy mcp clean
+	test test-race vet fmt lint verify container-smoke cover tidy mcp clean
 
 help: ## Show the available targets
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -238,6 +238,9 @@ lint: ## Run staticcheck and golangci-lint when installed
 	else echo 'golangci-lint is not installed; skipping'; fi
 
 verify: fmt test test-race vet lint ## Run the pre-handoff verification gates
+
+container-smoke: ## Build and verify the production image and Compose service
+	./tests/container/smoke.sh
 
 cover: console ## Build the console and report total test coverage
 	$(GO) test -coverprofile=$(COVERAGE_FILE) ./...

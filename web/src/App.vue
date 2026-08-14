@@ -11,6 +11,7 @@ const route = useRoute();
 const router = useRouter();
 const session = ref<Session | null>(null);
 const ready = ref(false);
+const navigationCollapsed = ref(false);
 
 // One workspace, so the sidebar names the one thing an operator manages.
 const navigation = [
@@ -70,17 +71,28 @@ const chromeless = computed(() => route.meta.public === true);
       </template>
     </header>
 
-    <div class="shell">
+    <div class="shell" :class="{ 'navigation-collapsed': navigationCollapsed }">
       <nav class="sidebar" aria-label="Primary">
+        <Button
+          :icon="navigationCollapsed ? 'pi pi-angle-right' : 'pi pi-angle-left'"
+          text
+          size="small"
+          class="navigation-toggle"
+          :aria-label="navigationCollapsed ? 'Expand navigation' : 'Collapse navigation'"
+          :aria-expanded="!navigationCollapsed"
+          @click="navigationCollapsed = !navigationCollapsed"
+        />
         <RouterLink
           v-for="item in navigation"
           :key="item.label"
           :to="{ name: item.route }"
           class="nav-item"
           :class="{ active: isActive(item.route) }"
+          :aria-label="item.label"
+          :title="navigationCollapsed ? item.label : undefined"
         >
-          <i :class="item.icon" />
-          <span>{{ item.label }}</span>
+          <i :class="item.icon" aria-hidden="true" />
+          <span v-show="!navigationCollapsed">{{ item.label }}</span>
         </RouterLink>
       </nav>
 
@@ -139,12 +151,31 @@ const chromeless = computed(() => route.meta.public === true);
   display: grid;
   grid-template-columns: 220px 1fr;
   min-height: calc(100vh - 52px);
+  transition: grid-template-columns 160ms ease;
+}
+
+.shell.navigation-collapsed {
+  grid-template-columns: 60px 1fr;
 }
 
 .sidebar {
+  min-width: 0;
   padding: 0.75rem;
   border-right: 1px solid var(--p-content-border-color);
   background: var(--p-content-background);
+}
+
+.navigation-toggle {
+  display: flex;
+  margin: 0 0 0.55rem auto;
+}
+
+.navigation-collapsed .sidebar {
+  padding-inline: 0.45rem;
+}
+
+.navigation-collapsed .navigation-toggle {
+  margin-inline: auto;
 }
 
 .nav-item {
@@ -165,6 +196,11 @@ const chromeless = computed(() => route.meta.public === true);
 .nav-item.active {
   background: var(--p-highlight-background);
   color: var(--p-highlight-color);
+}
+
+.navigation-collapsed .nav-item {
+  justify-content: center;
+  padding-inline: 0.5rem;
 }
 
 .nav-item.disabled {
@@ -189,11 +225,23 @@ const chromeless = computed(() => route.meta.public === true);
     grid-template-columns: 1fr;
   }
 
+  .shell.navigation-collapsed {
+    grid-template-columns: 1fr;
+  }
+
   .sidebar {
     display: flex;
+    align-items: center;
     gap: 0.4rem;
+    overflow-x: auto;
+    white-space: nowrap;
     border-right: 0;
     border-bottom: 1px solid var(--p-content-border-color);
+  }
+
+  .navigation-toggle,
+  .navigation-collapsed .navigation-toggle {
+    margin: 0;
   }
 
   .nav-hint {

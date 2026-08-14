@@ -1,0 +1,48 @@
+services:
+  dbgraph:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+    image: ${DBGRAPH_IMAGE:-dbgraph:local}
+    init: true
+    restart: unless-stopped
+    environment:
+      DBGRAPH_DATABASE_PATH: /var/lib/dbgraph/dbgraph.sqlite
+      DBGRAPH_LISTEN_ADDRESS: 0.0.0.0:8443
+      DBGRAPH_TLS_CERT_FILE: /var/lib/dbgraph/tls/cert.pem
+      DBGRAPH_TLS_KEY_FILE: /var/lib/dbgraph/tls/key.pem
+      DBGRAPH_WEB_TOKEN: ${DBGRAPH_WEB_TOKEN:?set DBGRAPH_WEB_TOKEN to 64 hexadecimal characters}
+      DBGRAPH_MCP_TOKEN: ${DBGRAPH_MCP_TOKEN:?set DBGRAPH_MCP_TOKEN to 64 hexadecimal characters}
+      DBGRAPH_SECRET_KEY: ${DBGRAPH_SECRET_KEY:?set DBGRAPH_SECRET_KEY to 64 hexadecimal characters}
+    ports:
+      - "127.0.0.1:${DBGRAPH_PORT:-8443}:8443"
+    volumes:
+      - dbgraph_data:/var/lib/dbgraph
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - --quiet
+        - --timeout=3
+        - --output-document=/dev/null
+        - --no-check-certificate
+        - https://127.0.0.1:8443/healthz
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    stop_grace_period: 20s
+
+volumes:
+  dbgraph_data:

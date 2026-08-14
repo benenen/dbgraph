@@ -265,7 +265,7 @@ function scheduleStatusAnnouncement(): void {
 
 function resizeGraph(): void {
   if (!host.value || !instance) return;
-  const width = Math.max(320, host.value.clientWidth);
+  const width = Math.max(1, host.value.clientWidth);
   const height = Math.max(420, Math.min(window.innerHeight * 0.68, 720));
   instance.width(width).height(height);
 }

@@ -161,6 +161,48 @@ def main() -> int:
                                 "dataType": "varchar(50)",
                                 "nullable": False,
                                 "ordinal": 4,
+                                "comment": "The knowledge point name shown to teachers when they arrange a learning schedule.",
+                            },
+                        ],
+                        "indexes": [
+                            {"name": "PRIMARY", "unique": True, "primary": True, "columns": ["ObjectID"]},
+                            {
+                                "name": "idx_schedule_kpoint",
+                                "unique": False,
+                                "primary": False,
+                                "columns": ["ScheduleID", "KPointID"],
+                            },
+                        ],
+                    },
+                    "error": None,
+                }
+            ),
+        )
+        page.route(
+            "**/api/v1/tables/902",
+            lambda route: route.fulfill(
+                json={
+                    "success": True,
+                    "data": {
+                        "id": "902",
+                        "name": "schedule",
+                        "qualifiedName": "resource.schedule",
+                        "comment": "",
+                        "columns": [
+                            {
+                                "id": "921",
+                                "name": "ObjectID",
+                                "dataType": "bigint unsigned",
+                                "nullable": False,
+                                "ordinal": 1,
+                                "comment": "",
+                            },
+                            {
+                                "id": "922",
+                                "name": "KPointID",
+                                "dataType": "bigint",
+                                "nullable": False,
+                                "ordinal": 2,
                                 "comment": "",
                             },
                         ],
@@ -200,7 +242,7 @@ def main() -> int:
                             },
                             {
                                 "relationId": "802",
-                                "sourceTableId": "902",
+                                "sourceTableId": "901",
                                 "targetTableId": "903",
                                 "sourceColumn": "KPointID",
                                 "targetColumn": "ObjectID",
@@ -217,6 +259,41 @@ def main() -> int:
         )
         page.get_by_role("link", name="Relation graph").click()
         page.wait_for_url("**/app/relation-graph")
+
+        primary_navigation = page.get_by_role("navigation", name="Primary")
+        collapse_navigation = page.get_by_role("button", name="Collapse navigation")
+        expanded_navigation_width = primary_navigation.bounding_box()
+        if expanded_navigation_width is None:
+            raise AssertionError("the primary navigation has no visible bounds")
+        for label in ("Data sources", "Relation graph", "Review"):
+            expect(primary_navigation.get_by_text(label, exact=True)).to_be_visible()
+        collapse_navigation.click()
+        expect(page.get_by_role("button", name="Expand navigation")).to_be_visible()
+        page.wait_for_function(
+            """threshold => {
+              const nav = document.querySelector('nav[aria-label="Primary"]');
+              return nav && nav.getBoundingClientRect().width < threshold;
+            }""",
+            arg=expanded_navigation_width["width"] * 0.6,
+        )
+        collapsed_navigation_width = primary_navigation.bounding_box()
+        if collapsed_navigation_width is None:
+            raise AssertionError("the collapsed primary navigation has no visible bounds")
+        for label in ("Data sources", "Relation graph", "Review"):
+            link = primary_navigation.get_by_role("link", name=label, exact=True)
+            expect(link).to_be_visible()
+            expect(link).to_have_accessible_name(label)
+            expect(link.get_by_text(label, exact=True)).to_be_hidden()
+        page.get_by_role("button", name="Expand navigation").click()
+        page.wait_for_function(
+            """threshold => {
+              const nav = document.querySelector('nav[aria-label="Primary"]');
+              return nav && nav.getBoundingClientRect().width > threshold;
+            }""",
+            arg=expanded_navigation_width["width"] * 0.9,
+        )
+        for label in ("Data sources", "Relation graph", "Review"):
+            expect(primary_navigation.get_by_text(label, exact=True)).to_be_visible()
 
         sphere = page.get_by_role("application", name=re.compile("Spherical relation graph"))
         expect(sphere).to_be_visible()
@@ -256,37 +333,114 @@ def main() -> int:
 
         page.get_by_role("button", name="Show the table list").click()
         page.get_by_role("button", name=re.compile(r"^schedulekpoint")).click()
-        table_drawer = page.get_by_role("dialog", name="resource.schedulekpoint")
+        table_drawer = page.get_by_role("complementary", name="resource.schedulekpoint")
         expect(table_drawer).to_be_visible()
-        expect(table_drawer).to_contain_text("4 columns · 1 index")
+        expect(table_drawer).to_be_focused()
+        expect(table_drawer).not_to_have_attribute("aria-modal", "true")
+        expect(page.locator(".p-overlay-mask")).to_have_count(0)
+        close_drawer = table_drawer.get_by_role("button", name="Close")
+        close_drawer.focus()
+        page.keyboard.press("Shift+Tab")
+        expect(sphere).to_be_focused()
+        drawer_bounds = table_drawer.bounding_box()
+        if drawer_bounds is None or drawer_bounds["width"] > 560:
+            raise AssertionError(f"the table drawer is still too wide: {drawer_bounds!r}")
+        page.locator("section.canvas").click(position={"x": 20, "y": 20})
+        expect(table_drawer).to_be_visible()
+        page.keyboard.press("Escape")
+        expect(table_drawer).to_be_visible()
+        page.get_by_role("button", name=re.compile(r"^schedulekpoint")).click()
+        expect(table_drawer).to_be_visible()
+        expect(table_drawer).to_contain_text("4 columns · 2 indexes")
         table_tab = table_drawer.get_by_role("tab", name="Table", exact=True)
         expect(table_tab).to_have_attribute("aria-selected", "true")
         expect(table_drawer).to_contain_text("ObjectID")
         expect(table_drawer).to_contain_text("bigint unsigned")
+        columns_table = table_drawer.get_by_role("table", name="Table columns")
+        for header in ("Name", "Type", "Constraint", "Comment"):
+            expect(columns_table.get_by_role("columnheader", name=header, exact=True)).to_be_visible()
+        long_comment = columns_table.get_by_role(
+            "cell",
+            name="The knowledge point name shown to teachers when they arrange a learning schedule.",
+        )
+        comment_bounds = long_comment.bounding_box()
+        if comment_bounds is None or comment_bounds["height"] < 40:
+            raise AssertionError(f"the long column comment did not wrap: {comment_bounds!r}")
+        page.set_viewport_size({"width": 320, "height": 800})
+        expect(table_drawer).to_be_visible()
+        narrow_drawer_bounds = table_drawer.bounding_box()
+        if narrow_drawer_bounds is None or narrow_drawer_bounds["width"] > 320:
+            raise AssertionError(f"the drawer overflows a narrow viewport: {narrow_drawer_bounds!r}")
+        overflow = page.evaluate(
+            """() => ({
+              page: `${document.documentElement.scrollWidth}/${window.innerWidth}`,
+              elements: [...document.querySelectorAll('body *')]
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  return { tag: element.tagName, className: element.className, left: rect.left, right: rect.right };
+                })
+                .filter((item) => item.left < -1 || item.right > window.innerWidth + 1)
+                .slice(0, 12),
+            })"""
+        )
+        if overflow["page"] != "320/320":
+            raise AssertionError(f"the application overflows the narrow viewport: {overflow!r}")
+        fields_scroll = table_drawer.locator(".fields-scroll")
+        scroll_widths = fields_scroll.evaluate(
+            "element => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth })"
+        )
+        if scroll_widths["scrollWidth"] <= scroll_widths["clientWidth"]:
+            raise AssertionError(f"the narrow columns table has no local horizontal scroll area: {scroll_widths!r}")
+        page.set_viewport_size({"width": 1440, "height": 900})
+        column_filter = table_drawer.get_by_role("textbox", name="Filter columns")
+        column_filter.fill("KPointName")
+        expect(columns_table.get_by_role("cell", name="KPointName", exact=True)).to_be_visible()
+        expect(columns_table.get_by_role("cell", name="ObjectID", exact=True)).to_have_count(0)
 
         table_drawer.get_by_role("tab", name="Index", exact=True).click()
         primary_index = table_drawer.get_by_role("listitem").filter(has_text="PRIMARY")
         expect(primary_index).to_contain_text("primary")
         expect(primary_index).to_contain_text("ObjectID")
+        index_filter = table_drawer.get_by_role("textbox", name="Filter indexes")
+        index_filter.fill("KPointID")
+        expect(table_drawer.get_by_role("listitem").filter(has_text="idx_schedule_kpoint")).to_be_visible()
+        expect(primary_index).to_have_count(0)
         expect(page.locator("section.canvas")).not_to_contain_text("Columns")
 
         table_drawer.get_by_role("tab", name="Relations", exact=True).click()
-        expect(table_drawer).to_contain_text("1 approved relation touching this table")
+        expect(table_drawer).to_contain_text("2 approved relations touching this table")
         expect(table_drawer.get_by_role("button", name=re.compile(r"^Relations"))).to_have_count(0)
+        relation_filter = table_drawer.get_by_role("textbox", name="Filter relations")
+        relation_filter.fill("KPointID")
+        expect(
+            table_drawer.get_by_role("button", name=re.compile(r"schedulekpoint\.KPointID"))
+        ).to_be_visible()
+        expect(
+            table_drawer.get_by_role("button", name=re.compile(r"schedulekpoint\.ScheduleID"))
+        ).to_have_count(0)
+        relation_filter.fill("ScheduleID")
         selected_relation = table_drawer.get_by_role("button", name=re.compile(r"schedulekpoint\.ScheduleID"))
         selected_relation.click()
-        expect(table_drawer).not_to_be_visible()
-        expect(sphere).to_be_focused()
+        expect(table_drawer).to_be_visible()
+        expect(selected_relation).to_have_attribute("aria-pressed", "true")
+        selected_relation.click()
+        expect(table_drawer).to_be_visible()
+        expect(selected_relation).to_have_attribute("aria-pressed", "true")
         expect(sphere).to_have_attribute("aria-label", re.compile(r"Selected relation 801"))
         expect(page.get_by_test_id("graph-accessible-status")).to_contain_text(
             "Selected relation schedulekpoint.ScheduleID → schedule.ObjectID"
         )
+        relation_filter.fill("KPointID")
+        table_drawer.get_by_role("button", name="Close").click()
+        expect(table_drawer).not_to_be_visible()
+        expect(sphere).to_be_focused()
 
         click_graph_relation(page, sphere, "schedulekpoint.ScheduleID → schedule.ObjectID")
         expect(table_drawer).to_be_visible()
         expect(table_drawer.get_by_role("tab", name="Relations", exact=True)).to_have_attribute(
             "aria-selected", "true"
         )
+        expect(table_drawer.get_by_role("textbox", name="Filter relations")).to_have_value("")
         selected_relation = table_drawer.get_by_role("button", name=re.compile(r"schedulekpoint\.ScheduleID"))
         expect(selected_relation).to_have_attribute("aria-pressed", "true")
         selected_relation_details = table_drawer.get_by_role("region", name="Selected relation details")
@@ -294,15 +448,50 @@ def main() -> int:
         expect(selected_relation_details).to_contain_text("Relation ID")
         expect(selected_relation_details).to_contain_text("801")
 
-        page.keyboard.press("Escape")
+        # Switching tables resets all three filters for the new table context.
+        table_drawer.get_by_role("textbox", name="Filter relations").fill("ScheduleID")
+        table_list = page.locator(".table-list")
+        table_list.get_by_role("button", name=re.compile(r"^schedule(?: in the graph)?$")).click()
+        expect(page.get_by_role("complementary", name="resource.schedule")).to_be_visible()
+        table_list.get_by_role("button", name=re.compile(r"^schedulekpoint")).click()
+        table_drawer = page.get_by_role("complementary", name="resource.schedulekpoint")
+        expect(table_drawer.get_by_role("textbox", name="Filter columns")).to_have_value("")
+        table_drawer.get_by_role("tab", name="Index", exact=True).click()
+        expect(table_drawer.get_by_role("textbox", name="Filter indexes")).to_have_value("")
+        table_drawer.get_by_role("tab", name="Relations", exact=True).click()
+        expect(table_drawer.get_by_role("textbox", name="Filter relations")).to_have_value("")
+
+        # A data-source change also clears every drawer filter. Edge-to-drawer
+        # selection is already exercised above; use the stable table-list seam
+        # here so this state-reset assertion does not depend on a second 3D hit.
+        table_drawer.get_by_role("tab", name="Table", exact=True).click()
+        table_drawer.get_by_role("textbox", name="Filter columns").fill("ObjectID")
+        table_drawer.get_by_role("tab", name="Index", exact=True).click()
+        table_drawer.get_by_role("textbox", name="Filter indexes").fill("PRIMARY")
+        table_drawer.get_by_role("tab", name="Relations", exact=True).click()
+        table_drawer.get_by_role("textbox", name="Filter relations").fill("KPointID")
+        table_drawer.get_by_role("button", name="Close").click()
+        expect(table_drawer).not_to_be_visible()
+        page.locator(".source-picker").click()
+        with page.expect_response("**/api/v1/data-sources/*/relation-graph") as source_graph_response:
+            page.get_by_role("option", name="browser-source", exact=True).click()
+        source_graph_response.value.finished()
+        table_list.get_by_role("button", name=re.compile(r"^schedulekpoint")).click()
+        table_drawer = page.get_by_role("complementary", name="resource.schedulekpoint")
+        expect(table_drawer.get_by_role("textbox", name="Filter columns")).to_have_value("")
+        table_drawer.get_by_role("tab", name="Index", exact=True).click()
+        expect(table_drawer.get_by_role("textbox", name="Filter indexes")).to_have_value("")
+        table_drawer.get_by_role("tab", name="Relations", exact=True).click()
+        expect(table_drawer.get_by_role("textbox", name="Filter relations")).to_have_value("")
+
+        table_drawer.get_by_role("button", name="Close").click()
         expect(table_drawer).not_to_be_visible()
         expect(page.get_by_role("region", name="Selected relation details")).to_have_count(0)
         expect(page.locator("section.canvas")).not_to_contain_text("Cardinality")
         expect(page.locator("section.canvas")).not_to_contain_text("confident")
 
-        # If WebGL cannot initialize, selecting a relation still closes the
-        # drawer and must restore focus to a visible fallback, not the hidden
-        # canvas host.
+        # If WebGL cannot initialize, explicitly closing the drawer must restore
+        # focus to a visible fallback, not the hidden canvas host.
         page.locator('a[href="/app/data-sources"]').click()
         page.evaluate(
             """
@@ -320,9 +509,11 @@ def main() -> int:
         expect(fallback).to_be_visible()
         page.get_by_role("button", name="Show the table list").click()
         page.get_by_role("button", name=re.compile(r"^schedulekpoint")).click()
-        table_drawer = page.get_by_role("dialog", name="resource.schedulekpoint")
+        table_drawer = page.get_by_role("complementary", name="resource.schedulekpoint")
         table_drawer.get_by_role("tab", name="Relations", exact=True).click()
         table_drawer.get_by_role("button", name=re.compile(r"schedulekpoint\.ScheduleID")).click()
+        expect(table_drawer).to_be_visible()
+        table_drawer.get_by_role("button", name="Close").click()
         expect(table_drawer).not_to_be_visible()
         expect(fallback).to_be_focused()
 
@@ -345,6 +536,40 @@ def main() -> int:
         page.locator(".source-picker").click()
         page.get_by_role("option", name="browser-source", exact=True).click()
         expect(graph_host).to_have_count(0)
+
+        # A source with tables but no relations has no RelationSphere focus
+        # target. Closing table details returns to the table that opened them.
+        page.unroute("**/api/v1/data-sources/*/relation-graph")
+        page.route(
+            "**/api/v1/data-sources/*/relation-graph",
+            lambda route: route.fulfill(
+                json={
+                    "success": True,
+                    "data": {
+                        "tables": [
+                            {
+                                "id": "901",
+                                "name": "schedulekpoint",
+                                "qualifiedName": "resource.schedulekpoint",
+                            }
+                        ],
+                        "edges": [],
+                        "truncated": False,
+                    },
+                    "error": None,
+                },
+            ),
+        )
+        page.locator(".source-picker").click()
+        page.get_by_role("option", name="browser-fixture", exact=True).click()
+        expect(page.get_by_text("No relations yet", exact=True)).to_be_visible()
+        table_opener = table_list.get_by_role("button", name=re.compile(r"^schedulekpoint"))
+        table_opener.click()
+        table_drawer = page.get_by_role("complementary", name="resource.schedulekpoint")
+        expect(table_drawer).to_be_focused()
+        table_drawer.get_by_role("button", name="Close").click()
+        expect(table_drawer).not_to_be_visible()
+        expect(table_opener).to_be_focused()
 
         page.screenshot(path=os.path.join(ARTIFACTS, "console-relation-sphere.png"))
         browser.close()

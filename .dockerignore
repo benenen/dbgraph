@@ -1,0 +1,17 @@
+.git
+.codegraph
+.dbgraph-local
+**/.env*
+**/*.local
+**/*.pem
+**/*.key
+bin
+coverage.*
+dbgraph.sqlite*
+docs/superpowers
+web/node_modules
+
+# The console must be rebuilt inside the image. Host output would make a
+# missing frontend build step appear to work.
+internal/transport/webapi/app/*
+!internal/transport/webapi/app/.gitkeep

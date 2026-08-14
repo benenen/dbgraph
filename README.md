@@ -22,6 +22,48 @@ make run
 
 Open `http://127.0.0.1:8080/` and sign in with the `DBGRAPH_WEB_TOKEN` printed at startup. Health is at `/healthz` and the Streamable HTTP MCP endpoint at `/mcp`, where loopback callers get anonymous Viewer access. `make watch` does the same and rebuilds and restarts on every source change; a failed build leaves the running process untouched.
 
+### Docker Compose
+
+The production image builds the Vue console before compiling the Go binary,
+runs as a non-root user, and stores SQLite plus its local TLS certificate in a
+single named volume. Generate stable credentials, then start it:
+
+```sh
+make dev-env
+docker compose --env-file .dbgraph-local/dev.env up --build -d
+```
+
+Open `https://127.0.0.1:8443/app/` and accept the local certificate generated
+inside the volume on first start. Use `make tokens` to print the Web token.
+The published port is bound to host loopback by default; override it with
+`DBGRAPH_PORT`. Keep the `dbgraph_data` volume on a local filesystem because
+SQLite WAL is rejected on network filesystems.
+
+Stop the service without deleting its database:
+
+```sh
+docker compose --env-file .dbgraph-local/dev.env down
+```
+
+Run `down --volumes` only when you intentionally want to delete the database,
+TLS key, and stored credential digests.
+
+The generated certificate is renewed on restart before it has 30 days left.
+To verify the complete image, HTTPS, embedded console, runtime hardening, and
+restart persistence contract, run:
+
+```sh
+make container-smoke
+```
+
+An authenticated Go module proxy must be supplied as a BuildKit secret rather
+than a build argument:
+
+```sh
+GOPROXY=https://proxy.example.invalid docker build \
+  --secret id=go_proxy,env=GOPROXY -t dbgraph:local .
+```
+
 Web sign-in over cleartext is an explicit development opt-in, because the `__Host-` session cookie requires HTTPS and dbgraph otherwise refuses to start with `DBGRAPH_WEB_*` tokens and no TLS. `make run` passes `--insecure-cleartext-web`, which:
 
 - is rejected unless the listener is loopback, and cannot be combined with TLS;

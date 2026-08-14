@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
-import Drawer from "primevue/drawer";
 import InputText from "primevue/inputtext";
 import Message from "primevue/message";
 import ProgressSpinner from "primevue/progressspinner";
@@ -52,21 +51,27 @@ const tableDetailFailure = ref("");
 // opens beside the graph so selecting a table never pushes the sphere down.
 const tableDrawerOpen = ref(false);
 const tableDrawerTab = ref<"table" | "index" | "relations">("table");
+const columnFilter = ref("");
+const indexFilter = ref("");
+const relationFilter = ref("");
 
 const selectedEdge = ref<RelationEdge | null>(null);
 interface RelationSphereHandle {
   focusGraph(): void;
 }
 const relationSphere = ref<RelationSphereHandle | null>(null);
+const tableDrawer = ref<HTMLElement | null>(null);
+let tableDrawerOpener: HTMLElement | null = null;
 // Guards name columns by id. Resolved on demand when an edge is opened, and
 // kept, because the same columns recur across a source's relations.
 const columnNames = ref<Record<string, string>>({});
 let tableDetailRequestGeneration = 0;
 let sourceLoadGeneration = 0;
-let focusGraphAfterDrawerClose = false;
 
 /** Tables that actually take part in a relation, which is what the graph draws. */
-const connected = computed(() => new Set(graph.value.tables.map((table) => table.id)));
+const connected = computed(
+  () => new Set(graph.value.tables.map((table) => table.id)),
+);
 
 async function loadWorkspace(): Promise<void> {
   loading.value = true;
@@ -77,7 +82,8 @@ async function loadWorkspace(): Promise<void> {
     if (!selectedSourceId.value) selectedSourceId.value = sources[0]?.id ?? "";
   } catch (error) {
     if (error instanceof UnauthenticatedError) return;
-    failure.value = error instanceof Error ? error.message : "Could not load data sources.";
+    failure.value =
+      error instanceof Error ? error.message : "Could not load data sources.";
   } finally {
     loading.value = false;
   }
@@ -99,7 +105,11 @@ async function loadSource(): Promise<void> {
   tableDetailRequestGeneration += 1;
   loadingDetail.value = false;
   tableDrawerOpen.value = false;
+  tableDrawerOpener = null;
   tableDrawerTab.value = "table";
+  columnFilter.value = "";
+  indexFilter.value = "";
+  relationFilter.value = "";
   columnNames.value = {};
   filter.value = "";
   try {
@@ -107,15 +117,26 @@ async function loadSource(): Promise<void> {
       api.listTables(sourceId, filter.value),
       api.relationGraph(sourceId),
     ]);
-    if (requestGeneration !== sourceLoadGeneration || selectedSourceId.value !== sourceId) return;
+    if (
+      requestGeneration !== sourceLoadGeneration ||
+      selectedSourceId.value !== sourceId
+    )
+      return;
     tables.value = imported.tables;
     tablesTruncated.value = imported.truncated;
     sourceTableCount.value = imported.tables.length;
     graph.value = relations;
   } catch (error) {
     if (error instanceof UnauthenticatedError) return;
-    if (requestGeneration !== sourceLoadGeneration || selectedSourceId.value !== sourceId) return;
-    failure.value = error instanceof Error ? error.message : "Could not load this data source.";
+    if (
+      requestGeneration !== sourceLoadGeneration ||
+      selectedSourceId.value !== sourceId
+    )
+      return;
+    failure.value =
+      error instanceof Error
+        ? error.message
+        : "Could not load this data source.";
   } finally {
     if (requestGeneration === sourceLoadGeneration) loadingTables.value = false;
   }
@@ -128,13 +149,22 @@ async function refilter(): Promise<void> {
   loadingTables.value = true;
   try {
     const listed = await api.listTables(sourceId, filter.value);
-    if (sourceGeneration !== sourceLoadGeneration || selectedSourceId.value !== sourceId) return;
+    if (
+      sourceGeneration !== sourceLoadGeneration ||
+      selectedSourceId.value !== sourceId
+    )
+      return;
     tables.value = listed.tables;
     tablesTruncated.value = listed.truncated;
   } catch (error) {
     if (error instanceof UnauthenticatedError) return;
-    if (sourceGeneration !== sourceLoadGeneration || selectedSourceId.value !== sourceId) return;
-    failure.value = error instanceof Error ? error.message : "Could not filter tables.";
+    if (
+      sourceGeneration !== sourceLoadGeneration ||
+      selectedSourceId.value !== sourceId
+    )
+      return;
+    failure.value =
+      error instanceof Error ? error.message : "Could not filter tables.";
   } finally {
     if (sourceGeneration === sourceLoadGeneration) loadingTables.value = false;
   }
@@ -143,7 +173,8 @@ async function refilter(): Promise<void> {
 function edgeFocused(edge: RelationEdge): boolean {
   if (!focusedTableId.value) return true;
   return (
-    edge.sourceTableId === focusedTableId.value || edge.targetTableId === focusedTableId.value
+    edge.sourceTableId === focusedTableId.value ||
+    edge.targetTableId === focusedTableId.value
   );
 }
 
@@ -182,7 +213,8 @@ async function loadTableDetail(tableId: string): Promise<void> {
       requestGeneration !== tableDetailRequestGeneration ||
       focusedTableId.value !== tableId ||
       selectedSourceId.value !== sourceId
-    ) return;
+    )
+      return;
     detail.value = loaded;
   } catch (error) {
     if (error instanceof UnauthenticatedError) return;
@@ -190,27 +222,32 @@ async function loadTableDetail(tableId: string): Promise<void> {
       requestGeneration !== tableDetailRequestGeneration ||
       focusedTableId.value !== tableId ||
       selectedSourceId.value !== sourceId
-    ) return;
-    tableDetailFailure.value = error instanceof Error ? error.message : "Could not read that table.";
+    )
+      return;
+    tableDetailFailure.value =
+      error instanceof Error ? error.message : "Could not read that table.";
   } finally {
     if (
       requestGeneration === tableDetailRequestGeneration &&
       selectedSourceId.value === sourceId
-    ) loadingDetail.value = false;
+    )
+      loadingDetail.value = false;
   }
 }
 
 /** Opens a graph relation in the drawer and selects it in both views. */
 async function openEdge(edge: RelationEdge): Promise<void> {
   selectedEdge.value = edge;
+  relationFilter.value = "";
   const endpointIds = [edge.sourceTableId, edge.targetTableId];
   const tableId = endpointIds.includes(focusedTableId.value)
     ? focusedTableId.value
     : edge.sourceTableId;
-  const needsDetail = detail.value?.id !== tableId || Boolean(tableDetailFailure.value);
+  const needsDetail =
+    detail.value?.id !== tableId || Boolean(tableDetailFailure.value);
   focusedTableId.value = tableId;
   tableDrawerTab.value = "relations";
-  tableDrawerOpen.value = true;
+  await showTableDrawer();
   await Promise.all([
     resolveColumnNames(conditionNodeIds(edge.guard)),
     needsDetail ? loadTableDetail(tableId) : Promise.resolve(),
@@ -255,41 +292,61 @@ function guardText(edge: RelationEdge): string {
 /** Picks a relation out of the drawer tab and lights it in the drawing behind it. */
 async function selectFromDrawer(edge: RelationEdge): Promise<void> {
   selectedEdge.value = edge;
-  focusGraphAfterDrawerClose = true;
-  tableDrawerOpen.value = false;
   await resolveColumnNames(conditionNodeIds(edge.guard));
 }
 
 function restoreGraphFocus(): void {
-  if (!focusGraphAfterDrawerClose) return;
-  focusGraphAfterDrawerClose = false;
   relationSphere.value?.focusGraph();
+}
+
+async function showTableDrawer(): Promise<void> {
+  const candidate = document.activeElement;
+  if (
+    candidate instanceof HTMLElement &&
+    !tableDrawer.value?.contains(candidate)
+  ) {
+    tableDrawerOpener = candidate;
+  }
+  tableDrawerOpen.value = true;
+  await nextTick();
+  tableDrawer.value?.focus({ preventScroll: true });
+}
+
+async function closeTableDrawer(): Promise<void> {
+  const opener = tableDrawerOpener;
+  tableDrawerOpen.value = false;
+  await nextTick();
+  if (relationSphere.value) {
+    restoreGraphFocus();
+  } else if (opener?.isConnected) {
+    opener.focus({ preventScroll: true });
+  }
+  tableDrawerOpener = null;
 }
 
 async function selectDrawerTab(value: string | number): Promise<void> {
   const selected = String(value);
-  if (selected !== "table" && selected !== "index" && selected !== "relations") return;
+  if (selected !== "table" && selected !== "index" && selected !== "relations")
+    return;
   tableDrawerTab.value = selected;
   if (selected === "relations") {
-    await resolveColumnNames(focusedEdges.value.flatMap((edge) => [...conditionNodeIds(edge.guard)]));
+    await resolveColumnNames(
+      focusedEdges.value.flatMap((edge) => [...conditionNodeIds(edge.guard)]),
+    );
   }
 }
-
 
 async function focusTable(table: TableSummary): Promise<void> {
   selectedEdge.value = null;
   if (focusedTableId.value === table.id && tableDrawerOpen.value) {
-    tableDrawerOpen.value = false;
-    focusedTableId.value = "";
-    detail.value = null;
-    tableDetailFailure.value = "";
-    tableDetailRequestGeneration += 1;
-    loadingDetail.value = false;
     return;
   }
   focusedTableId.value = table.id;
-  tableDrawerOpen.value = true;
   tableDrawerTab.value = "table";
+  columnFilter.value = "";
+  indexFilter.value = "";
+  relationFilter.value = "";
+  await showTableDrawer();
   await loadTableDetail(table.id);
 }
 
@@ -297,8 +354,10 @@ async function focusTable(table: TableSummary): Promise<void> {
 const joinedColumns = computed(() => {
   const names = new Set<string>();
   for (const edge of graph.value.edges) {
-    if (edge.sourceTableId === focusedTableId.value) names.add(edge.sourceColumn);
-    if (edge.targetTableId === focusedTableId.value) names.add(edge.targetColumn);
+    if (edge.sourceTableId === focusedTableId.value)
+      names.add(edge.sourceColumn);
+    if (edge.targetTableId === focusedTableId.value)
+      names.add(edge.targetColumn);
   }
   return names;
 });
@@ -307,8 +366,69 @@ const focusedEdges = computed(() =>
   graph.value.edges.filter((edge) => edgeFocused(edge) && focusedTableId.value),
 );
 
+function includesFilter(
+  values: Array<string | number | boolean>,
+  filterValue: string,
+): boolean {
+  const query = filterValue.trim().toLocaleLowerCase();
+  if (!query) return true;
+  return values.some((value) =>
+    String(value).toLocaleLowerCase().includes(query),
+  );
+}
+
+const filteredColumns = computed(() =>
+  (detail.value?.columns ?? []).filter((column) =>
+    includesFilter(
+      [
+        column.name,
+        column.dataType,
+        column.nullable ? "nullable" : "not null",
+        column.comment,
+      ],
+      columnFilter.value,
+    ),
+  ),
+);
+
+const filteredIndexes = computed(() =>
+  (detail.value?.indexes ?? []).filter((index) =>
+    includesFilter(
+      [
+        index.name,
+        index.primary ? "primary" : "",
+        index.unique ? "unique" : "",
+        ...index.columns,
+      ],
+      indexFilter.value,
+    ),
+  ),
+);
+
+const filteredEdges = computed(() =>
+  focusedEdges.value.filter((edge) =>
+    includesFilter(
+      [
+        edge.relationId,
+        tableName(edge.sourceTableId),
+        edge.sourceColumn,
+        tableName(edge.targetTableId),
+        edge.targetColumn,
+        CARDINALITY_LABELS[edge.cardinality],
+        cardinalityHint(edge),
+        edge.conditional ? "conditional" : "always",
+        Math.round(edge.confidence * 100),
+        guardText(edge),
+      ],
+      relationFilter.value,
+    ),
+  ),
+);
+
 function tableName(tableId: string): string {
-  return graph.value.tables.find((table) => table.id === tableId)?.name ?? tableId;
+  return (
+    graph.value.tables.find((table) => table.id === tableId)?.name ?? tableId
+  );
 }
 
 onMounted(async () => {
@@ -323,8 +443,8 @@ watch(selectedSourceId, loadSource);
     <div>
       <h1>Relation graph</h1>
       <p>
-        The tables one data source imported, and the approved relations between them. Relations join
-        columns; the graph draws the tables that own them.
+        The tables one data source imported, and the approved relations between
+        them. Relations join columns; the graph draws the tables that own them.
       </p>
     </div>
     <Select
@@ -337,9 +457,13 @@ watch(selectedSourceId, loadSource);
     />
   </header>
 
-  <Message v-if="failure" severity="error" :closable="false">{{ failure }}</Message>
+  <Message v-if="failure" severity="error" :closable="false">{{
+    failure
+  }}</Message>
 
-  <div v-if="loading" class="loading"><ProgressSpinner style="width: 2rem; height: 2rem" /></div>
+  <div v-if="loading" class="loading">
+    <ProgressSpinner style="width: 2rem; height: 2rem" />
+  </div>
 
   <Message v-else-if="!dataSources.length" severity="warn" :closable="false">
     No data sources registered yet.
@@ -362,16 +486,22 @@ watch(selectedSourceId, loadSource);
             text
             size="small"
             class="tables-toggle"
-            :aria-label="tablesCollapsed ? 'Show the table list' : 'Hide the table list'"
+            :aria-label="
+              tablesCollapsed ? 'Show the table list' : 'Hide the table list'
+            "
             :aria-expanded="!tablesCollapsed"
             @click="tablesCollapsed = !tablesCollapsed"
           />
         </div>
         <span v-if="!tablesCollapsed" class="count">
-          <template v-if="tablesTruncated">first </template>{{ tables.length }} table{{
-            tables.length === 1 ? "" : "s"
-          }}<template v-if="tablesTruncated"> — filter to see the rest</template>
-          <template v-if="connected.size">&nbsp;· {{ connected.size }} in the graph</template>
+          <template v-if="tablesTruncated">first </template
+          >{{ tables.length }} table{{ tables.length === 1 ? "" : "s"
+          }}<template v-if="tablesTruncated">
+            — filter to see the rest</template
+          >
+          <template v-if="connected.size"
+            >&nbsp;· {{ connected.size }} in the graph</template
+          >
         </span>
       </div>
 
@@ -390,15 +520,24 @@ watch(selectedSourceId, loadSource);
         <ProgressSpinner style="width: 1.5rem; height: 1.5rem" />
       </div>
       <ul v-else class="table-list">
-        <li v-if="!tables.length" class="muted empty-row">No table matches that filter.</li>
+        <li v-if="!tables.length" class="muted empty-row">
+          No table matches that filter.
+        </li>
         <li
           v-for="table in tables"
           :key="table.id"
-          :class="{ related: connected.has(table.id), focused: focusedTableId === table.id }"
+          :class="{
+            related: connected.has(table.id),
+            focused: focusedTableId === table.id,
+          }"
         >
           <button type="button" @click="focusTable(table)">
             <span class="table-name">{{ table.name }}</span>
-            <span v-if="connected.has(table.id)" class="dot" aria-label="in the graph" />
+            <span
+              v-if="connected.has(table.id)"
+              class="dot"
+              aria-label="in the graph"
+            />
           </button>
         </li>
       </ul>
@@ -411,10 +550,13 @@ watch(selectedSourceId, loadSource);
       <div v-else-if="!graph.edges.length" class="empty-graph">
         <p class="empty-title">No relations yet</p>
         <p class="muted">
-          This source has {{ sourceTableCount }} table{{ sourceTableCount === 1 ? "" : "s" }} and no
-          approved relations. dbgraph does not infer them: an agent reads the application source and
-          proposes them over MCP, and a reviewer approves. Declared foreign keys, where a database
-          has them, arrive with a scan.
+          This source has {{ sourceTableCount }} table{{
+            sourceTableCount === 1 ? "" : "s"
+          }}
+          and no approved relations. dbgraph does not infer them: an agent reads
+          the application source and proposes them over MCP, and a reviewer
+          approves. Declared foreign keys, where a database has them, arrive
+          with a scan.
         </p>
       </div>
 
@@ -431,144 +573,253 @@ watch(selectedSourceId, loadSource);
     </section>
   </div>
 
-  <Drawer
-    v-model:visible="tableDrawerOpen"
-    position="right"
+  <aside
+    v-if="tableDrawerOpen"
+    ref="tableDrawer"
     class="table-detail-drawer"
-    style="width: min(42rem, 92vw)"
-    :header="detail?.qualifiedName ?? tableName(focusedTableId)"
+    role="complementary"
+    tabindex="-1"
     :aria-label="detail?.qualifiedName ?? tableName(focusedTableId)"
-    @after-hide="restoreGraphFocus"
   >
-    <div class="table-detail">
-      <div class="table-detail-meta">
-        <span v-if="detail" class="detail-count">
-          {{ detail.columns.length }} column{{ detail.columns.length === 1 ? "" : "s" }} ·
-          {{ detail.indexes.length }} index{{ detail.indexes.length === 1 ? "" : "es" }}
-        </span>
-      </div>
+    <header class="table-detail-header">
+      <h2>{{ detail?.qualifiedName ?? tableName(focusedTableId) }}</h2>
+      <Button
+        icon="pi pi-times"
+        text
+        rounded
+        aria-label="Close"
+        @click="closeTableDrawer"
+      />
+    </header>
+    <div class="table-detail-content">
+      <div class="table-detail">
+        <div class="table-detail-meta">
+          <span v-if="detail" class="detail-count">
+            {{ detail.columns.length }} column{{
+              detail.columns.length === 1 ? "" : "s"
+            }}
+            · {{ detail.indexes.length }} index{{
+              detail.indexes.length === 1 ? "" : "es"
+            }}
+          </span>
+        </div>
 
-      <Tabs :value="tableDrawerTab" lazy @update:value="selectDrawerTab">
-        <TabList>
-          <Tab value="table">Table</Tab>
-          <Tab value="index">Index</Tab>
-          <Tab value="relations">Relations</Tab>
-        </TabList>
-        <TabPanels class="table-tab-panels">
-          <TabPanel value="table">
-            <p v-if="detail?.comment" class="table-comment">{{ detail.comment }}</p>
-            <div v-if="loadingDetail" class="loading small">
-              <ProgressSpinner style="width: 1.5rem; height: 1.5rem" />
-            </div>
-            <Message v-else-if="tableDetailFailure" severity="error" :closable="false">
-              {{ tableDetailFailure }}
-            </Message>
-            <section v-else-if="detail">
-              <h3>Columns</h3>
-              <table class="fields">
-                <tbody>
-                  <tr
-                    v-for="column in detail.columns"
-                    :key="column.id"
-                    :class="{ joined: joinedColumns.has(column.name) }"
+        <Tabs :value="tableDrawerTab" lazy @update:value="selectDrawerTab">
+          <TabList>
+            <Tab value="table">Table</Tab>
+            <Tab value="index">Index</Tab>
+            <Tab value="relations">Relations</Tab>
+          </TabList>
+          <TabPanels class="table-tab-panels">
+            <TabPanel value="table">
+              <InputText
+                v-model="columnFilter"
+                aria-label="Filter columns"
+                placeholder="Filter columns"
+                size="small"
+                fluid
+                class="drawer-filter"
+              />
+              <p v-if="detail?.comment" class="table-comment">
+                {{ detail.comment }}
+              </p>
+              <div v-if="loadingDetail" class="loading small">
+                <ProgressSpinner style="width: 1.5rem; height: 1.5rem" />
+              </div>
+              <Message
+                v-else-if="tableDetailFailure"
+                severity="error"
+                :closable="false"
+              >
+                {{ tableDetailFailure }}
+              </Message>
+              <section v-else-if="detail">
+                <h3>Columns</h3>
+                <div class="fields-scroll">
+                  <table class="fields" aria-label="Table columns">
+                    <thead>
+                      <tr>
+                        <th scope="col">Name</th>
+                        <th scope="col">Type</th>
+                        <th scope="col">Constraint</th>
+                        <th scope="col">Comment</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="column in filteredColumns"
+                        :key="column.id"
+                        :class="{ joined: joinedColumns.has(column.name) }"
+                      >
+                        <td class="field-name">{{ column.name }}</td>
+                        <td class="field-type" :title="column.dataType">
+                          {{ column.dataType }}
+                        </td>
+                        <td class="field-flag">
+                          <span v-if="!column.nullable" class="not-null"
+                            >NOT NULL</span
+                          >
+                        </td>
+                        <td class="field-comment" :title="column.comment">
+                          {{ column.comment }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p v-if="!detail.columns.length" class="muted small-note">
+                  No columns recorded.
+                </p>
+                <p v-else-if="!filteredColumns.length" class="muted small-note">
+                  No columns match that filter.
+                </p>
+              </section>
+            </TabPanel>
+
+            <TabPanel value="index">
+              <InputText
+                v-model="indexFilter"
+                aria-label="Filter indexes"
+                placeholder="Filter indexes"
+                size="small"
+                fluid
+                class="drawer-filter"
+              />
+              <div v-if="loadingDetail" class="loading small">
+                <ProgressSpinner style="width: 1.5rem; height: 1.5rem" />
+              </div>
+              <Message
+                v-else-if="tableDetailFailure"
+                severity="error"
+                :closable="false"
+              >
+                {{ tableDetailFailure }}
+              </Message>
+              <section v-else-if="detail">
+                <h3>Indexes</h3>
+                <ul class="indexes">
+                  <li v-for="index in filteredIndexes" :key="index.name">
+                    <span class="index-name">{{ index.name }}</span>
+                    <Tag
+                      v-if="index.primary"
+                      value="primary"
+                      severity="success"
+                    />
+                    <Tag
+                      v-else-if="index.unique"
+                      value="unique"
+                      severity="info"
+                    />
+                    <code>{{ index.columns.join(", ") }}</code>
+                  </li>
+                </ul>
+                <p v-if="!detail.indexes.length" class="muted small-note">
+                  No indexes recorded. They arrive with a scan — re-scan this
+                  source if it was imported before dbgraph read them.
+                </p>
+                <p v-else-if="!filteredIndexes.length" class="muted small-note">
+                  No indexes match that filter.
+                </p>
+              </section>
+            </TabPanel>
+
+            <TabPanel value="relations">
+              <InputText
+                v-model="relationFilter"
+                aria-label="Filter relations"
+                placeholder="Filter relations"
+                size="small"
+                fluid
+                class="drawer-filter"
+              />
+              <p class="drawer-lead muted">
+                {{ focusedEdges.length }} approved relation{{
+                  focusedEdges.length === 1 ? "" : "s"
+                }}
+                touching this table.
+              </p>
+              <ul class="drawer-relations">
+                <li
+                  v-for="edge in filteredEdges"
+                  :key="edge.relationId"
+                  :class="{
+                    current: selectedEdge?.relationId === edge.relationId,
+                  }"
+                >
+                  <button
+                    type="button"
+                    :aria-pressed="selectedEdge?.relationId === edge.relationId"
+                    :aria-expanded="
+                      selectedEdge?.relationId === edge.relationId
+                    "
+                    :aria-controls="`relation-details-${edge.relationId}`"
+                    @click="selectFromDrawer(edge)"
                   >
-                    <td class="field-name">{{ column.name }}</td>
-                    <td class="field-type" :title="column.dataType">{{ column.dataType }}</td>
-                    <td class="field-flag">
-                      <span v-if="!column.nullable" class="not-null">NOT NULL</span>
-                    </td>
-                    <td class="field-comment" :title="column.comment">{{ column.comment }}</td>
-                  </tr>
-                </tbody>
-              </table>
-              <p v-if="!detail.columns.length" class="muted small-note">No columns recorded.</p>
-            </section>
-          </TabPanel>
-
-          <TabPanel value="index">
-            <div v-if="loadingDetail" class="loading small">
-              <ProgressSpinner style="width: 1.5rem; height: 1.5rem" />
-            </div>
-            <Message v-else-if="tableDetailFailure" severity="error" :closable="false">
-              {{ tableDetailFailure }}
-            </Message>
-            <section v-else-if="detail">
-              <h3>Indexes</h3>
-              <ul class="indexes">
-                <li v-for="index in detail.indexes" :key="index.name">
-                  <span class="index-name">{{ index.name }}</span>
-                  <Tag v-if="index.primary" value="primary" severity="success" />
-                  <Tag v-else-if="index.unique" value="unique" severity="info" />
-                  <code>{{ index.columns.join(", ") }}</code>
+                    <span class="drawer-direction">
+                      {{ edge.sourceTableId === focusedTableId ? "out" : "in" }}
+                    </span>
+                    <span class="drawer-ends">
+                      <code
+                        >{{ tableName(edge.sourceTableId) }}.{{
+                          edge.sourceColumn
+                        }}</code
+                      >
+                      <span class="arrow">→</span>
+                      <code
+                        >{{ tableName(edge.targetTableId) }}.{{
+                          edge.targetColumn
+                        }}</code
+                      >
+                    </span>
+                    <span class="drawer-tags">
+                      <span
+                        class="cardinality"
+                        :class="{ unknown: edge.cardinality === 'UNKNOWN' }"
+                        :title="cardinalityHint(edge)"
+                      >
+                        {{ CARDINALITY_LABELS[edge.cardinality] }}
+                      </span>
+                      <Tag
+                        v-if="edge.conditional"
+                        value="conditional"
+                        severity="secondary"
+                      />
+                      <span class="drawer-confidence"
+                        >{{ Math.round(edge.confidence * 100) }}%</span
+                      >
+                    </span>
+                    <span v-if="guardText(edge)" class="drawer-guard">
+                      when <code>{{ guardText(edge) }}</code>
+                    </span>
+                  </button>
+                  <dl
+                    v-if="selectedEdge?.relationId === edge.relationId"
+                    :id="`relation-details-${edge.relationId}`"
+                    class="drawer-relation-details"
+                    role="region"
+                    aria-label="Selected relation details"
+                  >
+                    <dt>Cardinality</dt>
+                    <dd>{{ cardinalityHint(edge) }}</dd>
+                    <dt>Relation ID</dt>
+                    <dd>
+                      <code>{{ edge.relationId }}</code>
+                    </dd>
+                  </dl>
                 </li>
               </ul>
-              <p v-if="!detail.indexes.length" class="muted small-note">
-                No indexes recorded. They arrive with a scan — re-scan this source if it was imported
-                before dbgraph read them.
-              </p>
-            </section>
-          </TabPanel>
-
-          <TabPanel value="relations">
-            <p class="drawer-lead muted">
-              {{ focusedEdges.length }} approved relation{{ focusedEdges.length === 1 ? "" : "s" }}
-              touching this table.
-            </p>
-            <ul class="drawer-relations">
-              <li
-                v-for="edge in focusedEdges"
-                :key="edge.relationId"
-                :class="{ current: selectedEdge?.relationId === edge.relationId }"
+              <p
+                v-if="focusedEdges.length && !filteredEdges.length"
+                class="muted small-note"
               >
-                <button
-                  type="button"
-                  :aria-pressed="selectedEdge?.relationId === edge.relationId"
-                  :aria-expanded="selectedEdge?.relationId === edge.relationId"
-                  :aria-controls="`relation-details-${edge.relationId}`"
-                  @click="selectFromDrawer(edge)"
-                >
-                  <span class="drawer-direction">
-                    {{ edge.sourceTableId === focusedTableId ? "out" : "in" }}
-                  </span>
-                  <span class="drawer-ends">
-                    <code>{{ tableName(edge.sourceTableId) }}.{{ edge.sourceColumn }}</code>
-                    <span class="arrow">→</span>
-                    <code>{{ tableName(edge.targetTableId) }}.{{ edge.targetColumn }}</code>
-                  </span>
-                  <span class="drawer-tags">
-                    <span
-                      class="cardinality"
-                      :class="{ unknown: edge.cardinality === 'UNKNOWN' }"
-                      :title="cardinalityHint(edge)"
-                    >
-                      {{ CARDINALITY_LABELS[edge.cardinality] }}
-                    </span>
-                    <Tag v-if="edge.conditional" value="conditional" severity="secondary" />
-                    <span class="drawer-confidence">{{ Math.round(edge.confidence * 100) }}%</span>
-                  </span>
-                  <span v-if="guardText(edge)" class="drawer-guard">
-                    when <code>{{ guardText(edge) }}</code>
-                  </span>
-                </button>
-                <dl
-                  v-if="selectedEdge?.relationId === edge.relationId"
-                  :id="`relation-details-${edge.relationId}`"
-                  class="drawer-relation-details"
-                  role="region"
-                  aria-label="Selected relation details"
-                >
-                  <dt>Cardinality</dt>
-                  <dd>{{ cardinalityHint(edge) }}</dd>
-                  <dt>Relation ID</dt>
-                  <dd><code>{{ edge.relationId }}</code></dd>
-                </dl>
-              </li>
-            </ul>
-          </TabPanel>
-        </TabPanels>
-      </Tabs>
+                No relations match that filter.
+              </p>
+            </TabPanel>
+          </TabPanels>
+        </Tabs>
+      </div>
     </div>
-  </Drawer>
+  </aside>
 </template>
 
 <style scoped>
@@ -753,9 +1004,50 @@ h1 {
   line-height: 1.5;
 }
 
+.table-detail-drawer {
+  position: fixed;
+  z-index: 1100;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(34rem, 92vw);
+  min-width: 0;
+  border-left: 1px solid var(--p-content-border-color);
+  background: var(--p-content-background);
+  box-shadow: -0.25rem 0 1.25rem color-mix(in srgb, #000 18%, transparent);
+}
+
+.table-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  gap: 1rem;
+  padding: 1rem 1rem 0.75rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+
+.table-detail-header h2 {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.table-detail-content {
+  min-width: 0;
+  padding: 1rem;
+  overflow: auto;
+}
+
 .table-detail {
   display: grid;
   gap: 1rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .table-detail-meta {
@@ -770,6 +1062,12 @@ h1 {
 
 .table-tab-panels {
   padding: 1rem 0 0;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.drawer-filter {
+  margin-bottom: 0.85rem;
 }
 
 .drawer-lead {
@@ -895,23 +1193,65 @@ h1 {
 
 .fields {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 0.8rem;
 }
 
+.fields-scroll {
+  width: 100%;
+  min-width: 0;
+  max-width: min(100%, calc(92vw - 3rem));
+  overflow-x: auto;
+}
+
+.fields-scroll .fields {
+  width: 31rem;
+  min-width: 31rem;
+}
+
+.fields th {
+  padding: 0.35rem 0.45rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+  color: var(--p-text-muted-color);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.fields th:nth-child(1) {
+  width: 24%;
+}
+
+.fields th:nth-child(2) {
+  width: 25%;
+}
+
+.fields th:nth-child(3) {
+  width: 19%;
+}
+
+.fields th:nth-child(4) {
+  width: 32%;
+}
+
 .fields td {
-  padding: 0.15rem 0.5rem 0.15rem 0;
+  padding: 0.45rem;
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--p-content-border-color), transparent 35%);
   vertical-align: top;
 }
 
 .field-name {
   font-family: var(--font-mono, ui-monospace, monospace);
+  overflow-wrap: anywhere;
 }
 
 /* A type like "bigint(20) unsigned zerofill" wraps to three lines and drags
    its whole row out of alignment, so it stays on one line and truncates. */
 .field-type {
-  max-width: 16rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -919,21 +1259,15 @@ h1 {
 }
 
 .field-flag {
-  width: 5.5rem;
   white-space: nowrap;
 }
 
-/* A comment is context, not identity: it reads quietly beside the column and
-   truncates rather than pushing the name and type out of alignment. The zero
-   max-width with a full width is the table-cell ellipsis trick — it lets the
-   cell take whatever room the other columns leave and clip to exactly that,
-   instead of clipping at a guessed width or overflowing the panel. */
+/* Comments carry the catalog's human context. In the narrow reference drawer
+   they wrap within their own column instead of forcing the panel wider. */
 .field-comment {
-  width: 100%;
-  max-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  line-height: 1.4;
   color: var(--p-text-muted-color);
 }
 
@@ -988,6 +1322,15 @@ h1 {
 }
 
 @media (max-width: 900px) {
+  .page-head {
+    flex-direction: column;
+  }
+
+  .source-picker {
+    width: 100%;
+    min-width: 0;
+  }
+
   .split,
   .split.tables-hidden {
     grid-template-columns: 1fr;
