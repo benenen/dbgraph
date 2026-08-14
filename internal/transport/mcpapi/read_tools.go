@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/benenen/dbgraph/internal/catalog"
+	"github.com/benenen/dbgraph/internal/relations"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -49,7 +50,7 @@ type searchNodesOutput struct {
 	Nodes []nodeOutput `json:"nodes"`
 }
 
-func registerReadTools(server *mcp.Server, services Services) {
+func registerReadTools(server *mcp.Server, services Services, principal relations.Principal) {
 	registerTool(server, objectTool("dbgraph_status", "Report dbgraph storage and schema health."),
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ statusInput) (*mcp.CallToolResult, statusOutput, error) {
 			if services.Status == nil {
@@ -104,6 +105,7 @@ func registerReadTools(server *mcp.Server, services Services) {
 	registerGraphReadTools(server, services)
 	registerReconcileReadTools(server, services)
 	registerJobReadTools(server, services)
+	registerSourceBindingReadTools(server, services, principal)
 }
 
 func parseID(value string) (int64, error) {

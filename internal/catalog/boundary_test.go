@@ -152,6 +152,8 @@ func TestCatalogServicesRejectInvalidCreationInputs(t *testing.T) {
 	testCases := []catalog.CreateCodeRepository{
 		{Name: " "},
 		{Name: "repository", RemoteURL: "https://user:password@example.test/private.git"},
+		{Name: "repository", RemoteURL: "ssh://alice@example.test/private.git"},
+		{Name: "repository", RemoteURL: "ssh://git:password@example.test/private.git"},
 		{Name: "repository", RemoteURL: "://invalid"},
 		{Name: strings.Repeat("r", 201)},
 		{Name: "repository", RemoteURL: strings.Repeat("r", 2001)},

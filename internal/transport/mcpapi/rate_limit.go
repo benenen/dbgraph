@@ -130,12 +130,13 @@ func classifyTool(name string) toolClass {
 	switch name {
 	case "dbgraph_trace", "dbgraph_impact", "dbgraph_search_nodes", "dbgraph_get_relation",
 		"dbgraph_explain_relation", "dbgraph_get_relation_init", "dbgraph_list_proposals",
-		"dbgraph_list_unresolved":
+		"dbgraph_list_unresolved", "dbgraph_resolve_workspace_data_sources":
 		return toolExpensiveRead
 	case "dbgraph_propose_relation", "dbgraph_begin_relation_init", "dbgraph_propose_relations",
 		"dbgraph_complete_relation_init", "dbgraph_propose_relation_revision",
 		"dbgraph_propose_relation_tombstone", "dbgraph_review_relation",
-		"dbgraph_suppress_relation", "dbgraph_restore_relation", "dbgraph_start_schema_scan":
+		"dbgraph_suppress_relation", "dbgraph_restore_relation", "dbgraph_start_schema_scan",
+		"dbgraph_replace_source_binding":
 		return toolWrite
 	default:
 		return toolCheapRead

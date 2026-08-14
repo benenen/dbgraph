@@ -55,6 +55,23 @@ func inputSchema(name string) map[string]any {
 		}, []string{"dataSourceId", "reason", "requestId"})
 	case "dbgraph_get_job":
 		return strictObject(map[string]any{"jobId": idSchema()}, []string{"jobId"})
+	case "dbgraph_resolve_workspace_data_sources":
+		return strictObject(map[string]any{
+			"remotes": map[string]any{
+				"type": "array", "minItems": 1, "maxItems": 10, "uniqueItems": true,
+				"items": stringSchema(1, 2000),
+			},
+			"context": stringSchema(1, 100),
+		}, []string{"remotes"})
+	case "dbgraph_replace_source_binding":
+		return strictObject(map[string]any{
+			"repositoryId": idSchema(), "context": stringSchema(1, 100),
+			"dataSourceIds": map[string]any{
+				"type": "array", "maxItems": 50, "uniqueItems": true, "items": idSchema(),
+			},
+			"expectedRevisionNo": integerSchema(0, 1_000_000),
+			"reason":             stringSchema(1, 2000), "requestId": stringSchema(1, 200),
+		}, []string{"repositoryId", "context", "dataSourceIds", "expectedRevisionNo", "reason", "requestId"})
 	default:
 		return strictObject(nil, nil)
 	}

@@ -25,6 +25,7 @@ import (
 	"github.com/benenen/dbgraph/internal/reconcile"
 	"github.com/benenen/dbgraph/internal/relations"
 	"github.com/benenen/dbgraph/internal/secret"
+	"github.com/benenen/dbgraph/internal/sourcebinding"
 	"github.com/benenen/dbgraph/internal/transport/httpapi"
 	"github.com/benenen/dbgraph/internal/transport/mcpapi"
 	"github.com/benenen/dbgraph/internal/transport/mcpproxy"
@@ -187,6 +188,7 @@ func serve(serveConfig config.ServeConfig) (returnError error) {
 		dbsqlite.NewCatalogRepository(store, allocator), allocator, time.Now, catalogOptions...,
 	)
 	codeRepositoryService := catalog.NewCodeRepositoryService(dbsqlite.NewCodeRepository(store), allocator, time.Now)
+	sourceBindingService := sourcebinding.NewService(dbsqlite.NewSourceBindingRepository(store), allocator, time.Now)
 	relationCommands := relations.NewCommands(dbsqlite.NewRelationRepository(store), allocator, time.Now)
 	graphService := graph.NewService(dbsqlite.NewGraphRepository(store))
 	reconcileService := reconcile.NewService(
@@ -237,6 +239,7 @@ func serve(serveConfig config.ServeConfig) (returnError error) {
 	mcpHandler := mcpapi.NewHTTPHandler(mcpapi.Services{
 		Status: store, Catalog: catalogService, Relations: relationCommands,
 		Graph: graphService, Reconcile: reconcileService, Jobs: schemaScans,
+		SourceBindings: sourceBindingService,
 	}, authenticator)
 	webAuthenticator, err := appauth.NewTokenAuthenticatorFromStored(
 		appauth.Filter(storedCredentials, audit.OriginWeb),

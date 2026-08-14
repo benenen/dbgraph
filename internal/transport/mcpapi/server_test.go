@@ -53,7 +53,8 @@ func TestServerPublishesTheCompleteMCPToolSurfaceAndStringIDs(t *testing.T) {
 		"dbgraph_get_job", "dbgraph_get_node", "dbgraph_get_relation", "dbgraph_get_relation_init",
 		"dbgraph_impact", "dbgraph_list_proposals", "dbgraph_list_unresolved", "dbgraph_propose_relation",
 		"dbgraph_propose_relation_revision", "dbgraph_propose_relation_tombstone", "dbgraph_propose_relations",
-		"dbgraph_restore_relation", "dbgraph_review_relation", "dbgraph_search_nodes", "dbgraph_start_schema_scan",
+		"dbgraph_replace_source_binding", "dbgraph_resolve_workspace_data_sources", "dbgraph_restore_relation",
+		"dbgraph_review_relation", "dbgraph_search_nodes", "dbgraph_start_schema_scan",
 		"dbgraph_status", "dbgraph_suppress_relation", "dbgraph_trace",
 	}
 	got := make([]string, 0, len(tools.Tools))
@@ -83,6 +84,9 @@ func TestServerPublishesTheCompleteMCPToolSurfaceAndStringIDs(t *testing.T) {
 	assertSchemaProperties(t, schemas["dbgraph_list_unresolved"], "limit")
 	assertSchemaProperties(t, schemas["dbgraph_start_schema_scan"], "dataSourceId")
 	assertSchemaProperties(t, schemas["dbgraph_begin_relation_init"], "repositoryId", "mode")
+	assertSchemaProperties(t, schemas["dbgraph_resolve_workspace_data_sources"], "remotes", "context")
+	assertSchemaProperties(t, schemas["dbgraph_replace_source_binding"],
+		"repositoryId", "context", "dataSourceIds", "expectedRevisionNo", "reason", "requestId")
 	assertSchemaProperties(t, schemas["dbgraph_trace"], "startNodeId", "targetNodeId")
 	assertSchemaProperties(t, schemas["dbgraph_impact"], "startNodeId", "targetNodeId")
 	properties, _ := proposalSchema["properties"].(map[string]any)
@@ -95,6 +99,11 @@ func TestServerPublishesTheCompleteMCPToolSurfaceAndStringIDs(t *testing.T) {
 		t.Fatalf("schema scan schema = %#v", scanSchema)
 	}
 	assertIncrementalInitScopeSchema(t, initSchema)
+	bindingProperties, _ := schemas["dbgraph_replace_source_binding"]["properties"].(map[string]any)
+	if schemas["dbgraph_replace_source_binding"]["additionalProperties"] != false || bindingProperties["role"] != nil ||
+		!schemaRequires(schemas["dbgraph_replace_source_binding"], "dataSourceIds") {
+		t.Fatalf("source binding schema = %#v", schemas["dbgraph_replace_source_binding"])
+	}
 
 	result, err := clientSession.CallTool(t.Context(), &mcp.CallToolParams{
 		Name: "dbgraph_search_nodes",

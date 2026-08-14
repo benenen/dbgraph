@@ -111,6 +111,12 @@
   relation_init_batches
   jobs
 
+  repository_identities
+  source_binding_sets
+  source_binding_revisions
+  source_binding_members
+  source_binding_current
+
   nodes
   node_versions
   node_current
@@ -132,6 +138,14 @@
 
   - The catalog, relation graph, and audit history are service-wide. There is no
     separate workspace-scope entity.
+  - Workspace evidence is transient input to the `sourcebinding` module. Exact,
+    transport-specific canonical Git remotes identify a registered repository;
+    an explicit context selects an Admin-managed, revisioned data-source binding.
+    Cross-transport and optional `.git` suffix aliases, directory names, table
+    overlap, and a single registered source never select a binding.
+  - Source-binding revisions and members are append-only. Replacement atomically
+    appends a revision, updates the current pointer, and records one audit event.
+    Empty membership is an explicit unbind revision.
   - Primary key 使用 application-generated int64 Snowflake ID
   - 类型和状态在 SQLite 中使用 INTEGER
   - REST/MCP 对外返回 English enum，例如 COLUMN、PROPOSED
@@ -361,7 +375,7 @@
   Web write requirements:
 
   - server-side authentication and role authorization on every request
-  - Viewer is read-only; Editor can propose create/revision/tombstone; Reviewer can approve/reject/suppress/restore; Admin manages data sources and schema scans
+  - Viewer is read-only; Editor can propose create/revision/tombstone; Reviewer can approve/reject/suppress/restore; Admin manages data sources, source bindings, and schema scans
   - the data source list is readable by Viewer and above; the DSN environment variable name (`dsnEnvironment`) and its timestamps are returned only to Admin, so the deployment detail never reaches a non-Admin role
   - Require CSRF tokens and HttpOnly, Secure, SameSite session cookies
   - Source-database DSNs may rest in SQLite, sealed with AES-256-GCM under `DBGRAPH_SECRET_KEY`, which is read from the environment and never stored. The sealed DSN is write-only: no Web, REST, or MCP response returns it, and audit events record only how a DSN resolves. A data source that names an environment variable instead keeps working, and that variable is the fallback when no ciphertext is stored
@@ -387,6 +401,7 @@
   dbgraph_explain_relation
   dbgraph_list_proposals
   dbgraph_list_unresolved
+  dbgraph_resolve_workspace_data_sources
 
   dbgraph_propose_relation
   dbgraph_begin_relation_init
@@ -398,6 +413,7 @@
   dbgraph_review_relation
   dbgraph_suppress_relation
   dbgraph_restore_relation
+  dbgraph_replace_source_binding
 
   dbgraph_start_schema_scan
   dbgraph_get_job
@@ -408,7 +424,7 @@
   - Web Viewer：read
   - Web Editor：propose create/revision/tombstone
   - Reviewer：approve/reject/suppress/restore; content edits create a new PROPOSED revision
-  - Admin：source database configuration + schema scans
+  - Admin：source database configuration + source binding replacement + schema scans
   - 不提供 generic execute_sql
   - Source database credentials 只从 environment variables 读取
   - SQLite、日志和 MCP response 不保存或返回密码

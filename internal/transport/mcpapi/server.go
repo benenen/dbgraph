@@ -12,6 +12,7 @@ import (
 	"github.com/benenen/dbgraph/internal/jobs"
 	"github.com/benenen/dbgraph/internal/reconcile"
 	"github.com/benenen/dbgraph/internal/relations"
+	"github.com/benenen/dbgraph/internal/sourcebinding"
 	appstatus "github.com/benenen/dbgraph/internal/status"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -65,13 +66,19 @@ type JobService interface {
 	Get(context.Context, int64) (jobs.Job, error)
 }
 
+type SourceBindingService interface {
+	ResolveWorkspace(context.Context, sourcebinding.WorkspaceEvidence) (sourcebinding.Resolution, error)
+	ReplaceBindingSet(context.Context, sourcebinding.ReplaceBindingSet) (sourcebinding.BindingRevision, error)
+}
+
 type Services struct {
-	Status    StatusService
-	Catalog   CatalogService
-	Relations RelationService
-	Graph     GraphService
-	Reconcile ReconcileService
-	Jobs      JobService
+	Status         StatusService
+	Catalog        CatalogService
+	Relations      RelationService
+	Graph          GraphService
+	Reconcile      ReconcileService
+	Jobs           JobService
+	SourceBindings SourceBindingService
 }
 
 func ViewerPrincipal() relations.Principal {
@@ -80,7 +87,7 @@ func ViewerPrincipal() relations.Principal {
 
 func NewServer(services Services, principal relations.Principal) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: serverName, Version: serverVersion}, nil)
-	registerReadTools(server, services)
+	registerReadTools(server, services, principal)
 	registerWriteTools(server, services, principal)
 	return server
 }
@@ -178,10 +185,28 @@ func toolErrorResult(err error) *mcp.CallToolResult {
 		if conflict.Current != nil {
 			payload["currentRelation"] = mapRelation(*conflict.Current)
 		}
-		encoded, encodeError := json.Marshal(payload)
-		if encodeError == nil {
-			result.StructuredContent = json.RawMessage(encoded)
-		}
+		setBudgetedConflict(result, payload, map[string]any{
+			"code": "REVISION_CONFLICT", "currentRevisionNo": conflict.CurrentRevisionNo,
+			"currentRelationOmitted": true,
+		})
+		return result
+	}
+	var bindingConflict *sourcebinding.RevisionConflictError
+	if errors.As(err, &bindingConflict) {
+		setBudgetedConflict(result, map[string]any{
+			"code": "REVISION_CONFLICT", "currentRevisionNo": bindingConflict.CurrentRevisionNo,
+		}, nil)
 	}
 	return result
+}
+
+func setBudgetedConflict(result *mcp.CallToolResult, payload map[string]any, fallback map[string]any) {
+	if _, err := structuredToolResult(result, payload, true); err == nil {
+		return
+	}
+	if fallback == nil {
+		result.StructuredContent = nil
+		return
+	}
+	_, _ = structuredToolResult(result, fallback, false)
 }

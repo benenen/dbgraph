@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/benenen/dbgraph/internal/audit"
+	"github.com/benenen/dbgraph/internal/gitremote"
 	"github.com/benenen/dbgraph/internal/relations"
 )
 
@@ -128,11 +128,8 @@ func (s *CodeRepositoryService) create(
 	name := strings.TrimSpace(command.Name)
 	remoteURL := strings.TrimSpace(command.RemoteURL)
 	defaultBranch := strings.TrimSpace(command.DefaultBranch)
-	if remoteURL != "" {
-		parsedURL, err := url.Parse(remoteURL)
-		if err != nil || parsedURL.User != nil {
-			return CodeRepository{}, ErrInvalidRepository
-		}
+	if !validRepositoryRemote(remoteURL) {
+		return CodeRepository{}, ErrInvalidRepository
 	}
 	if name == "" || len(name) > 200 ||
 		len(remoteURL) > 2000 || len(defaultBranch) > 500 {
@@ -165,6 +162,14 @@ func (s *CodeRepositoryService) create(
 		return CodeRepository{}, err
 	}
 	return repository, nil
+}
+
+func validRepositoryRemote(remote string) bool {
+	if remote == "" {
+		return true
+	}
+	_, err := gitremote.Canonicalize(remote)
+	return err == nil
 }
 
 func (s *CodeRepositoryService) Get(ctx context.Context, repositoryID int64) (CodeRepository, error) {

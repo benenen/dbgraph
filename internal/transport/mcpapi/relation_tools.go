@@ -155,6 +155,7 @@ func registerWriteTools(server *mcp.Server, services Services, principal relatio
 	registerRelationWriteTools(server, services, principal)
 	registerReconcileWriteTools(server, services, principal)
 	registerJobWriteTools(server, services, principal)
+	registerSourceBindingWriteTools(server, services, principal)
 }
 
 func registerRelationWriteTools(server *mcp.Server, services Services, principal relations.Principal) {

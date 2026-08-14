@@ -160,11 +160,17 @@ Every configured access token must be 32 random bytes encoded as exactly 64 hexa
 - Agent: Viewer access plus individual relation create/revision/tombstone proposals and relation-init sessions.
 - Editor: Web relation create/revision/tombstone proposals.
 - Reviewer: revision proposals plus approve/reject/suppress/restore. Reviewer edits create a new proposed revision; they do not overwrite approved content.
-- Admin: evidence-repository, data-source, and full/incremental schema-scan administration; only Admin can list evidence repositories.
+- Admin: evidence-repository, data-source, source-binding, and full/incremental schema-scan administration; only Admin can list evidence repositories.
 
 An approved revision remains effective while its replacement is pending. Rejection leaves the effective graph unchanged. Tombstone, suppression, restoration, and stale candidates are explicit reviewed state transitions. Historical relation versions, endpoints, references, evidence, events, scan facts, init batches, and audit events are append-only.
 
 `GET /api/v1/data-sources` lists the service-wide source registry for every signed-in role. Only Admin responses include `dsnEnvironment` and timestamps, so deployment metadata never reaches a non-Admin role. Evidence repositories are listed through the Admin-only `GET /api/v1/repositories`. Catalog node search uses `GET /api/v1/nodes` and accepts an optional `dataSourceId` filter. The console routes and API payloads carry no separate workspace identifier.
+
+## Workspace source bindings
+
+`sourcebinding` maps transient workspace evidence to an explicit, audited data-source set; it does not persist a Workspace or Project entity and never reads a repository checkout. An Admin calls `dbgraph_replace_source_binding` with a registered repository ID, a context such as `development` or `production`, data-source IDs, `expectedRevisionNo`, reason, and request ID. Every replacement appends an immutable revision; an empty data-source list records an explicit unbind.
+
+An Agent calls `dbgraph_resolve_workspace_data_sources` with one to ten Git remotes and an optional context. HTTPS, SSH, and scp-style remotes are canonicalized as separate transport identities; dbgraph never guesses that different transports or optional `.git` suffixes are aliases. Credentials, missing or non-`git` SSH users, query strings, fragments, `file://` URLs, encoded or ambiguous paths, and path traversal are rejected. Repository basenames, table-name overlap, and the presence of only one data source are never treated as identity. A registered repository with no matching revision returns `UNBOUND` rather than `REPOSITORY_NOT_FOUND`; duplicate exact identities return `AMBIGUOUS_REPOSITORY` and cannot be bound until the registry is disambiguated. Resolution otherwise returns `RESOLVED` or `CONTEXT_REQUIRED`, plus only safe repository and data-source summaries. It never returns remote URLs, DSNs, DSN environment names, ciphertext, or credentials.
 
 ## Agent-driven relation initialization
 
@@ -199,7 +205,8 @@ dbgraph_status                       dbgraph_search_nodes
 dbgraph_get_node                     dbgraph_get_relation
 dbgraph_trace                        dbgraph_impact
 dbgraph_explain_relation             dbgraph_list_proposals
-dbgraph_list_unresolved              dbgraph_propose_relation
+dbgraph_list_unresolved              dbgraph_resolve_workspace_data_sources
+dbgraph_propose_relation             dbgraph_replace_source_binding
 dbgraph_begin_relation_init          dbgraph_propose_relations
 dbgraph_complete_relation_init       dbgraph_get_relation_init
 dbgraph_propose_relation_revision    dbgraph_propose_relation_tombstone

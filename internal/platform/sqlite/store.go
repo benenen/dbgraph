@@ -131,6 +131,10 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 		_ = store.Close()
 		return nil, err
 	}
+	if err := backfillRepositoryIdentities(ctx, db); err != nil {
+		_ = store.Close()
+		return nil, err
+	}
 	store.startWriteWorker(writeQueueCapacity)
 	if err := secureSQLiteArtifacts(canonicalPath); err != nil {
 		_ = store.Close()

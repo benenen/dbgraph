@@ -50,7 +50,7 @@ func (r *CodeRepository) CreateCodeRepositoryWithAudit(
 }
 
 func insertCodeRepository(ctx context.Context, tx *sql.Tx, repository catalog.CodeRepository) error {
-	_, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 INSERT INTO repositories(
     id, name, remote_url, default_branch, created_at, updated_at
 ) VALUES (?, ?, ?, ?, ?, ?)
@@ -61,8 +61,10 @@ INSERT INTO repositories(
 		repository.DefaultBranch,
 		formatTime(repository.CreatedAt),
 		formatTime(repository.UpdatedAt),
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	return insertRepositoryIdentity(ctx, tx, repository.ID, repository.RemoteURL)
 }
 
 func (r *CodeRepository) GetCodeRepository(

@@ -169,7 +169,7 @@ func writeAdminError(response http.ResponseWriter, err error) {
 		writeError(response, http.StatusServiceUnavailable, "QUEUE_FULL", "schema scan queue is full", nil)
 	case errors.Is(err, catalog.ErrDataSourceInUse):
 		writeError(response, http.StatusConflict, "IN_USE",
-			"this data source has imported catalog content and cannot be deleted", nil)
+			"this data source is referenced by catalog content, relation evidence, or binding history and cannot be deleted", nil)
 	case errors.Is(err, catalog.ErrDataSourceNameTaken):
 		writeError(response, http.StatusConflict, "NAME_TAKEN",
 			"a data source with that name already exists", nil)

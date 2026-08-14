@@ -19,9 +19,9 @@ var (
 	ErrDataSourceNotFound = errors.New("data source not found")
 	// ErrDataSourceNameTaken reports a service-wide registry name collision.
 	ErrDataSourceNameTaken = errors.New("a data source with that name already exists")
-	// ErrDataSourceInUse reports a source that imported a catalog. Deleting it
-	// would orphan the nodes and scan runs that record what was imported.
-	ErrDataSourceInUse = errors.New("data source has imported catalog content")
+	// ErrDataSourceInUse reports a source referenced by imported catalog data,
+	// relation evidence, or immutable source-binding history.
+	ErrDataSourceInUse = errors.New("data source is still referenced")
 
 	// ErrUnusableDSN reports a connection string the scanner would fail on.
 	ErrUnusableDSN     = errors.New("connection string cannot be used")

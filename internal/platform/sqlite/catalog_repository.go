@@ -163,10 +163,10 @@ WHERE id = ?
 }
 
 // DeleteDataSource removes a source and the scan runs that recorded attempts to
-// read it. It is refused only while catalog
-// nodes exist, because those are the imported data itself and deleting the
-// source would orphan them. A source whose scans all failed imported nothing,
-// and that is exactly the misconfigured source an operator needs to remove.
+// read it. It is refused while catalog nodes, relation evidence, or historical
+// source-binding revisions still reference the source. A source whose scans all
+// failed imported nothing, and that is exactly the misconfigured source an
+// operator needs to remove.
 func (r *CatalogRepository) DeleteDataSource(ctx context.Context, dataSourceID int64) error {
 	err := r.store.write(ctx, func(tx *sql.Tx) error {
 		var importedNodes int
@@ -184,6 +184,15 @@ func (r *CatalogRepository) DeleteDataSource(ctx context.Context, dataSourceID i
 			return err
 		}
 		if referencedContent > 0 {
+			return catalog.ErrDataSourceInUse
+		}
+		var bindingMembers int
+		if err := tx.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM source_binding_members WHERE data_source_id = ?",
+			dataSourceID).Scan(&bindingMembers); err != nil {
+			return err
+		}
+		if bindingMembers > 0 {
 			return catalog.ErrDataSourceInUse
 		}
 		// Scan artifacts describe attempts to read a source that is going away.

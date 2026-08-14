@@ -8,6 +8,7 @@ import (
 	"github.com/benenen/dbgraph/internal/jobs"
 	"github.com/benenen/dbgraph/internal/reconcile"
 	"github.com/benenen/dbgraph/internal/relations"
+	"github.com/benenen/dbgraph/internal/sourcebinding"
 )
 
 var (
@@ -31,18 +32,26 @@ func safeToolError(err error) error {
 		return err
 	case errors.Is(err, relations.ErrForbidden):
 		return errForbidden
+	case errors.Is(err, sourcebinding.ErrForbidden):
+		return errForbidden
 	case errors.Is(err, catalog.ErrNodeNotFound), errors.Is(err, catalog.ErrDataSourceNotFound),
 		errors.Is(err, relations.ErrRelationNotFound), errors.Is(err, reconcile.ErrInitNotFound),
 		errors.Is(err, jobs.ErrJobNotFound):
+		return errNotFound
+	case errors.Is(err, sourcebinding.ErrRepositoryNotFound), errors.Is(err, sourcebinding.ErrBindingNotFound):
 		return errNotFound
 	case errors.Is(err, relations.ErrRevisionConflict), errors.Is(err, relations.ErrPendingProposal),
 		errors.Is(err, relations.ErrDuplicateRelation), errors.Is(err, reconcile.ErrBatchConflict),
 		errors.Is(err, reconcile.ErrIdempotencyConflict), errors.Is(err, reconcile.ErrIncompleteBatches):
 		return errConflict
+	case errors.Is(err, sourcebinding.ErrRevisionConflict), errors.Is(err, sourcebinding.ErrBindingConflict):
+		return errConflict
 	case errors.Is(err, relations.ErrInvalidCommand), errors.Is(err, relations.ErrInvalidTransition),
 		errors.Is(err, reconcile.ErrInvalidInit), errors.Is(err, reconcile.ErrInitNotOpen),
 		errors.Is(err, catalog.ErrInvalidSnapshot), errors.Is(err, jobs.ErrInvalidJob),
 		errors.Is(err, graph.ErrInvalidTrace), errors.Is(err, errInvalidToolInput):
+		return errInvalidRequest
+	case errors.Is(err, sourcebinding.ErrInvalidWorkspaceEvidence), errors.Is(err, sourcebinding.ErrInvalidBinding):
 		return errInvalidRequest
 	default:
 		return errOperation
