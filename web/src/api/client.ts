@@ -71,11 +71,13 @@ export interface ConditionNode {
   else?: ConditionNode;
 }
 
+export type ProposalKind = "CONTENT" | "TOMBSTONE" | "STALE";
+
 export interface Revision {
   id: string;
   relationId: string;
   revisionNo: number;
-  kind: string;
+  kind: ProposalKind;
   sourceNodeId: string;
   targetNodeId: string;
   guard: ConditionNode | null;
@@ -114,11 +116,7 @@ export interface CatalogNode {
  * the tables, not that the relation is unconstrained.
  */
 export type Cardinality =
-  | "ONE_TO_ONE"
-  | "ONE_TO_MANY"
-  | "MANY_TO_ONE"
-  | "MANY_TO_MANY"
-  | "UNKNOWN";
+  "ONE_TO_ONE" | "ONE_TO_MANY" | "MANY_TO_ONE" | "MANY_TO_MANY" | "UNKNOWN";
 
 export interface RelationEdge {
   relationId: string;
@@ -192,20 +190,31 @@ interface Envelope<T> {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body) headers.set("Content-Type", "application/json");
-  if (init.method && init.method !== "GET") headers.set("X-CSRF-Token", csrfToken);
+  if (init.method && init.method !== "GET")
+    headers.set("X-CSRF-Token", csrfToken);
 
-  const response = await fetch(path, { ...init, headers, credentials: "same-origin" });
+  const response = await fetch(path, {
+    ...init,
+    headers,
+    credentials: "same-origin",
+  });
 
   let envelope: Envelope<T>;
   try {
     envelope = (await response.json()) as Envelope<T>;
   } catch {
-    throw new ApiError(`Request failed with status ${response.status}.`, response.status, "UNPARSEABLE");
+    throw new ApiError(
+      `Request failed with status ${response.status}.`,
+      response.status,
+      "UNPARSEABLE",
+    );
   }
 
   if (!response.ok || !envelope.success) {
     const code = envelope.error?.code ?? "UNKNOWN";
-    const message = envelope.error?.message ?? `Request failed with status ${response.status}.`;
+    const message =
+      envelope.error?.message ??
+      `Request failed with status ${response.status}.`;
     if (response.status === 401) {
       csrfToken = "";
       signedOut?.();
@@ -218,9 +227,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const api = {
   signIn: (token: string) =>
-    request<Session>("/login", { method: "POST", body: JSON.stringify({ token }) }),
+    request<Session>("/login", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
 
-  signOut: () => request<unknown>("/logout", { method: "POST", body: JSON.stringify({}) }),
+  signOut: () =>
+    request<unknown>("/logout", { method: "POST", body: JSON.stringify({}) }),
 
   session: () => request<Session>("/api/v1/session"),
 
@@ -229,7 +242,12 @@ export const api = {
   // An empty dsn leaves the stored connection string exactly as it is.
   updateDataSource: (
     dataSourceId: string,
-    input: { name: string; dsnEnvironment: string; dsn: string; reason: string },
+    input: {
+      name: string;
+      dsnEnvironment: string;
+      dsn: string;
+      reason: string;
+    },
   ) =>
     request<DataSource>(`/api/v1/data-sources/${dataSourceId}/update`, {
       method: "POST",
@@ -275,16 +293,23 @@ export const api = {
       `/api/v1/data-sources/${dataSourceId}/tables?q=${encodeURIComponent(filter)}`,
     ),
 
-  tableDetail: (tableId: string) => request<TableDetail>(`/api/v1/tables/${tableId}`),
+  tableDetail: (tableId: string) =>
+    request<TableDetail>(`/api/v1/tables/${tableId}`),
 
   listProposals: () =>
-    request<{ relations: Relation[]; truncated: boolean }>("/api/v1/relation-proposals"),
+    request<{ relations: Relation[]; truncated: boolean }>(
+      "/api/v1/relation-proposals",
+    ),
 
   node: (nodeId: string) => request<CatalogNode>(`/api/v1/nodes/${nodeId}`),
 
   reviewRelation: (
     relationId: string,
-    input: { expectedRevisionNo: number; decision: "APPROVE" | "REJECT"; reason: string },
+    input: {
+      expectedRevisionNo: number;
+      decision: "APPROVE" | "REJECT";
+      reason: string;
+    },
   ) =>
     request<Relation>(`/api/v1/relations/${relationId}/reviews`, {
       method: "POST",
@@ -296,7 +321,9 @@ export const api = {
     }),
 
   relationGraph: (dataSourceId: string) =>
-    request<RelationGraph>(`/api/v1/data-sources/${dataSourceId}/relation-graph`),
+    request<RelationGraph>(
+      `/api/v1/data-sources/${dataSourceId}/relation-graph`,
+    ),
 
   job: (jobId: string) => request<Job>(`/api/v1/schema-scan-jobs/${jobId}`),
 };

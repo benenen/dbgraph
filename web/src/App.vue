@@ -2,10 +2,16 @@
 import { computed, onMounted, ref } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import Button from "primevue/button";
+import ConfirmDialog from "primevue/confirmdialog";
 import Tag from "primevue/tag";
 import Toast from "primevue/toast";
 
-import { api, setCsrfToken, UnauthenticatedError, type Session } from "@/api/client";
+import {
+  api,
+  setCsrfToken,
+  UnauthenticatedError,
+  type Session,
+} from "@/api/client";
 
 const route = useRoute();
 const router = useRouter();
@@ -57,6 +63,9 @@ const chromeless = computed(() => route.meta.public === true);
 
 <template>
   <Toast />
+  <!-- Bulk review decisions change the effective graph in one click, so they
+       ask first. -->
+  <ConfirmDialog />
 
   <RouterView v-if="chromeless" @signed-in="(s: Session) => (session = s)" />
 
@@ -67,7 +76,13 @@ const chromeless = computed(() => route.meta.public === true);
       <template v-if="session">
         <span class="actor">{{ session.actor }}</span>
         <Tag :value="session.role" severity="secondary" />
-        <Button label="Sign out" severity="secondary" text size="small" @click="signOut" />
+        <Button
+          label="Sign out"
+          severity="secondary"
+          text
+          size="small"
+          @click="signOut"
+        />
       </template>
     </header>
 

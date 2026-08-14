@@ -19,6 +19,7 @@ SECRET_PASSWORD = "BrowserFlowSecretPassword"
 CONNECTION = f"root:{SECRET_PASSWORD}@tcp(127.0.0.1:3306)/browser_flow?charset=utf8mb4"
 
 failures: list[str] = []
+expected_console_errors: list[str] = []
 
 
 def record_console_error(message) -> None:
@@ -30,6 +31,10 @@ def record_console_error(message) -> None:
         return
     if message.text == "THREE.WebGLRenderer: WebGL disabled by E2E":
         return
+    for expected in expected_console_errors:
+        if expected in message.text:
+            expected_console_errors.remove(expected)
+            return
     failures.append(f"console error: {message.text}")
 
 
@@ -55,6 +60,60 @@ def click_graph_relation(page, sphere, label: str) -> None:
                 page.mouse.click(x, y)
                 return
     raise AssertionError(f"could not hit graph relation {label!r}")
+
+
+def review_proposal(
+    relation_id: str,
+    revision_no: int,
+    proposal_kind: str,
+    source_node_id: str,
+    target_node_id: str,
+) -> dict:
+    revision = {
+        "id": f"revision-{relation_id}",
+        "relationId": relation_id,
+        "revisionNo": revision_no,
+        "kind": proposal_kind,
+        "sourceNodeId": source_node_id,
+        "targetNodeId": target_node_id,
+        "guard": None,
+        "selector": None,
+        "transform": {"kind": "column_copy", "nodeId": source_node_id},
+        "confidence": 0.9,
+        "evidence": [
+            {
+                "kind": "CODE",
+                "repository": "browser-fixture",
+                "commit": "abcdef1234567890",
+                "file": "Mapper.java",
+                "symbol": "map",
+                "startLine": 10,
+                "endLine": 12,
+            }
+        ],
+        "actor": "browser-agent",
+        "reason": "Browser bulk review fixture",
+        "requestId": f"request-{relation_id}",
+        "createdAt": "2026-08-14T00:00:00Z",
+    }
+    return {
+        "id": relation_id,
+        "type": "CONDITIONAL_VALUE_COPY",
+        "latestRevisionNo": revision_no,
+        "status": "PENDING",
+        "effective": False,
+        "active": None,
+        "proposed": revision,
+        "createdAt": "2026-08-14T00:00:00Z",
+    }
+
+
+def wait_for_review_calls(page, calls: list, expected_count: int) -> None:
+    for _ in range(100):
+        page.wait_for_timeout(25)
+        if len(calls) >= expected_count:
+            return
+    raise AssertionError(f"expected {expected_count} review calls, got {len(calls)}")
 
 
 def main() -> int:
@@ -95,6 +154,283 @@ def main() -> int:
         page.goto(deep_link, wait_until="networkidle")
         expect(page).to_have_url(deep_link)
         expect(page.locator("table")).to_contain_text("browser-source")
+
+        # Bulk review is a bounded, confirmed sequence. Hold every POST so the
+        # browser can prove that no second mutation or refresh is possible
+        # while one optimistic-concurrency decision is in flight.
+        review_proposals = [
+            review_proposal("501", 7, "CONTENT", "601", "602"),
+            review_proposal("502", 3, "TOMBSTONE", "603", "604"),
+            review_proposal("503", 11, "STALE", "601", "604"),
+        ]
+        node_names = {
+            "601": "resource.schedulekpoint.ScheduleID",
+            "602": "resource.schedule.ObjectID",
+            "603": "resource.schedulekpoint.KPointID",
+            "604": "resource.knowledgepoint.ObjectID",
+        }
+        review_calls = []
+        held_reviews = []
+        held_proposal_reloads = []
+        held_navigation_reloads = []
+        hold_next_proposal_reload = {"value": True}
+        hold_navigation_completion_reload = {"value": True}
+        navigation_first_completed = {"value": False}
+        navigation_proposals = [
+            review_proposal("503", 12, "STALE", "601", "604"),
+            review_proposal("504", 1, "CONTENT", "603", "602"),
+        ]
+
+        def fulfill_proposals(route) -> None:
+            relations = review_proposals
+            truncated = True
+            if len(review_calls) >= 3:
+                relations = [
+                    review_proposal("501", 8, "CONTENT", "601", "602"),
+                    review_proposal("502", 4, "TOMBSTONE", "603", "604"),
+                ]
+                truncated = False
+            if len(review_calls) >= 5:
+                if hold_next_proposal_reload["value"]:
+                    hold_next_proposal_reload["value"] = False
+                    held_proposal_reloads.append(route)
+                    return
+                if (
+                    navigation_first_completed["value"]
+                    and hold_navigation_completion_reload["value"]
+                ):
+                    hold_navigation_completion_reload["value"] = False
+                    held_navigation_reloads.append(route)
+                    return
+                relations = (
+                    navigation_proposals[1:]
+                    if navigation_first_completed["value"]
+                    else navigation_proposals
+                )
+            route.fulfill(
+                json={
+                    "success": True,
+                    "data": {"relations": relations, "truncated": truncated},
+                    "error": None,
+                }
+            )
+
+        page.route("**/api/v1/relation-proposals", fulfill_proposals)
+        page.route(
+            "**/api/v1/nodes/*",
+            lambda route: route.fulfill(
+                json={
+                    "success": True,
+                    "data": {
+                        "id": route.request.url.rsplit("/", 1)[-1],
+                        "name": node_names[route.request.url.rsplit("/", 1)[-1]].rsplit(".", 1)[-1],
+                        "qualifiedName": node_names[route.request.url.rsplit("/", 1)[-1]],
+                        "kind": "COLUMN",
+                        "dataType": "bigint",
+                    },
+                    "error": None,
+                }
+            ),
+        )
+
+        def hold_review(route) -> None:
+            review_calls.append((route.request.url, route.request.post_data_json))
+            held_reviews.append(route)
+
+        page.route("**/api/v1/relations/*/reviews", hold_review)
+        page.get_by_role("link", name="Review", exact=True).click()
+        expect(
+            page.get_by_text(
+                "3 waiting on this page — decide these to see the rest",
+                exact=True,
+            )
+        ).to_be_visible()
+
+        content_card = page.locator("li.proposal").filter(
+            has_text="resource.schedulekpoint.ScheduleID"
+        ).filter(has_text="resource.schedule.ObjectID")
+        tombstone_card = page.locator("li.proposal").filter(
+            has_text="resource.schedulekpoint.KPointID"
+        )
+        stale_card = page.locator("li.proposal").filter(
+            has_text="resource.knowledgepoint.ObjectID"
+        ).filter(has_text="resource.schedulekpoint.ScheduleID")
+        expect(content_card).to_contain_text("content update")
+        expect(tombstone_card).to_contain_text("tombstone — removes relation")
+        expect(stale_card).to_contain_text("stale — removes relation")
+        content_card.locator("textarea").fill("reason one")
+        tombstone_card.locator("textarea").fill("reason two")
+
+        page.get_by_role("button", name="Approve all 3").click()
+        confirmation = page.get_by_role(
+            "alertdialog", name="Approve 3 proposals, including 2 removals?"
+        )
+        expect(confirmation).to_contain_text(
+            "1 content update, 1 tombstone, and 1 stale candidate"
+        )
+        expect(confirmation).to_contain_text(
+            "Approving the 2 removal proposals removes their relations from the effective graph."
+        )
+        expect(confirmation).to_contain_text(
+            "Only the proposals on this page are decided; more are waiting."
+        )
+        page.go_back()
+        page.wait_for_url("**/app/data-sources")
+        expect(confirmation).not_to_be_visible()
+        page.wait_for_timeout(150)
+        if review_calls:
+            raise AssertionError(
+                f"leaving an open bulk confirmation sent requests: {review_calls!r}"
+            )
+        page.get_by_role("link", name="Review", exact=True).click()
+        expect(
+            page.get_by_text(
+                "3 waiting on this page — decide these to see the rest",
+                exact=True,
+            )
+        ).to_be_visible()
+        content_card.locator("textarea").fill("reason one")
+        tombstone_card.locator("textarea").fill("reason two")
+        page.get_by_role("button", name="Approve all 3").click()
+        confirmation = page.get_by_role(
+            "alertdialog", name="Approve 3 proposals, including 2 removals?"
+        )
+        confirmation.get_by_role("button", name="Cancel").click()
+        expect(confirmation).not_to_be_visible()
+        if review_calls:
+            raise AssertionError(f"canceling bulk review still sent requests: {review_calls!r}")
+
+        page.get_by_role("button", name="Approve all 3").click()
+        destructive_accept = confirmation.get_by_role("button", name="Approve 3, remove 2")
+        expect(destructive_accept).to_have_class(re.compile(r"p-button-danger"))
+        destructive_accept.click()
+        bulk_progress = page.locator(".bulk-progress").filter(has_text="Approving 0 / 3")
+        expect(bulk_progress).to_be_visible()
+        expect(bulk_progress).to_be_focused()
+        wait_for_review_calls(page, review_calls, 1)
+        page.wait_for_timeout(150)
+        if len(review_calls) != 1:
+            raise AssertionError(f"bulk review ran requests concurrently: {review_calls!r}")
+
+        expect(page.get_by_role("button", name="Refresh")).to_be_disabled()
+        row_actions = page.get_by_role("button", name=re.compile(r"^(Approve|Reject)$"))
+        if row_actions.count() != 6:
+            raise AssertionError(f"expected 6 per-proposal actions, got {row_actions.count()}")
+        for index in range(row_actions.count()):
+            expect(row_actions.nth(index)).to_be_disabled()
+        row_reasons = page.locator("li.proposal textarea")
+        for index in range(row_reasons.count()):
+            expect(row_reasons.nth(index)).to_be_disabled()
+
+        held_reviews[0].fulfill(json={"success": True, "data": {}, "error": None})
+        wait_for_review_calls(page, review_calls, 2)
+        expected_console_errors.append("status of 409")
+        held_reviews[1].fulfill(
+            status=409,
+            json={
+                "success": False,
+                "data": None,
+                "error": {"code": "REVISION_CONFLICT", "message": "proposal changed"},
+            },
+        )
+        wait_for_review_calls(page, review_calls, 3)
+        held_reviews[2].fulfill(json={"success": True, "data": {}, "error": None})
+
+        expected_reviews = [
+            ("501", 7, "APPROVE", "reason one"),
+            ("502", 3, "APPROVE", "reason two"),
+            ("503", 11, "APPROVE", "Approved in bulk from the review queue"),
+        ]
+        actual_reviews = [
+            (
+                url.rsplit("/", 2)[-2],
+                body["expectedRevisionNo"],
+                body["decision"],
+                body["reason"],
+            )
+            for url, body in review_calls
+        ]
+        if actual_reviews != expected_reviews:
+            raise AssertionError(f"review sequence = {actual_reviews!r}")
+        result_toast = page.get_by_role("alert").filter(has_text="2 of 3 approved")
+        expect(result_toast).to_be_visible()
+        expect(result_toast).to_contain_text("proposal changed")
+        expect(page.get_by_text("2 waiting", exact=True)).to_be_visible()
+        expect(page.locator(".bulk-bar")).to_be_focused()
+        refreshed_content_card = page.locator("li.proposal").filter(
+            has_text="resource.schedulekpoint.ScheduleID"
+        ).filter(has_text="resource.schedule.ObjectID")
+        expect(refreshed_content_card).to_contain_text("revision 8")
+        expect(refreshed_content_card.locator("textarea")).to_have_value("")
+        expect(tombstone_card).to_contain_text("revision 4")
+        expect(tombstone_card.locator("textarea")).to_have_value("")
+
+        # When every item on a truncated page succeeds, the live batch status
+        # remains mounted until the next bounded page arrives. It must never
+        # claim the whole queue is empty between the last POST and that reload.
+        page.get_by_role("button", name="Reject all 2").click()
+        reject_confirmation = page.get_by_role("alertdialog", name="Reject 2 proposals?")
+        expect(reject_confirmation).to_contain_text("1 content update and 1 tombstone")
+        expect(reject_confirmation).to_contain_text("The effective graph does not change.")
+        reject_confirmation.get_by_role("button", name="Reject 2").click()
+        wait_for_review_calls(page, review_calls, 4)
+        held_reviews[3].fulfill(json={"success": True, "data": {}, "error": None})
+        wait_for_review_calls(page, review_calls, 5)
+        held_reviews[4].fulfill(json={"success": True, "data": {}, "error": None})
+        wait_for_review_calls(page, held_proposal_reloads, 1)
+        completed_progress = page.locator(".bulk-progress").filter(has_text="Rejecting 2 / 2")
+        expect(completed_progress).to_be_visible()
+        expect(completed_progress).to_be_focused()
+        expect(page.get_by_text("Nothing waiting", exact=False)).to_have_count(0)
+        held_proposal_reloads[0].fulfill(
+            json={
+                "success": True,
+                "data": {"relations": navigation_proposals, "truncated": False},
+                "error": None,
+            }
+        )
+        expect(page.get_by_text("2 waiting", exact=True)).to_be_visible()
+        expect(page.locator(".bulk-bar")).to_be_focused()
+
+        # Leaving during an in-flight batch cancels the old instance before it
+        # starts the next POST. A new Review instance observes the shared lock,
+        # waits for that request, then refreshes the authoritative queue.
+        page.get_by_role("button", name="Reject all 2").click()
+        page.get_by_role("alertdialog", name="Reject 2 proposals?").get_by_role(
+            "button", name="Reject 2"
+        ).click()
+        wait_for_review_calls(page, review_calls, 6)
+        page.get_by_role("link", name="Data sources", exact=True).click()
+        page.get_by_role("link", name="Review", exact=True).click()
+        expect(page.get_by_text("A review operation is finishing", exact=False)).to_be_visible()
+        expect(page.get_by_role("button", name="Reject all 2")).to_be_disabled()
+        navigation_first_completed["value"] = True
+        held_reviews[5].fulfill(json={"success": True, "data": {}, "error": None})
+        wait_for_review_calls(page, held_navigation_reloads, 1)
+        expect(
+            page.get_by_text(
+                "Refreshing the review queue before controls are unlocked.",
+                exact=True,
+            )
+        ).to_be_visible()
+        expect(page.get_by_role("button", name="Reject all 2")).to_be_disabled()
+        expect(page.get_by_role("button", name="Refresh")).to_be_disabled()
+        page.wait_for_timeout(150)
+        if len(review_calls) != 6:
+            raise AssertionError(f"an unmounted bulk review continued: {review_calls!r}")
+        held_navigation_reloads[0].fulfill(
+            json={
+                "success": True,
+                "data": {"relations": navigation_proposals[1:], "truncated": False},
+                "error": None,
+            }
+        )
+        expect(page.get_by_text("1 waiting", exact=True)).to_be_visible()
+        expect(page.get_by_role("button", name="Reject all 1")).to_be_enabled()
+
+        page.unroute("**/api/v1/relation-proposals")
+        page.unroute("**/api/v1/nodes/*")
+        page.unroute("**/api/v1/relations/*/reviews")
 
         # Feed the graph view a small, deterministic relation network. The
         # server/API contract has its own integration tests; this browser seam
@@ -574,6 +910,8 @@ def main() -> int:
         page.screenshot(path=os.path.join(ARTIFACTS, "console-relation-sphere.png"))
         browser.close()
 
+    if expected_console_errors:
+        failures.append(f"expected console errors were not observed: {expected_console_errors!r}")
     if failures:
         print("\n".join(failures), file=sys.stderr)
         return 1
